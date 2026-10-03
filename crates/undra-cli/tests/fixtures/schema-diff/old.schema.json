@@ -1,0 +1,153 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "todo-core",
+  "records": [
+    {
+      "name": "Todo",
+      "type_id": 2995082141,
+      "fields": [
+        { "name": "id", "ty": {"kind":"u32"}, "default": false },
+        { "name": "title", "ty": {"kind":"string"}, "default": false },
+        { "name": "done", "ty": {"kind":"bool"}, "default": true }
+      ],
+      "docs": "An item."
+    }
+  ],
+  "enums": [
+    {
+      "name": "Filter",
+      "type_id": 4104765591,
+      "is_error": false,
+      "variants": [
+        { "name": "All", "index": 0, "fields": [], "tuple": false, "message": null },
+        { "name": "Open", "index": 1, "fields": [], "tuple": false, "message": null }
+      ]
+    },
+    {
+      "name": "TodoError",
+      "type_id": 787313993,
+      "is_error": true,
+      "variants": [
+        { "name": "NotFound", "index": 0, "fields": [], "tuple": false, "message": "not found" }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "name": "Todos",
+      "type_id": 4125302698,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 898850282,
+          "params": [],
+          "returns": {"kind":"named","of":"Todos"},
+          "is_async": false,
+          "takes_ctx": true
+        }
+      ],
+      "methods": [
+        {
+          "name": "add",
+          "method_id": 3510467287,
+          "params": [
+            { "name": "title", "ty": {"kind":"string"} }
+          ],
+          "returns": {"kind":"result","of":[{"kind":"named","of":"Todo"},{"kind":"named","of":"TodoError"}]},
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "toggle",
+          "method_id": 482630968,
+          "params": [
+            { "name": "id", "ty": {"kind":"u32"} }
+          ],
+          "returns": {"kind":"unit"},
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "store": {
+        "signals": [
+          { "name": "items", "signal_id": 0, "ty": {"kind":"vec","of":{"kind":"named","of":"Todo"}}, "computed": false, "key": "id" },
+          { "name": "filter", "signal_id": 1, "ty": {"kind":"named","of":"Filter"}, "computed": false, "key": null }
+        ]
+      }
+    }
+  ],
+  "functions": [
+    {
+      "name": "export_all",
+      "method_id": 1799698235,
+      "params": [],
+      "returns": {"kind":"vec","of":{"kind":"named","of":"Todo"}},
+      "is_async": false,
+      "takes_ctx": false
+    }
+  ],
+  "ports": [
+    {
+      "name": "Notifier",
+      "port_id": 2370714154,
+      "kind": "async",
+      "methods": [
+        {
+          "name": "notify",
+          "method_id": 901195882,
+          "params": [
+            { "name": "text", "ty": {"kind":"string"} }
+          ],
+          "returns": {"kind":"unit"},
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ]
+    },
+    {
+      "name": "Progress",
+      "port_id": 3677362027,
+      "kind": "callback",
+      "methods": [
+        {
+          "name": "update",
+          "method_id": 3402924665,
+          "params": [
+            { "name": "percent", "ty": {"kind":"u8"} }
+          ],
+          "returns": {"kind":"unit"},
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "name": "todo",
+      "query_id": 2699013991,
+      "kind": "query",
+      "key": "todo/{id}",
+      "params": [
+        { "name": "id", "ty": {"kind":"u32"} }
+      ],
+      "returns": {"kind":"result","of":[{"kind":"named","of":"Todo"},{"kind":"named","of":"TodoError"}]},
+      "stale_ms": null,
+      "persist": false,
+      "idempotent": false
+    },
+    {
+      "name": "add_todo",
+      "query_id": 3882214807,
+      "kind": "mutation",
+      "key": "add_todo/{id}",
+      "params": [
+        { "name": "title", "ty": {"kind":"string"} }
+      ],
+      "returns": {"kind":"result","of":[{"kind":"named","of":"Todo"},{"kind":"named","of":"TodoError"}]},
+      "stale_ms": null,
+      "persist": false,
+      "idempotent": false
+    }
+  ]
+}

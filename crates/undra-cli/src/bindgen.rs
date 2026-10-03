@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use undra_bindgen::{BindgenError, GeneratedFile, Generator, SwiftObservation};
+use undra_bindgen::{BindgenError, GeneratedFile, Generator, SwiftObservation, provenance};
 use undra_meta::Schema;
 
 use crate::config::{Platform, ProjectConfig, check_ios_target};
@@ -19,6 +19,11 @@ use crate::runtimes::{RuntimeRef, Runtimes};
 
 /// The file listing what a previous run wrote, inside the output directory.
 pub const MANIFEST: &str = ".undra-generated";
+
+/// The attributes file at the root of each generated tree (`swift/`, `kotlin/`, `ts/`): it marks the
+/// tree `linguist-generated` so GitHub collapses it in review (ADR-062). Its text is
+/// [`provenance::GITATTRIBUTES`].
+pub const ATTRIBUTES_FILE: &str = ".gitattributes";
 
 /// Everything that decides what is generated besides the schema.
 #[derive(Clone, Debug)]
@@ -107,7 +112,14 @@ pub fn plan_files(schema: &Schema, plan: &Plan) -> Result<Vec<GeneratedFile>> {
             })
             .collect()
     };
+    // Each tree says it is generated to the code host (ADR-062): a `.gitattributes` at its root, so a
+    // pull request collapses the tree and the reviewer reads the schema diff instead.
+    let attributes = |dir: &str| GeneratedFile {
+        path: format!("{dir}/{ATTRIBUTES_FILE}"),
+        contents: provenance::GITATTRIBUTES.to_owned(),
+    };
     if plan.platforms.contains(&Platform::Ios) {
+        files.push(attributes("swift"));
         files.extend(prefixed(
             "swift",
             plan.generator.swift(schema).map_err(bindgen_failure)?,
@@ -124,6 +136,7 @@ pub fn plan_files(schema: &Schema, plan: &Plan) -> Result<Vec<GeneratedFile>> {
         });
     }
     if plan.platforms.contains(&Platform::Android) {
+        files.push(attributes("kotlin"));
         files.extend(prefixed(
             "kotlin",
             plan.generator.kotlin(schema).map_err(bindgen_failure)?,
@@ -138,6 +151,7 @@ pub fn plan_files(schema: &Schema, plan: &Plan) -> Result<Vec<GeneratedFile>> {
         });
     }
     if plan.platforms.contains(&Platform::Web) {
+        files.push(attributes("ts"));
         files.extend(prefixed(
             "ts",
             plan.generator.typescript(schema).map_err(bindgen_failure)?,
@@ -440,6 +454,40 @@ mod tests {
             "{paths:?}"
         );
         assert!(paths.windows(2).all(|w| w[0] <= w[1]), "sorted");
+    }
+
+    #[test]
+    fn each_tree_is_marked_generated_for_the_code_host() {
+        // ADR-062: one `.gitattributes` per tree, the text bindgen owns, written (and checked, and
+        // removed) with the rest.
+        let files = plan_files(
+            &schema(),
+            &plan(Platform::ALL.to_vec(), Runtimes::from_registries("0.1")),
+        )
+        .unwrap();
+        for tree in ["swift", "kotlin", "ts"] {
+            let attributes = files
+                .iter()
+                .find(|f| f.path == format!("{tree}/.gitattributes"))
+                .unwrap_or_else(|| panic!("{tree} has no .gitattributes"));
+            assert_eq!(attributes.contents, provenance::GITATTRIBUTES);
+        }
+        assert!(
+            provenance::GITATTRIBUTES.contains("linguist-generated=true"),
+            "the host collapses what this marks"
+        );
+        // Only the chosen platforms' trees get one.
+        let web = plan_files(
+            &schema(),
+            &plan(vec![Platform::Web], Runtimes::from_registries("0.1")),
+        )
+        .unwrap();
+        let attributes: Vec<&str> = web
+            .iter()
+            .map(|f| f.path.as_str())
+            .filter(|p| p.ends_with(".gitattributes"))
+            .collect();
+        assert_eq!(attributes, ["ts/.gitattributes"]);
     }
 
     #[test]
