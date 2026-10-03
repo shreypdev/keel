@@ -396,6 +396,59 @@ mod tests {
     }
 
     #[test]
+    fn the_mobile_profile_is_size_tuned_and_still_unwinds() {
+        // ADR-052, "native size gates": `undra build --platform ios,android --release` builds this
+        // profile. It inherits `release` (LTO, one unit, line tables, no `strip`), asks for size, and
+        // never turns the panic strategy into `abort` (constitution R6: native panics are contained
+        // by `catch_unwind`).
+        let dir = crate::fsutil::unique_temp_dir("shim-mobile-profile");
+        let manifest =
+            write_shim(&dir, Path::new("/nonexistent"), &core(false), &names(), "z").unwrap();
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        let mobile = text
+            .split("[profile.release-mobile]")
+            .nth(1)
+            .and_then(|rest| rest.split("\n[").next())
+            .unwrap();
+        assert!(mobile.contains("inherits = \"release\""), "{mobile}");
+        assert!(mobile.contains("opt-level = \"s\""), "{mobile}");
+        assert!(mobile.contains("panic = \"unwind\""), "{mobile}");
+        assert!(!mobile.contains("abort"), "{mobile}");
+        // The call path keeps the speed profile's optimiser: the wire codec, the signals, the runtime and the
+        // ABI shim (measured in ADR-052: with them at `s` the core's own operations are 17% slower).
+        for hot in ["undra-wire", "undra-signals", "undra-runtime", "undra-ffi"] {
+            let table = text
+                .split(&format!("[profile.release-mobile.package.{hot}]"))
+                .nth(1)
+                .and_then(|rest| rest.split("\n[").next())
+                .unwrap_or_else(|| panic!("no release-mobile override for {hot}: {text}"));
+            assert!(table.contains("opt-level = 3"), "{hot}: {table}");
+        }
+        // The speed profile is what the host builds use (and `opt_level = "3"`), and it is left as it was.
+        let release = text
+            .split("[profile.release]")
+            .nth(1)
+            .and_then(|rest| rest.split("\n[").next())
+            .unwrap();
+        assert!(release.contains("opt-level = 3"), "{release}");
+        // `opt_level = "z"`: the smallest, `z` for every crate (no override keeps a crate at 3), still unwinding.
+        let smallest = text
+            .split("[profile.release-mobile-z]")
+            .nth(1)
+            .and_then(|rest| rest.split("\n[").next())
+            .unwrap();
+        assert!(smallest.contains("inherits = \"release\""), "{smallest}");
+        assert!(smallest.contains("opt-level = \"z\""), "{smallest}");
+        assert!(smallest.contains("panic = \"unwind\""), "{smallest}");
+        assert!(!smallest.contains("abort"), "{smallest}");
+        assert!(
+            !text.contains("[profile.release-mobile-z.package."),
+            "{text}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn projects_sharing_a_target_directory_get_their_own_crates() {
         let target = Path::new("/shared/target");
         let a = shim_dir(target, Path::new("/work/app"));

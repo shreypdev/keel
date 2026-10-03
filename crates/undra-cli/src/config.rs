@@ -120,6 +120,8 @@ pub struct IosConfig {
     pub deployment_target: String,
     /// Simulator architectures: `arm64` and/or `x86_64`.
     pub simulator_archs: Vec<String>,
+    /// What a release build optimises for (`opt_level`, [`NativeOptLevel`]).
+    pub opt_level: NativeOptLevel,
 }
 
 impl Default for IosConfig {
@@ -127,6 +129,7 @@ impl Default for IosConfig {
         IosConfig {
             deployment_target: "17.0".to_owned(),
             simulator_archs: vec!["arm64".to_owned()],
+            opt_level: NativeOptLevel::default(),
         }
     }
 }
@@ -138,6 +141,8 @@ pub struct AndroidConfig {
     pub abis: Vec<String>,
     /// The minimum API level (`cargo ndk --platform`).
     pub min_sdk: u32,
+    /// What a release build optimises for (`opt_level`, [`NativeOptLevel`]).
+    pub opt_level: NativeOptLevel,
 }
 
 impl Default for AndroidConfig {
@@ -145,6 +150,48 @@ impl Default for AndroidConfig {
         AndroidConfig {
             abis: vec!["arm64-v8a".to_owned(), "x86_64".to_owned()],
             min_sdk: 26,
+            opt_level: NativeOptLevel::default(),
+        }
+    }
+}
+
+/// What an iOS or Android release build optimises for: `opt_level` in `[ios]` and in `[android]` of
+/// `undra.toml` (ADR-052, amendment "native size gates"). Each is the profile of the generated crate
+/// that `undra build --release` builds for that platform; a debug build is cargo's dev profile
+/// whatever this says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum NativeOptLevel {
+    /// `"s"`, the default: the `release-mobile` profile, `opt-level = "s"` with the crates of the call
+    /// path (`undra-wire`, `undra-signals`, `undra-runtime`, `undra-ffi`) at 3.
+    #[default]
+    Small,
+    /// `"z"`: the `release-mobile-z` profile, `opt-level = "z"` for every crate, the call path
+    /// included: the smallest library, and a synchronous call about half again as slow.
+    Smallest,
+    /// `"3"`: the `release` profile, `opt-level = 3` for every crate: the fastest and the largest
+    /// (what every native release build was before the size-tuned profile).
+    Fastest,
+}
+
+impl NativeOptLevel {
+    /// The value as `undra.toml` spells it.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            NativeOptLevel::Small => "s",
+            NativeOptLevel::Smallest => "z",
+            NativeOptLevel::Fastest => "3",
+        }
+    }
+
+    /// Reads `"s"`, `"z"` or `"3"` (also the integer `3`).
+    fn from_value(value: &Value) -> Option<NativeOptLevel> {
+        match value {
+            Value::Str(s) if s == "s" => Some(NativeOptLevel::Small),
+            Value::Str(s) if s == "z" => Some(NativeOptLevel::Smallest),
+            Value::Str(s) if s == "3" => Some(NativeOptLevel::Fastest),
+            Value::Int(3) => Some(NativeOptLevel::Fastest),
+            _ => None,
         }
     }
 }
@@ -376,7 +423,13 @@ impl ProjectConfig {
             },
         };
 
-        reader.check_keys("ios", &["deployment_target", "simulator_archs"])?;
+        reader.check_keys(
+            "ios",
+            &["deployment_target", "simulator_archs", "opt_level"],
+        )?;
+        if let Some(level) = reader.native_opt_level("ios")? {
+            cfg.ios.opt_level = level;
+        }
         if let Some(entry) = reader.get("ios", "deployment_target") {
             let Value::Str(target) = &entry.value else {
                 return Err(CliError::bad_config(
@@ -416,7 +469,10 @@ impl ProjectConfig {
             cfg.ios.simulator_archs = archs;
         }
 
-        reader.check_keys("android", &["abis", "min_sdk"])?;
+        reader.check_keys("android", &["abis", "min_sdk", "opt_level"])?;
+        if let Some(level) = reader.native_opt_level("android")? {
+            cfg.android.opt_level = level;
+        }
         if let Some(entry) = reader.get("android", "abis") {
             let abis = reader.as_str_list(entry, "android", "abis")?;
             for abi in &abis {
@@ -635,6 +691,19 @@ impl ProjectConfig {
             .map(|a| quote(a))
             .collect::<Vec<_>>()
             .join(", ");
+        // `opt_level` of a mobile platform: the line is written commented out while it is the default, so
+        // the file shows the choice without making it.
+        let native_opt_level = |level: NativeOptLevel| {
+            format!(
+                "{}opt_level = {}   # release builds: \"s\" small (the default), \"z\" smallest (calls about 1.5x slower), \"3\" fastest",
+                if level == NativeOptLevel::default() {
+                    "# "
+                } else {
+                    ""
+                },
+                quote(level.as_str())
+            )
+        };
         let _ = writeln!(
             out,
             "\n[ios]\n\
@@ -643,16 +712,20 @@ impl ProjectConfig {
              deployment_target = {}\n\
              # Simulator slices of the XCFramework. Add \"x86_64\" for Intel Macs.\n\
              simulator_archs = [{archs}]\n\
+             {}\n\
              \n\
              [android]\n\
              abis = [{abis}]\n\
              min_sdk = {}\n\
+             {}\n\
              \n\
              [web]\n\
              # \"z\" is smallest, \"s\" is small and a little faster: measure both.\n\
              opt_level = {}",
             quote(&self.ios.deployment_target),
+            native_opt_level(self.ios.opt_level),
             self.android.min_sdk,
+            native_opt_level(self.android.opt_level),
             quote(&self.web.opt_level),
         );
         let runtimes = [
@@ -856,6 +929,24 @@ impl Reader<'_> {
         }
     }
 
+    /// `opt_level` of `[ios]` or `[android]`: `"s"`, `"z"` or `"3"` ([`NativeOptLevel`]).
+    fn native_opt_level(&self, table: &str) -> Result<Option<NativeOptLevel>> {
+        let Some(entry) = self.get(table, "opt_level") else {
+            return Ok(None);
+        };
+        NativeOptLevel::from_value(&entry.value).map(Some).ok_or_else(|| {
+            CliError::bad_config(
+                self.file,
+                format!(
+                    "line {}: opt_level in [{table}] must be \"s\", \"z\" or \"3\"",
+                    entry.line
+                ),
+                "\"s\" (the default) is small with the call path at full speed; \"z\" is the smallest, and a call is about \
+                 half again as slow; \"3\" is the fastest and the largest (ADR-052, \"native size gates\")",
+            )
+        })
+    }
+
     fn require_str(&self, table: &str, key: &str) -> Result<String> {
         self.opt_str(table, key)?.ok_or_else(|| {
             CliError::bad_config(
@@ -910,6 +1001,7 @@ mod tests {
         cfg.bindings.kotlin_package = Some("com.example.todoapp.core".into());
         cfg.bindings.swift_typed_throws = Some(false);
         cfg.ios.simulator_archs = vec!["arm64".into(), "x86_64".into()];
+        cfg.android.opt_level = NativeOptLevel::Smallest;
         cfg.runtimes.ts = Some("../rt".into());
         cfg
     }
@@ -1091,6 +1183,39 @@ mod tests {
         assert_eq!(cfg.generated, "generated");
         assert_eq!(cfg.android.abis, ["arm64-v8a", "x86_64"]);
         assert_eq!(cfg.web.opt_level, "z");
+        assert_eq!(cfg.ios.opt_level, NativeOptLevel::Small);
+        assert_eq!(cfg.android.opt_level, NativeOptLevel::Small);
+    }
+
+    #[test]
+    fn a_mobile_release_build_optimises_for_what_opt_level_says() {
+        // ADR-052, "native size gates": "s" is the default, "z" and "3" are chosen per platform.
+        let levels = |toml: &str| {
+            let cfg = with_ios(toml).unwrap();
+            (cfg.ios.opt_level, cfg.android.opt_level)
+        };
+        use NativeOptLevel::{Fastest, Small, Smallest};
+        assert_eq!(levels(""), (Small, Small));
+        assert_eq!(levels("[android]\nopt_level = \"z\"\n"), (Small, Smallest));
+        assert_eq!(
+            levels("[ios]\nopt_level = \"3\"\n[android]\nopt_level = 3\n"),
+            (Fastest, Fastest)
+        );
+        assert_eq!(levels("[ios]\nopt_level = \"s\"\n"), (Small, Small));
+        // The default is written commented out, a choice as a setting, and both read back.
+        let default = with_ios("").unwrap();
+        let text = default.render();
+        assert!(text.contains("\n# opt_level = \"s\""), "{text}");
+        assert!(!text.contains("\nopt_level = \"s\""), "{text}");
+        let chosen = with_ios("[ios]\nopt_level = \"z\"\n[android]\nopt_level = \"3\"\n").unwrap();
+        let text = chosen.render();
+        assert!(text.contains("\nopt_level = \"z\""), "{text}");
+        assert!(text.contains("\nopt_level = \"3\""), "{text}");
+        assert_eq!(ProjectConfig::parse(&text, file()).unwrap(), chosen);
+        assert_eq!(
+            ProjectConfig::parse(&default.render(), file()).unwrap(),
+            default
+        );
     }
 
     #[test]
@@ -1125,6 +1250,14 @@ mod tests {
             (
                 "[project]\nname = \"a\"\nid = \"b\"\n[web]\nopt_level = \"3\"\n",
                 "opt_level",
+            ),
+            (
+                "[project]\nname = \"a\"\nid = \"b\"\n[android]\nopt_level = \"0\"\n",
+                "must be \"s\", \"z\" or \"3\"",
+            ),
+            (
+                "[project]\nname = \"a\"\nid = \"b\"\n[ios]\nopt_level = 2\n",
+                "opt_level in [ios]",
             ),
             (
                 "[project]\nname = \"a\"\nid = \"b\"\n[ios]\nsimulator_archs = [\"ppc\"]\n",

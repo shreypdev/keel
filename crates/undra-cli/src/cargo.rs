@@ -12,6 +12,7 @@ use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
+use crate::config::NativeOptLevel;
 use crate::error::{CliError, Code, Result};
 use crate::sys::Sys;
 use crate::toolchain::Toolchain;
@@ -415,8 +416,15 @@ pub struct Cargo<'a> {
 pub enum Profile {
     /// `dev`: fast to build, for `undra bindgen`, `undra dev` and debug builds.
     Dev,
-    /// `release`: LTO, one codegen unit (the shim's profile).
+    /// `release`: LTO, one codegen unit, `opt-level = 3` (the shim's profile; the host builds).
     Release,
+    /// `release-mobile`: `release` with the optimiser asked for size and the panic strategy left
+    /// alone (`panic = "unwind"`, constitution R6): what an iOS or Android `--release` build uses
+    /// (ADR-052, "native size gates").
+    ReleaseMobile,
+    /// `release-mobile-z`: `release` with `opt-level = "z"` for every crate and `panic = "unwind"`:
+    /// what `opt_level = "z"` in `[ios]` or `[android]` of `undra.toml` builds (ADR-052).
+    ReleaseMobileZ,
     /// `release-wasm`: `release` with `opt-level = "z"` and `panic = "abort"` (SPEC 7).
     ReleaseWasm,
 }
@@ -428,14 +436,33 @@ impl Profile {
         match self {
             Profile::Dev => "debug",
             Profile::Release => "release",
+            Profile::ReleaseMobile => "release-mobile",
+            Profile::ReleaseMobileZ => "release-mobile-z",
             Profile::ReleaseWasm => "release-wasm",
         }
     }
 
-    fn args(self) -> Vec<&'static str> {
+    /// The profile of an iOS or Android build: for `--release`, the one `opt_level` of the
+    /// platform's table in `undra.toml` names (`release-mobile` by default); cargo's dev profile
+    /// otherwise.
+    #[must_use]
+    pub fn mobile(release: bool, level: NativeOptLevel) -> Profile {
+        match (release, level) {
+            (false, _) => Profile::Dev,
+            (true, NativeOptLevel::Small) => Profile::ReleaseMobile,
+            (true, NativeOptLevel::Smallest) => Profile::ReleaseMobileZ,
+            (true, NativeOptLevel::Fastest) => Profile::Release,
+        }
+    }
+
+    /// The arguments that select the profile on a `cargo rustc` / `cargo ndk` command line.
+    #[must_use]
+    pub fn args(self) -> Vec<&'static str> {
         match self {
             Profile::Dev => vec![],
             Profile::Release => vec!["--release"],
+            Profile::ReleaseMobile => vec!["--profile", "release-mobile"],
+            Profile::ReleaseMobileZ => vec!["--profile", "release-mobile-z"],
             Profile::ReleaseWasm => vec!["--profile", "release-wasm"],
         }
     }
@@ -483,6 +510,8 @@ pub fn unpacked_debuginfo(profile: Profile) -> String {
         match profile {
             Profile::Dev => "dev",
             Profile::Release => "release",
+            Profile::ReleaseMobile => "release-mobile",
+            Profile::ReleaseMobileZ => "release-mobile-z",
             Profile::ReleaseWasm => "release-wasm",
         }
     )
@@ -1171,6 +1200,39 @@ mod tests {
         assert_eq!(e.fix, "rustup target add aarch64-apple-ios");
     }
 
+    #[test]
+    fn the_mobile_profile_is_a_profile_of_its_own_in_cargo_and_in_target() {
+        // `undra build --platform ios,android --release` builds `release-mobile`, so a plain
+        // `--release` (the host builds) and the mobile builds never share an output directory.
+        assert_eq!(Profile::ReleaseMobile.dir_name(), "release-mobile");
+        assert_eq!(
+            Profile::ReleaseMobile.args(),
+            ["--profile", "release-mobile"]
+        );
+        assert_eq!(Profile::Release.args(), ["--release"]);
+        // `opt_level` of `[ios]` / `[android]`: "s" (the default), "z", "3"; a debug build is `dev`.
+        use crate::config::NativeOptLevel::{Fastest, Small, Smallest};
+        assert_eq!(Profile::mobile(true, Small), Profile::ReleaseMobile);
+        assert_eq!(Profile::mobile(true, Smallest), Profile::ReleaseMobileZ);
+        assert_eq!(Profile::mobile(true, Fastest), Profile::Release);
+        for level in [Small, Smallest, Fastest] {
+            assert_eq!(Profile::mobile(false, level), Profile::Dev);
+        }
+        assert_eq!(Profile::ReleaseMobileZ.dir_name(), "release-mobile-z");
+        assert_eq!(
+            Profile::ReleaseMobileZ.args(),
+            ["--profile", "release-mobile-z"]
+        );
+        assert_eq!(
+            unpacked_debuginfo(Profile::ReleaseMobileZ),
+            "profile.release-mobile-z.split-debuginfo=\"unpacked\""
+        );
+        assert_eq!(
+            unpacked_debuginfo(Profile::ReleaseMobile),
+            "profile.release-mobile.split-debuginfo=\"unpacked\""
+        );
+    }
+
     fn remap_with(
         sys: &crate::sys::fake::FakeSys,
         profile: Profile,
@@ -1217,6 +1279,8 @@ mod tests {
             "--remap-path-prefix=/Users/dev/.cargo/git/checkouts=/undra/deps",
         ];
         assert_eq!(flags_of(remap_of(&sys, Profile::Release)), expected);
+        assert_eq!(flags_of(remap_of(&sys, Profile::ReleaseMobile)), expected);
+        assert_eq!(flags_of(remap_of(&sys, Profile::ReleaseMobileZ)), expected);
         assert_eq!(flags_of(remap_of(&sys, Profile::ReleaseWasm)), expected);
 
         // A rustc that knows the scope flag remaps the binary only, not its messages.

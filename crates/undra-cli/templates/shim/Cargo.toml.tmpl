@@ -58,6 +58,41 @@ opt-level = 3
 panic = "unwind"
 debug = "line-tables-only"
 
+# What `undra build --platform ios,android --release` builds (ADR-052, "native size gates"): `release` with the
+# optimiser asked for size (`opt-level = "s"`: 14% off the Android library of a hello world, 16% off the playground's), except for the
+# crates the call path runs through, which stay at `opt-level = 3`: on the device bench every row of `s` alone moved by up to
+# 8% (and 17% of the core's own work on the host, a loop the vectoriser no longer takes up 3x), and with these four crates at
+# 3 none moves by more than its noise, for about 6 points of the size (8% off a hello world, 13% off the playground; `"z"`
+# would take 8 to 13 points more and slows the call path by up to half). Nothing else changes. A panic still unwinds
+# (constitution R6: a panic on native is contained and reported through `catch_unwind`, which `panic = "abort"` would turn
+# into a crash), the line tables stay for the symbol files of ADR-046, and the copies that ship are stripped by `undra build`
+# as before. The host builds stay on `release`.
+[profile.release-mobile]
+inherits = "release"
+opt-level = "s"
+panic = "unwind"
+
+[profile.release-mobile.package.undra-wire]
+opt-level = 3
+
+[profile.release-mobile.package.undra-signals]
+opt-level = 3
+
+[profile.release-mobile.package.undra-runtime]
+opt-level = 3
+
+[profile.release-mobile.package.undra-ffi]
+opt-level = 3
+
+# What `opt_level = "z"` in `[ios]` or `[android]` of undra.toml builds instead (ADR-052, "native size gates"): `"z"` for
+# every crate, the call path included. The smallest library (arm64-v8a: 15% under `release-mobile` for a hello world, 19% for the
+# playground; 21% and 29% under `release`), and a synchronous call 1.58x as slow on the Android emulator, 1.33x on the iOS simulator.
+# A panic still unwinds (R6). (`opt_level = "3"` builds `release` above.)
+[profile.release-mobile-z]
+inherits = "release"
+opt-level = "z"
+panic = "unwind"
+
 [profile.release-wasm]
 inherits = "release"
 opt-level = "@@WASM_OPT_LEVEL@@"

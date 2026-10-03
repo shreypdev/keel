@@ -31,14 +31,16 @@ const ROOT = join(SITE, "..");
 const SLOTS = {
   "web-size": { file: "bench/results/web-size.jsonl", artifact: "web/hello-wasm" },
   "web-runtime-js": { file: "bench/results/web-size.jsonl", artifact: "web/hello-runtime-js" },
-  "android-size": { file: "bench/results/android-size.jsonl", artifact: "android/hello-arm64-v8a", field: "bytes" },
+  "android-size": { file: "bench/results/native-size.jsonl", artifact: "android/hello-arm64-v8a", field: "bytes" },
+  "android-x86-size": { file: "bench/results/native-size.jsonl", artifact: "android/hello-x86_64", field: "bytes" },
+  "ios-size": { file: "bench/results/native-size.jsonl", artifact: "ios/hello-arm64", field: "bytes" },
 };
 
 /** The JSON line of `artifact` in the record `file` (one JSON object per line), and its `field` in bytes. */
 function recordOf({ file, artifact, field = "gzipped" }) {
   const lines = read(join(ROOT, file)).split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
   const line = lines.find((l) => l.artifact === artifact);
-  if (!line) throw new Error(`${file} has no line for ${artifact}; record it again (scripts/wasm-size.sh --record for the web, bench/results/android-size.jsonl for Android)`);
+  if (!line) throw new Error(`${file} has no line for ${artifact}; record it again (scripts/wasm-size.sh --record for the web, scripts/native-size.sh --record for Android)`);
   if (typeof line[field] !== "number") throw new Error(`${file}: ${artifact} was not measured (${line.error ?? `no ${field}`}); run scripts/wasm-size.sh --record with the TypeScript runtime's node_modules installed`);
   return { ...line, bytes: line[field] };
 }

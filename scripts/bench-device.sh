@@ -226,10 +226,10 @@ bench_android() {
     physical="$(echo "$found" | grep -v '^emulator-' || true)"
     emulators="$(echo "$found" | grep '^emulator-' || true)"
     if [ -n "$physical" ]; then
-      [ "$(echo "$physical" | wc -l)" = 1 ] || die "several devices attached ($(echo "$physical" | tr '\n' ' ')): pass --target <serial>"
+      [ "$(echo "$physical" | wc -l | tr -d ' ')" = 1 ] || die "several devices attached ($(echo "$physical" | tr '\n' ' ')): pass --target <serial>"
       serial="$physical"
     elif [ -n "$emulators" ]; then
-      [ "$(echo "$emulators" | wc -l)" = 1 ] || die "several emulators running ($(echo "$emulators" | tr '\n' ' ')): pass --target <serial>"
+      [ "$(echo "$emulators" | wc -l | tr -d ' ')" = 1 ] || die "several emulators running ($(echo "$emulators" | tr '\n' ' ')): pass --target <serial>"
       serial="$emulators"
     else
       echo "== no device attached: booting the \"$avd\" AVD headless"
