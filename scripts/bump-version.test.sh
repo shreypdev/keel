@@ -59,16 +59,29 @@ done
 for dir in runtimes/ts/@undra/testkit runtimes/rn/@undra/react-native; do
   grep -q "\"@undra/runtime\": \"^$new\"" "$copy/$dir/package.json" || fail "$dir/package.json's peer range"
 done
+grep -qx "export const RUNTIME_VERSION = \"$new\";" "$copy/runtimes/ts/@undra/runtime/src/version.ts" ||
+  fail "runtimes/ts/@undra/runtime/src/version.ts does not say $new"
+grep -qx "internal const val UNDRA_RUNTIME_VERSION: String = \"$new\"" \
+  "$copy/runtimes/kotlin/undra-runtime/runtime/src/main/kotlin/dev/undra/runtime/UndraLog.kt" ||
+  fail "the Kotlin runtime's UNDRA_RUNTIME_VERSION does not say $new"
 stale=$(cd "$copy" && git ls-files -- '*package.json' '*package-lock.json' | grep -v '/tests/fixtures/' |
   xargs grep -l "\"@undra/runtime\": \"^$old\"" || true)
 [ -z "$stale" ] || fail "still naming ^$old: $stale"
-pass "the workspace, Cargo.lock, the three packages, their locks and every runtime range say $new"
+pass "the workspace, Cargo.lock, the three packages, their locks, every runtime range and the runtimes' Hello versions say $new"
 
 fixtures=$(git -C "$copy" status --porcelain -- crates/undra-cli/tests/fixtures)
 [ -z "$fixtures" ] || fail "the fixtures of older releases changed: $fixtures"
 pass "the fixtures of older releases are left"
 
 bump --check "$new" >/dev/null || fail "--check $new fails after the bump"
+# One file left behind (the runtime's Hello version, which no manifest shows) and --check names it.
+cp "$copy/runtimes/ts/@undra/runtime/src/version.ts" "$tmp/version.ts"
+sed -i.bak "s/\"$new\"/\"$old\"/" "$copy/runtimes/ts/@undra/runtime/src/version.ts"
+rm -f "$copy/runtimes/ts/@undra/runtime/src/version.ts.bak"
+if out=$(bump --check "$new" 2>&1); then fail "--check passed with version.ts left at $old"; fi
+case "$out" in *"runtimes/ts/@undra/runtime/src/version.ts"*) ;; *) fail "--check does not name the file it found: $out" ;; esac
+cp "$tmp/version.ts" "$copy/runtimes/ts/@undra/runtime/src/version.ts"
+pass "--check names a file that was left behind"
 if bump --check "$old" >/dev/null 2>&1; then fail "--check $old passes after the bump"; fi
 out=$(bump "$new")
 case "$out" in "nothing to change"*) ;; *) fail "a second run changed something: $out" ;; esac

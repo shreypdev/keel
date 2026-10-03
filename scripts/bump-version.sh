@@ -29,6 +29,8 @@ Sets the version of the release (for example 1.0.0, or 1.0.0-rc.1) in:
   "@undra/runtime": "^<version>"                   in every package.json and package-lock.json of the
                                                    repository: the peer range of the testkit and the
                                                    React Native host, and of every generated package
+  runtimes/ts/@undra/runtime/src/version.ts        RUNTIME_VERSION, and the Kotlin runtime's
+  runtimes/kotlin/.../dev/undra/runtime/UndraLog.kt  UNDRA_RUNTIME_VERSION: what each sends in its Hello
 
 and prints every file it changed. Nothing else carries the release's number: the Swift package's
 version is the tag, the Kotlin artifacts' version is the tag (JitPack's VERSION), the projects
@@ -104,6 +106,9 @@ rewrite_package_lock() { # the top-level version and the root package'"'"'s ("pa
 rewrite_runtime_range() { # every `"@undra/runtime": "^<semver>"`: the peer and dev ranges that name the runtime
   sed -E 's/("@undra\/runtime": "\^)[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?"/\1'"$version"'"/g' "$1"
 }
+rewrite_hello_version() { # the version a runtime reports in its Hello: TypeScript's RUNTIME_VERSION, Kotlin's UNDRA_RUNTIME_VERSION
+  sed -E 's/^(export const RUNTIME_VERSION = ")[^"]*(";)$/\1'"$version"'\2/; s/^(internal const val UNDRA_RUNTIME_VERSION: String = ")[^"]*(")$/\1'"$version"'\2/' "$1"
+}
 
 # The npm packages of a release (crates/undra-cli/src/dist.rs, NPM_PACKAGES).
 packages="runtimes/ts/@undra/runtime runtimes/ts/@undra/testkit runtimes/rn/@undra/react-native"
@@ -122,6 +127,8 @@ manifests() {
 
 files_and_kinds() {
   printf 'cargo Cargo.toml\n'
+  printf 'hello_version runtimes/ts/@undra/runtime/src/version.ts\n'
+  printf 'hello_version runtimes/kotlin/undra-runtime/runtime/src/main/kotlin/dev/undra/runtime/UndraLog.kt\n'
   local dir
   for dir in $packages; do
     printf 'package_json %s/package.json\n' "$dir"

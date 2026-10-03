@@ -23,6 +23,15 @@ const CURRENT: &str = env!("CARGO_PKG_VERSION");
 /// Where the npm packages of a release are downloaded (ADR-063).
 const ASSETS: &str = "https://github.com/shreypdev/undra/releases/download";
 
+/// The release the first migration notes are filed under (`crates/undra-cli/src/migrations.rs`). It is not always this
+/// `undra`'s: docs/RELEASING.md re-keys it by hand when the first release is cut, and a release candidate before that
+/// (`1.0.0-rc.1`) prints it as it is, so the version pull request of either stays green.
+fn first_notes_release() -> String {
+    let text = include_str!("../src/migrations.rs");
+    let at = text.find("version: \"").expect("the first migration's version") + "version: \"".len();
+    text[at..at + text[at..].find('"').unwrap()].to_owned()
+}
+
 /// The `@undra/runtime` dependency of a project on the current release.
 fn runtime_url() -> String {
     format!("{ASSETS}/v{CURRENT}/undra-runtime-{CURRENT}.tgz")
@@ -178,7 +187,7 @@ fn a_dry_run_shows_every_line_that_would_change_and_writes_nothing() {
         "{stdout}"
     );
     assert!(
-        stdout.contains(&format!("{CURRENT}  Since v1.0:"))
+        stdout.contains(&format!("{}  Since v1.0:", first_notes_release()))
             && stdout.contains("[do] Rebuild the core and every app together"),
         "{stdout}"
     );
