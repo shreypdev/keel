@@ -356,7 +356,8 @@ class URLSessionWebSocketAdapterTests: XCTestCase {
 
 /// What an app's `URLSession` sees: a delegate that records the tasks it was asked to run (`URLSessionTaskDelegate`'s metrics, which
 /// a pinning or authenticating delegate sits next to).
-final class RecordingSessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+/// Records the path of every task that finished on the app's session (the SSE tests have their own recorder, with pinning).
+final class MetricsRecordingSessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let seen = Locked<[String]>([])
 
     /// The paths of the tasks that finished, in order.
@@ -400,11 +401,11 @@ final class AnsweringSessionDelegate: NSObject, URLSessionTaskDelegate, @uncheck
 /// The same suite on the app's own session (ADR-060): `URLSessionWebSocketAdapter(session:)`, a session with a recording delegate and a
 /// configuration of its own, so every case also shows that the adapter works as a task of a session it does not own.
 final class URLSessionWebSocketOnAppSessionTests: URLSessionWebSocketAdapterTests {
-    private var delegate: RecordingSessionDelegate!
+    private var delegate: MetricsRecordingSessionDelegate!
     private var session: URLSession!
 
     override func makeAdapter() -> URLSessionWebSocketAdapter {
-        delegate = RecordingSessionDelegate()
+        delegate = MetricsRecordingSessionDelegate()
         let configuration = URLSessionConfiguration.default
         configuration.httpAdditionalHeaders = ["X-Traced": "yes"]
         session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
