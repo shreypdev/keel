@@ -101,10 +101,10 @@
 <section id="try-it">
 <h2>Try it in five minutes</h2>
 <p>With Rust (and its <code>wasm32-unknown-unknown</code> target) and Node installed:</p>
-<pre><code class="language-bash" data-lang="bash">brew install shreypdev/undra/undra
+<pre><code class="language-bash" data-lang="bash">curl -fsSL https://shreypdev.github.io/undra/install.sh | sh
 undra init myapp
 cd myapp/web &amp;&amp; npm install &amp;&amp; npm run dev</code></pre>
-<p>The installer script and cargo work too. <code>undra init</code> writes a core with a to-do store, its bindings and an app per platform, downloading nothing. <code>npm run dev</code> builds the core to WebAssembly (the first build compiles the Undra crates and takes a minute or two) and serves the app at <code>http://localhost:5173</code>. Edit <code>core/src/lib.rs</code> and save: the page is on the new core. <code>undra dev</code> serves one core to every app at once.</p>
+<p>Cargo works too (<code>cargo install --git https://github.com/shreypdev/undra undra-cli</code>, built from source). <code>undra init</code> writes a core with a to-do store, its bindings and an app per platform, downloading nothing. <code>npm run dev</code> builds the core to WebAssembly (the first build compiles the Undra crates and takes a minute or two) and serves the app at <code>http://localhost:5173</code>. Edit <code>core/src/lib.rs</code> and save: the page is on the new core. <code>undra dev</code> serves one core to every app at once.</p>
 <p>The iOS and Android apps get their runtimes from the same GitHub release, with no account: the Swift package at the repository's root and the Kotlin modules from JitPack. <a href="../../docs/getting-started.html">Getting started</a> has every step, as we ran it.</p>
 </section>
 <section id="what-it-is-not">

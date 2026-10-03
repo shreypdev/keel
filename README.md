@@ -151,15 +151,15 @@ and persistence are built in (`#[undra::query]` / `#[undra::mutation]`).
 
 ## Install
 
-Three ways to get the same `undra` binary (macOS and Linux, x86_64 and arm64):
+Two ways to get the same `undra` command (macOS and Linux, x86_64 and arm64):
 
 ```bash
-brew install shreypdev/undra/undra                                   # Homebrew
 curl -fsSL https://shreypdev.github.io/undra/install.sh | sh         # checks the sha256, installs to ~/.undra/bin, no sudo
 cargo install --git https://github.com/shreypdev/undra undra-cli     # from source (Rust 1.85+)
 ```
 
-Not supported yet: Windows, and Alpine (musl) for the prebuilt binaries.
+Not supported yet: Windows, and Alpine (musl) for the prebuilt binaries. Homebrew (`brew install undra`) comes
+later, through homebrew-core ([what is not done](#what-is-not-done)).
 `undra --version` prints `undra <version> (<commit>)` (`unknown` for a build from source). Maintainers: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Quick start
@@ -240,6 +240,8 @@ Open, with the work done around it (the same list as the [roadmap](https://shrey
 * Benchmark rows from physical phones; today's device rows are a simulator, an emulator and headless Chromium.
 * Maven Central and the npm registry beside GitHub (the launch ships everything from this repository's tags), then
   the crates on crates.io.
+* Homebrew (`brew install undra`), through homebrew-core once the repository is 30 days old and notable (75 stars, or 30
+  forks or watchers); there is no tap at launch.
 * The `undra-compose`, `android-adapters` and `android-work` tests in CI (they pass locally and on the emulator);
   Android under Bazel, built and tested; a byte-reproducible `undra build`.
 * A cancelled port call reaching the platform (today it is abandoned in the core); a Windows CLI; Dart and Flutter.
