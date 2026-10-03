@@ -1,19 +1,27 @@
-// Server-sent events (ADR-047) on URLSession.bytes(for:) and the runtime's SseParser.
+// Server-sent events (ADR-047) on a URLSession data task and the runtime's SseParser.
 
 import Foundation
 
-/// `Sse` on `URLSession.bytes(for:)`, parsed by ``SseParser`` (the HTML standard's algorithm).
+/// `Sse` on a `URLSession` data task, parsed by ``SseParser`` (the HTML standard's algorithm).
 ///
 /// The request carries `Accept: text/event-stream`, `Cache-Control: no-cache`, the core's headers
 /// and, when resuming, `Last-Event-ID`. `open` returns once the answer's head arrived: a status
 /// other than 2xx is ``SseError/refused(status:message:)`` with it (a 204 means "stop"), a content
-/// type other than `text/event-stream` is ``SseError/protocol(_:)``. The body is read as the
-/// binding pulls events; its end is ``SseError/ended``, a failure while reading
-/// ``SseError/network(_:)``, bytes that are not UTF-8 ``SseError/protocol(_:)``. `close` cancels
-/// the request, so the server sees the client leave.
+/// type other than `text/event-stream` is ``SseError/protocol(_:)``. The body arrives in the chunks
+/// URLSession hands over (a task delegate receives them), each chunk is parsed at once, and the
+/// events wait for the binding to pull them; its end is ``SseError/ended``, a failure while
+/// reading ``SseError/network(_:)``, bytes that are not UTF-8 ``SseError/protocol(_:)``. `close`
+/// cancels the request, so the server sees the client leave.
+///
+/// The read-ahead follows the core's pulls: while enough events wait for the binding, the data task
+/// is suspended, so URLSession stops reading the socket and TCP pushes back on the server; it is
+/// resumed when the binding takes the queue below the mark again.
 ///
 /// It is also the `Sse` adapter of ``Adapters/platformDefault`` (served by the binding of
 /// ``SsePortAdapter``).
+///
+/// The `session`'s delegate queue must be serial, which is what URLSession makes of the queue
+/// it creates itself (the default session's, and any session made without one).
 public final class URLSessionSseAdapter: SseAdapter, UndraAdapter, @unchecked Sendable {
     private let session: URLSession
     private let bindings = BindingSet<SseBinding>()
@@ -56,26 +64,23 @@ public final class URLSessionSseAdapter: SseAdapter, UndraAdapter, @unchecked Se
         if let lastEventId = lastEventId {
             request.setValue(lastEventId, forHTTPHeaderField: "Last-Event-ID")
         }
-        let bytes: URLSession.AsyncBytes
-        let response: URLResponse
-        do {
-            (bytes, response) = try await session.bytes(for: request)
-        } catch let error as URLError {
-            if error.code == .badURL || error.code == .unsupportedURL {
-                throw SseError.refused(status: nil, message: "invalid URL: \(url)")
-            }
-            throw SseError.network(error.localizedDescription)
-        } catch {
-            throw SseError.network((error as NSError).localizedDescription)
+        let stream = URLSessionSseStream(lastEventId: lastEventId)
+        switch await stream.start(request, on: session) {
+        case .accepted:
+            return stream
+        case .failed(let error):
+            throw error
         }
+    }
+
+    /// Why the answer's head is not an event stream, or `nil` when it is one.
+    static func refusal(of response: URLResponse) -> SseError? {
         guard let http = response as? HTTPURLResponse else {
-            bytes.task.cancel()
-            throw SseError.protocol("the answer is not HTTP")
+            return SseError.protocol("the answer is not HTTP")
         }
         guard (200 ..< 300).contains(http.statusCode), http.statusCode != 204 else {
-            bytes.task.cancel()
             let status = http.statusCode
-            throw SseError.refused(
+            return SseError.refused(
                 status: UInt16(clamping: status),
                 message: "the server answered HTTP \(status) (\(HTTPURLResponse.localizedString(forStatusCode: status)))"
             )
@@ -84,10 +89,20 @@ public final class URLSessionSseAdapter: SseAdapter, UndraAdapter, @unchecked Se
         let mediaType = contentType.split(separator: ";", maxSplits: 1).first
             .map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? ""
         guard mediaType == "text/event-stream" else {
-            bytes.task.cancel()
-            throw SseError.protocol("expected text/event-stream, got \(contentType.isEmpty ? "no content type" : contentType)")
+            return SseError.protocol("expected text/event-stream, got \(contentType.isEmpty ? "no content type" : contentType)")
         }
-        return URLSessionSseStream(bytes: bytes, lastEventId: lastEventId)
+        return nil
+    }
+
+    /// What request failed before it had an answer.
+    static func openFailure(_ error: any Error, url: String) -> SseError {
+        if let urlError = error as? URLError {
+            if urlError.code == .badURL || urlError.code == .unsupportedURL {
+                return SseError.refused(status: nil, message: "invalid URL: \(url)")
+            }
+            return SseError.network(urlError.localizedDescription)
+        }
+        return SseError.network((error as NSError).localizedDescription)
     }
 
     // MARK: UndraAdapter
@@ -105,29 +120,161 @@ public final class URLSessionSseAdapter: SseAdapter, UndraAdapter, @unchecked Se
     }
 }
 
-/// One response body, parsed as the binding pulls.
-final class URLSessionSseStream: SseStream, @unchecked Sendable {
-    /// The reader: touched by one `next()` at a time (the binding's pump).
-    private final class Reader: @unchecked Sendable {
-        var iterator: URLSession.AsyncBytes.AsyncIterator
-        var parser: SseParser
-        var ready: [SseEvent] = []
-        var done = false
+/// What the stream asks of its request: a `URLSessionTask`, or a recorder in the tests.
+protocol SseTaskControl: AnyObject, Sendable {
+    /// Stops reading the socket (what is already on its way may still arrive).
+    func suspend()
+    /// Reads again.
+    func resume()
+    /// Ends the request, so the server sees the client leave.
+    func cancel()
+}
 
-        init(_ bytes: URLSession.AsyncBytes, lastEventId: String?) {
-            self.iterator = bytes.makeAsyncIterator()
-            self.parser = SseParser(lastEventId: lastEventId)
+extension URLSessionTask: SseTaskControl {}
+
+/// One response body: a task delegate that parses each chunk as it arrives and queues the events
+/// for the binding.
+///
+/// URLSession hands the body over in chunks of whatever size the socket gave it; the parser is
+/// incremental, so a chunk is fed to it whole and may end anywhere (inside an event, a multi-byte
+/// character, a CR LF pair). Reading it one byte at a time through `URLSession.AsyncBytes` made
+/// every byte an asynchronous hop, which is what capped the throughput.
+///
+/// Backpressure is the Kotlin adapter's rule (`SseStreamReader`): the socket is read only while
+/// fewer events wait than the binding's buffer has `room` for. A delegate has no pull, so the data
+/// task is suspended when `waiting` reaches `room` and resumed when the binding takes `waiting`
+/// below it. A chunk may hold several events, so the read-ahead is `room` plus at most one chunk
+/// (plus the few chunks already in flight when the task was suspended), and it ends in the
+/// kernel's socket buffers, where TCP pushes back on the server.
+final class URLSessionSseStream: NSObject, SseStream, URLSessionDataDelegate, @unchecked Sendable {
+    /// How the request's head came out: the stream is open, or why it is not.
+    enum Head: Sendable {
+        case accepted
+        case failed(SseError)
+    }
+
+    /// How many events may wait for the binding before the task is suspended: the room of the
+    /// binding's buffer, which is its window (16 before the core's first pull, SPEC 3.7).
+    static let room = initialReadAhead
+
+    private enum Step {
+        case event(SseEvent)
+        case end(SseError)
+        case finished
+        case wait
+    }
+
+    private struct State {
+        var control: (any SseTaskControl)?
+        var url = ""
+        /// `open`, waiting for the head.
+        var head: CheckedContinuation<Head, Never>?
+        var cancelledWhileOpening = false
+        /// The events parsed and not yet taken by the binding: `queue[first...]`.
+        var queue: [SseEvent] = []
+        var first = 0
+        /// How the body ended; handed over once the queued events are taken.
+        var end: SseError?
+        /// The end was handed over, or the core closed the stream.
+        var over = false
+        /// The binding's pump, waiting for an event.
+        var waiter: CheckedContinuation<Void, Never>?
+        var suspended = false
+        /// Chunks being parsed now (the task stays suspended until the last of them is queued).
+        var parsing = 0
+        var chunks = 0
+        var bytes = 0
+
+        /// Events that wait for the binding.
+        var waiting: Int {
+            return queue.count - first
+        }
+
+        mutating func take() -> SseEvent? {
+            guard first < queue.count else {
+                return nil
+            }
+            let event = queue[first]
+            first += 1
+            if first == queue.count {
+                queue.removeAll(keepingCapacity: true)
+                first = 0
+            } else if first >= 1_024 && first * 2 >= queue.count {
+                queue.removeFirst(first)
+                first = 0
+            }
+            return event
         }
     }
 
-    private let task: URLSessionDataTask
-    private let reader: Reader
-    private let closing = Guarded(false)
+    private let state = Guarded(State())
+    /// Touched by `receive`, which URLSession calls one chunk at a time.
+    private let parser: Guarded<SseParser>
+    private let room: Int
 
-    init(bytes: URLSession.AsyncBytes, lastEventId: String?) {
-        self.task = bytes.task
-        self.reader = Reader(bytes, lastEventId: lastEventId)
+    /// A stream whose request is `control` (a test's recorder), or the one `start` makes.
+    init(lastEventId: String?, room: Int = URLSessionSseStream.room, control: (any SseTaskControl)? = nil) {
+        self.parser = Guarded(SseParser(lastEventId: lastEventId))
+        self.room = max(1, room)
+        super.init()
+        state.withLock { (current: inout State) -> Void in
+            current.control = control
+        }
     }
+
+    /// Chunks the body has arrived in so far, and their bytes (what the tests wait on).
+    var received: (chunks: Int, bytes: Int) {
+        return state.withLock { (current: inout State) -> (chunks: Int, bytes: Int) in
+            return (current.chunks, current.bytes)
+        }
+    }
+
+    /// Whether the task is suspended now (what the tests look at).
+    var isSuspended: Bool {
+        return state.withLock { (current: inout State) -> Bool in
+            return current.suspended
+        }
+    }
+
+    // MARK: Opening
+
+    /// Starts `request` on `session` and waits for the answer's head. Cancelling the caller
+    /// cancels the request.
+    func start(_ request: URLRequest, on session: URLSession) async -> Head {
+        let task = session.dataTask(with: request)
+        task.delegate = self
+        state.withLock { (current: inout State) -> Void in
+            current.control = task
+            current.url = request.url?.absoluteString ?? ""
+        }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Head, Never>) in
+                let cancelled = state.withLock { (current: inout State) -> Bool in
+                    if current.cancelledWhileOpening {
+                        return true
+                    }
+                    current.head = continuation
+                    return false
+                }
+                if cancelled {
+                    continuation.resume(returning: .failed(.network("cancelled")))
+                } else {
+                    task.resume()
+                }
+            }
+        } onCancel: {
+            let head = state.withLock { (current: inout State) -> CheckedContinuation<Head, Never>? in
+                current.cancelledWhileOpening = true
+                let taken = current.head
+                current.head = nil
+                return taken
+            }
+            task.cancel()
+            head?.resume(returning: .failed(.network("cancelled")))
+        }
+    }
+
+    // MARK: SseStream
 
     var events: AsyncThrowingStream<SseEvent, any Error> {
         return AsyncThrowingStream(unfolding: { [self] () async throws -> SseEvent? in
@@ -136,45 +283,198 @@ final class URLSessionSseStream: SseStream, @unchecked Sendable {
     }
 
     func close() async {
-        closing.withLock { (value: inout Bool) -> Void in
-            value = true
+        let (waiter, control, wasSuspended) = state.withLock { (current: inout State) -> (CheckedContinuation<Void, Never>?, (any SseTaskControl)?, Bool) in
+            current.over = true
+            current.queue = []
+            current.first = 0
+            let waiter = current.waiter
+            current.waiter = nil
+            let suspended = current.suspended
+            current.suspended = false
+            return (waiter, current.control, suspended)
         }
-        task.cancel()
+        control?.cancel()
+        if wasSuspended {
+            // A cancelled task that stays suspended may never report, and the server must see the client leave.
+            control?.resume()
+        }
+        waiter?.resume()
     }
 
-    private var isClosing: Bool {
-        return closing.withLock { (value: inout Bool) -> Bool in value }
-    }
+    // MARK: Reading
 
-    /// The next event: read bytes until the parser completes one.
+    /// The next event: the first queued one, else what ended the body, else wait for a chunk.
     private func nextEvent() async throws -> SseEvent? {
-        let reader = self.reader
-        while reader.ready.isEmpty {
-            if reader.done || isClosing {
-                return nil
-            }
-            let byte: UInt8?
-            do {
-                byte = try await reader.iterator.next()
-            } catch {
-                if isClosing {
-                    return nil
+        while true {
+            let step = state.withLock { (current: inout State) -> Step in
+                if current.over {
+                    return .finished
                 }
-                reader.done = true
-                throw SseError.network((error as NSError).localizedDescription)
+                if let event = current.take() {
+                    if current.suspended && current.parsing == 0 && current.waiting < room {
+                        current.suspended = false
+                        current.control?.resume()
+                    }
+                    return .event(event)
+                }
+                if let end = current.end {
+                    current.over = true
+                    return .end(end)
+                }
+                return .wait
             }
-            guard let byte = byte else {
-                reader.done = true
-                throw SseError.ended
-            }
-            do {
-                reader.ready.append(contentsOf: try reader.parser.push(CollectionOfOne(byte)))
-            } catch {
-                reader.done = true
-                task.cancel()
+            switch step {
+            case .event(let event):
+                return event
+            case .end(let error):
                 throw error
+            case .finished:
+                return nil
+            case .wait:
+                await park()
             }
         }
-        return reader.ready.removeFirst()
+    }
+
+    /// Waits until a chunk queued an event, the body ended, or the stream was closed.
+    private func park() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let ready = state.withLock { (current: inout State) -> Bool in
+                if current.over || current.end != nil || current.waiting > 0 {
+                    return true
+                }
+                current.waiter = continuation
+                return false
+            }
+            if ready {
+                continuation.resume()
+            }
+        }
+    }
+
+    /// One chunk of the body: parsed whole, its events queued. The parser keeps what is left of an
+    /// event the chunk ended in; bytes that are not UTF-8 end the stream after the events before them.
+    ///
+    /// The task is suspended before the chunk is parsed, not after: parsing takes time (a chunk is
+    /// up to megabytes), and URLSession goes on reading the socket meanwhile and hands the lot over
+    /// in one piece, so a suspend that came after the parse would have nothing left to stop. It is
+    /// resumed once the events are queued, unless `waiting` has reached `room`: then the binding's
+    /// next pull below the mark resumes it.
+    func receive(_ chunk: Data) {
+        let proceed = state.withLock { (current: inout State) -> Bool in
+            current.chunks += 1
+            current.bytes += chunk.count
+            if current.over || current.end != nil {
+                return false
+            }
+            current.parsing += 1
+            if !current.suspended {
+                current.suspended = true
+                current.control?.suspend()
+            }
+            return true
+        }
+        guard proceed else {
+            return
+        }
+        var events: [SseEvent] = []
+        var failure: SseError?
+        parser.withLock { (parser: inout SseParser) -> Void in
+            chunk.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) -> Void in
+                do throws(SseError) {
+                    try parser.push(buffer, into: &events)
+                } catch {
+                    failure = error
+                }
+            }
+        }
+        let (waiter, control, resume) = state.withLock { (current: inout State) -> (CheckedContinuation<Void, Never>?, (any SseTaskControl)?, Bool) in
+            current.parsing -= 1
+            if current.over {
+                return (nil, nil, false)
+            }
+            current.queue.append(contentsOf: events)
+            var resume = false
+            if let failure = failure {
+                // Bytes that are not UTF-8 end the stream: the request has nothing more to say.
+                current.end = failure
+                resume = current.suspended
+            } else if current.parsing == 0 && current.waiting < room {
+                resume = current.suspended
+            }
+            if resume {
+                current.suspended = false
+            }
+            var waiter: CheckedContinuation<Void, Never>?
+            if !events.isEmpty || failure != nil {
+                waiter = current.waiter
+                current.waiter = nil
+            }
+            return (waiter, current.control, resume)
+        }
+        if failure != nil {
+            control?.cancel()
+        }
+        if resume {
+            control?.resume()
+        }
+        waiter?.resume()
+    }
+
+    /// The request is over: the body ended (`error == nil`), failed, or never had an answer.
+    func finish(_ error: (any Error)?) {
+        let (head, url, waiter) = state.withLock { (current: inout State) -> (CheckedContinuation<Head, Never>?, String, CheckedContinuation<Void, Never>?) in
+            let head = current.head
+            current.head = nil
+            if head == nil && current.end == nil && !current.over {
+                if let error = error {
+                    current.end = SseError.network((error as NSError).localizedDescription)
+                } else {
+                    current.end = .ended
+                }
+            }
+            let waiter = current.waiter
+            current.waiter = nil
+            return (head, current.url, waiter)
+        }
+        if let head = head {
+            if let error = error {
+                head.resume(returning: .failed(URLSessionSseAdapter.openFailure(error, url: url)))
+            } else {
+                head.resume(returning: .failed(.network("the connection ended before the answer")))
+            }
+        }
+        waiter?.resume()
+    }
+
+    // MARK: URLSessionDataDelegate
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
+    ) {
+        let refusal = URLSessionSseAdapter.refusal(of: response)
+        let head = state.withLock { (current: inout State) -> CheckedContinuation<Head, Never>? in
+            let taken = current.head
+            current.head = nil
+            return taken
+        }
+        if let refusal = refusal {
+            completionHandler(.cancel)
+            head?.resume(returning: .failed(refusal))
+        } else {
+            completionHandler(.allow)
+            head?.resume(returning: .accepted)
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        receive(data)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+        finish(error)
     }
 }
