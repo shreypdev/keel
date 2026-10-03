@@ -72,17 +72,17 @@
 </header>
 <main class="post" id="main"><article>
   <header class="post-header">
-    <p class="eyebrow">Field notes</p><h1>A week of outside use: seven findings, five fixes</h1><p class="lede">Before the release, a team tried Undra for a week, in a proof of concept inside its own repository, and sent us seven findings. Five are fixed and merged, each through a pull request with a decision record and an adversarial review. Two were not taken on. Here is each one, what we measured, and what changed.</p>
-    <p class="post-meta"><time datetime="2026-10-03">3 Oct 2026</time> · 5 min read · Undra team</p>
+    <p class="eyebrow">Field notes</p><h1>A week of outside use: seven findings, five fixes</h1><p class="lede">Before the release, a team tried Undra for a week, in a proof of concept, and sent us seven findings. Five are fixed and merged, each through a pull request with a decision record and an adversarial review. Two were not taken on. Here is each one, what we measured, and what changed.</p>
+    <p class="post-meta"><time datetime="2026-10-03">3 Oct 2026</time> · 6 min read · Undra team</p>
   </header>
   <nav class="toc" aria-label="On this page"><ol><li><a href="#the-findings">The seven findings</a></li><li><a href="#sse">The SSE adapter read a byte at a time</a></li><li><a href="#bazel">No Bazel</a></li><li><a href="#size">1.6 MB per ABI</a></li><li><a href="#network-stack">Inside the app's network stack</a></li><li><a href="#generated-code">Generated code in review</a></li><li><a href="#not-taken">What we did not take on</a></li><li><a href="#what-it-taught">What a week taught us</a></li></ol></nav>
 <section id="the-findings">
 <h2>The seven findings</h2>
 <div class="table-wrap"><table><thead><tr><th>Finding</th><th>What happened</th></tr></thead><tbody>
-<tr><td>Server-sent events are slow on iOS</td><td>Fixed: 7.8x on 4 KB events</td></tr>
+<tr><td>Server-sent events are slow on iOS</td><td>Fixed: 7.8x on 4 KB events (release build, on a Mac)</td></tr>
 <tr><td>The Swift tests do not build on Xcode 27</td><td>Not taken on: no reproduction yet</td></tr>
 <tr><td>No Bazel</td><td>Fixed: Bazel rules and an example workspace</td></tr>
-<tr><td>A core is 1.6 MB per Android ABI</td><td>Fixed: a size profile, a setting and gates</td></tr>
+<tr><td>A core is 1.6 MB per Android ABI</td><td>Fixed: a size profile, a setting and gates; the reported core is an estimated 1.42 MB by default</td></tr>
 <tr><td>The Android adapter is not our network stack</td><td>Fixed: adapters over the app's own OkHttp</td></tr>
 <tr><td>No GraphQL</td><td>Not taken on: Apollo stays on the platform side</td></tr>
 <tr><td>Generated code is noise in review</td><td>Fixed: the schema is the API, and <code>undra schema diff</code> reads it</td></tr>
@@ -91,25 +91,26 @@
 <section id="sse">
 <h2>The SSE adapter read a byte at a time</h2>
 <p>The report measured the iOS ceiling for server-sent events 2.4x below what it should be. The code agreed: the Swift adapter pulled the response body from <code>URLSession.AsyncBytes</code> one byte at a time and handed the parser one byte per call. The Kotlin and TypeScript adapters already read chunks.</p>
-<p>The adapter is now the delegate of a data task, and the parser gets whole chunks. Backpressure follows the Kotlin adapter's rule: the task is suspended while events wait for the core, so URLSession stops reading and TCP pushes back. In release builds, 4 KB events went from 12,600 to between 84,000 and 99,000 a second (7.8x), and 512-byte events by 2.1x. Once it worked on bytes instead of characters, the parser alone went from 310 to 2,246 MB/s on 4 KB events.</p>
-<p>The review found two High defects: a cancelled waiter hung and left the request open, and a background URLSession, which takes no task delegate, crashed the app. It is now refused with a typed error.</p>
+<p>The adapter is now the delegate of a data task, and the parser gets whole chunks. Backpressure follows the Kotlin adapter's rule: the task is suspended while events wait for the core, so URLSession stops reading and TCP pushes back.</p>
+<p>We measured on a Mac (Apple M5 Pro, macOS 26.5), not on an iPhone or the simulator: a release build of the adapter reading from a local test server. 4 KB events went from 12,600 to between 84,000 and 99,000 a second over three runs (7.8x is the middle run), and 512-byte events by 2.1x; 64-byte events did not move, because the limit there is URLSession's own receive path. A debug build gained 4.2x and 4.3x on the same two sizes, and the report's 2.4x falls inside that range. Separately, once the parser worked on bytes instead of characters, it alone went from 310 to 2,246 MB/s on 4 KB events, in a release harness fed 64 KiB chunks.</p>
+<p>The review found two High defects in the fix itself: a cancelled waiter hung and left the request open, and a background URLSession, which takes no task delegate, aborted the app. A background session is now refused with a typed error. The old adapter streamed on one, so that is a behaviour change, stated in ADR-047.</p>
 </section>
 <section id="bazel">
 <h2>No Bazel</h2>
-<p>Undra's build was a command line that Xcode and Gradle call: a Bazel repository had nothing to put in its graph, and its lint rules flagged the generated Kotlin. The <code>bazel/</code> module adds <code>undra_core</code>, <code>undra_bindings</code> and a library rule per language, which run the CLI as a pinned, hermetic, offline tool. <code>examples/bazel</code> tests a core from Kotlin on the JVM, TypeScript on Node and, on macOS, Swift. Lint exclusions written beside every generated tree took ktlint from 90 findings to none. Android under Bazel is declared and not yet verified, and the roadmap says so.</p>
+<p>Undra's build was a command line that Xcode and Gradle call: a Bazel repository had nothing to put in its graph, and its lint rules flagged the generated Kotlin. The <code>bazel/</code> module adds <code>undra_core</code>, <code>undra_bindings</code> and a library rule per language, which run the CLI as a pinned, hermetic, offline tool. <code>examples/bazel</code> tests a core from Kotlin on the JVM, TypeScript on Node and, on macOS, Swift. Lint exclusions written beside every generated tree took ktlint 1.8 from 90 findings to none on the example's generated Kotlin. Android under Bazel is declared and not yet verified: the example's Android core stops at analysis for want of a C++ toolchain, and the roadmap says so.</p>
 </section>
 <section id="size">
 <h2>1.6 MB per ABI</h2>
-<p>Nothing gated a native core's size. iOS and Android release builds now use a profile at <code>opt-level = "s"</code> that keeps the four crates of the call path at full speed, and three gates hold the hello world (898,176 bytes for arm64-v8a against 1.2 MB). For a team with a hard byte budget, <code>opt_level</code> in <code>undra.toml</code> chooses smaller or faster.</p>
-<p>The reported core lands at about 1.42 MB per ABI with nothing changed and about 1.18 MB at <code>opt_level = "z"</code>. <code>"z"</code> has a cost we measured: a synchronous call 1.33x slower on the iPhone simulator and 1.58x on the Android emulator. The answer is a setting with its price documented.</p>
+<p>Nothing gated a native core's size. iOS and Android release builds now use a profile at <code>opt-level = "s"</code> that keeps the four crates of the call path at full speed, and three gates hold the hello world: 898,176 bytes for arm64-v8a and 960,776 for x86_64 (stripped, uncompressed) against 1.2 MB, and an iOS slice of 784,086 against 900 KB. For a team with a hard byte budget, <code>opt_level</code> in the <code>[android]</code> or <code>[ios]</code> table of <code>undra.toml</code> chooses <code>"s"</code> (the default), <code>"z"</code> (smallest) or <code>"3"</code> (fastest).</p>
+<p>We did not have the reported core, so we estimated where it lands: the hello world's share plus the rest, scaled by how much the playground shrinks. It comes to about 1.42 MB per ABI with nothing changed (1.38 to 1.46 MB, since the tool rounds 1.55 to 1.65 million bytes to "1.6 MB") and about 1.18 MB at <code>opt_level = "z"</code> (1.14 to 1.21 MB), so <code>"z"</code> reaches 1.2 MB narrowly and not for every core of that size. <code>"z"</code> has a cost we measured on the playground's device benchmark, against <code>"3"</code>, which the default matches within noise: a synchronous call 1.33x slower on the iPhone simulator and 1.58x on the Android emulator, not on a phone. The answer is a setting with its price documented, not a promise.</p>
 </section>
 <section id="network-stack">
 <h2>Inside the app's network stack</h2>
-<p>The default Android adapter used <code>HttpURLConnection</code>. The team's token refresh, interceptors, tracing and certificate pinning live in their own <code>OkHttpClient</code>, so a request from the core carried no token, appeared in no trace and was not pinned. The optional <code>okhttp-adapters</code> module puts Http, WebSocket and SSE over the app's own client with one call; on iOS the app's <code>URLSession</code> serves all three. The review's High: in the old install order, a queued offline request could leave through the default adapter, without the token and without the pin.</p>
+<p>The default Android adapter used <code>HttpURLConnection</code>. An app's token refresh, interceptors, tracing and certificate pinning live in its own <code>OkHttpClient</code>, an object the platform's <code>HttpURLConnection</code> cannot reach, so a request from the core carried no token, appeared in no trace and was not pinned. The optional <code>okhttp-adapters</code> module puts Http, WebSocket and SSE over the app's own client with one call; on iOS the app's <code>URLSession</code> serves all three. Two limits remain. OkHttp itself leaves a client's network interceptors and event listener out of a WebSocket upgrade, so tracing written that way will not see the core's WebSockets; the docs say so. And the SSE adapter refuses a background <code>URLSession</code> while the WebSocket adapter does not yet, which is on the roadmap. The review's High: in the old install order, a queued offline request could leave through the default adapter, without the token and without the pin.</p>
 </section>
 <section id="generated-code">
 <h2>Generated code in review</h2>
-<p>Two features had produced about 1,400 lines of bindings. The count was right: one feature of the playground is 130 to 250 generated lines per platform. We kept the code, which reads as native to each platform's engineers, and moved review to the schema. Generated files are marked for GitHub to collapse, and <code>undra schema diff</code> prints one line per API change, breaking or additive. On a test fixture with twelve changes, the bindings changed by 506 lines, the schema by 60, and the diff printed 12.</p>
+<p>Two features had produced about 1,400 lines of bindings. The count was right: one feature of the playground is 130 to 250 generated lines per platform. We kept the code, since the project's rules require generated code to read as a platform engineer would write it, and moved review to the schema. Generated files are marked for GitHub to collapse, and <code>undra schema diff</code> prints one line per API change, breaking or additive. On the command line's test fixture, a to-do core with thirteen API changes, the generated bindings changed by 581 lines, the schema file by 77, and the diff printed 13.</p>
 </section>
 <section id="not-taken">
 <h2>What we did not take on</h2>
@@ -118,7 +119,7 @@
 </section>
 <section id="what-it-taught">
 <h2>What a week taught us</h2>
-<p>Each finding we took on was a place where our tests were green and a real app was not: a ceiling nobody had measured, a build system we did not use, a size we did not gate. What their reviews left open is on the <a href="../../roadmap/">roadmap</a>: OkHttp pinning end to end, Android under Bazel, a byte-reproducible build.</p>
+<p>Three of the five were places where our tests were green and a real app was not: a ceiling nobody had measured, a build system we did not use, a size we did not gate. What the five reviews left open is on the <a href="../../roadmap/">roadmap</a>: OkHttp pinning end to end, Android under Bazel, a byte-reproducible build.</p>
 </section>
 <footer class="post-footer"><p>Every claim and its source: <a href="claims.md">the claims ledger</a>.</p></footer>
 </article></main>
