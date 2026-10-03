@@ -253,6 +253,7 @@ Every suite is local; nothing needs the network after install.
 | Distribution: npm packages (build, pack, `npm install -g`, run) | `bash packaging/npm/test.sh` | all checks pass |
 | Distribution: the curl installer against a served release (checksums, tampering, platforms) | `bash packaging/test-install.sh` | all checks pass |
 | Benchmark budget gate | `cargo test -p undra-bench --test budgets --release` | pass |
+| Native size gate (ADR-052, R9): the hello-world core for Android (both ABIs, the stripped `.so` Gradle packages, 16 KB alignment checked) and iOS (the device slice, linked with `-dead_strip` and stripped) against the `[size."android/..."]` and `[size."ios/..."]` tables of `bench/budgets.toml`; `--record` re-records both in one commit | `scripts/native-size.sh` (`--platform android` or `ios`; needs cargo-ndk and NDK r27 for Android, Xcode for iOS; a minute or two) | each row `ok` against its gate; `bench/results/native-size.jsonl` is the record |
 | Benchmarks (numbers for humans) | `cargo bench -p undra-bench` | see `bench/RESULTS.md` |
 | Device bench: the blueprint rows through the generated binding and the mirror, on a simulator, emulator, browser or phone | `scripts/bench-device.sh --device ios`, `--device android` (boots the `undra` AVD if nothing is attached; `--target <serial>` for a phone), `--device web`; add `--quick` to check the plumbing in seconds | writes `bench/results/device/<date>-<target>.json` and the device tables of `bench/RESULTS.md`; needs the iOS simulator + Xcode, the Android SDK + NDK, or Playwright's Chromium (`cd examples/playground/web && npx playwright install chromium`) |
 | React Native runtime: C++ host under ASan + UBSan (both shims) and the JSI layer against React Native's headers | `runtimes/rn/@undra/react-native/cpp/test/run.sh` (needs `npm ci` in `examples/playground/rn` for the headers, and `undra build --platform host` of the playground and of `examples/two-cores/a`, which it runs when missing; `UNDRA_RN_REQUIRE_JSI=1` makes a missing one a failure) | 15 store checks, then 29 + 29 host checks (the linked shim on macOS only); `UndraJsi.cpp`, `UndraTurboModule.cpp` and (macOS) `UndraPlatformApple.mm` compile |
@@ -405,6 +406,33 @@ that no shipped artefact grew. It needs the toolchains of every platform and ski
 
 ```bash
 UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test symbols --test debugging -- --test-threads=1
+```
+
+### The size of the shipped core
+
+`undra build --platform ios,android --release` builds the `release-mobile` profile of the generated shim: `release` with
+`opt-level = "s"` and **`panic = "unwind"` kept** (R6, ADR-046: a native panic is contained by `catch_unwind` and reported;
+`abort` would make it a crash). The crates the call path runs through (`undra-wire`, `undra-signals`, `undra-runtime`, `undra-ffi`) stay
+at `opt-level = 3`: `s` everywhere made the core's own operations 17% slower. That is 8% off the Android library of a hello world
+(987,720 to 905,520 bytes, arm64-v8a), 13% off the playground's, and 8% off what the iOS slice adds to an app, with the device bench rows
+inside their noise (ADR-052, amendment "native size gates"). The host build stays on `release`; `opt-level = "z"` would take 8 to 13 points
+more and slows the call path up to 1.5x, so it is not the default. The sizes are gated, not just printed:
+
+```bash
+scripts/native-size.sh                    # the hello-world core per Android ABI and the iOS device slice, against bench/budgets.toml
+scripts/native-size.sh --platform android # (--platform ios on a Mac); --record re-records bench/results/native-size.jsonl and the tables
+```
+
+A row fails when the library is over the design's budget (1.2 MB per ABI, 900 KB added to an iOS app) or more than 5% over its
+record; the script also fails a library that is not 16 KB aligned or that names the builder's directories. The iOS number is the
+slice linked the way an app keeps it (`-dead_strip`, `strip -x`), because the `.a` is no measure (it grows at `z` while the code shrinks).
+To find what grew, use the NDK's own tools on the unstripped twin that `--release` keeps (no `cargo-bloat`, no dependency):
+
+```bash
+NDK_BIN=$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/<host>/bin
+$NDK_BIN/llvm-size -A build/android/jniLibs/arm64-v8a/lib<ns>.so          # sections
+$NDK_BIN/llvm-nm --print-size --size-sort -C --defined-only build/symbols/android/arm64-v8a/lib<ns>.so | tail -40
+size -m build/ios/<Ns>Core.xcframework/ios-arm64/lib<ns>.a                # the slice's sections
 ```
 
 ### Debugging into Rust

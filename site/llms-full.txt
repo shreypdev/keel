@@ -204,7 +204,7 @@ undra build --platform ios,android,web --release
 
 `undra init` also writes `.github/workflows/undra.yml`: a job for the core (format, clippy, tests, `undra bindgen --check`) and one per app, each installing `undra` at the version pinned once at the top of the file. When a newer Undra is out, `undra upgrade` moves every pin of the project (the core's dependency, the runtimes, the workflow) in step, regenerates the bindings and prints the migration notes of every release it crosses; `undra upgrade --dry-run` shows the lines first.
 
-Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 118.4 KB gzipped (budget 120 KB, gated in CI) and the arm64-v8a Android `.so` is 978.6 KB (budget 1.2 MB per ABI).
+Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 118.4 KB gzipped (budget 120 KB, gated in CI) and the arm64-v8a Android `.so` is 905.5 KB (budget 1.2 MB per ABI, gated in CI).
 
 ## Prefer to explore first?
 
@@ -1467,7 +1467,7 @@ Source: https://shreypdev.github.io/undra/docs/production.html
 
 # Operating in production
 
-Three things a shipped app needs that nobody should write for themselves: a crash report that names the Rust frame, the symbol files to read it with, and a way to finish the offline queue while the app is not on screen.
+Four things a shipped app needs that nobody should write for themselves: a crash report that names the Rust frame, the symbol files to read it with, a way to finish the offline queue while the app is not on screen, and a core that is as small as a native release build can make it.
 
 ## Crash reports
 
@@ -1487,7 +1487,7 @@ On the web a panic traps the module, which cannot call out of its last moments. 
 
 ## Symbol files
 
-A release build keeps line tables and nothing else: the code, the optimisation and the size of what ships are the same. `undra build --release` strips the copies it ships, keeps the unstripped ones below `build/symbols/` and writes `manifest.json` there (per image: namespace, core version, schema hash and the image id a report carries). `--no-symbols` skips all of it.
+A release build keeps line tables and nothing else: the code, the optimisation and the size of what ships are the same with or without them. `undra build --release` strips the copies it ships, keeps the unstripped ones below `build/symbols/` and writes `manifest.json` there (per image: namespace, core version, schema hash and the image id a report carries). `--no-symbols` skips all of it.
 
 | Platform | Ships | Symbols to keep (and upload) |
 | --- | --- | --- |
@@ -1523,6 +1523,31 @@ A run returns when its tasks are done, or half a second before the deadline so y
 On iOS the identifiers are `<id>.processing` and `<id>.refresh`; `undra init` writes them to `Info.plist` with the `processing` and `fetch` background modes. **BackgroundTasks does not run in the simulator**: test the handler with the fakes in the Swift package, and on a device with the debugger command Apple documents. On Android the worker returns `retry()` while work is pending, and the web has no background beyond the page's own life yet: Background Sync in a service worker needs the core inside the worker and is a follow-up.
 
 Your own work joins the run with `undra::background::register(ctx, name, pending, run)` in Rust: `pending` says cheaply how much is waiting, `run` does it and reports progress to the `Deadline` as it goes. The core's statistics carry `background.pending`, which is what the platforms read to decide whether a window is worth asking for.
+
+## Size of the shipped core
+
+`undra build --platform ios,android --release` builds the core with the `release-mobile` profile of the generated crate: the release profile with the optimiser asked for size (`opt-level = "s"`), except for the crates the call path runs through (the wire codec, the signals, the runtime and the C ABI), which stay at `opt-level = 3` so that a call is not slower. Nothing else changed. The panic strategy is not on the list: a native panic must unwind so the core can contain it and report it (the report above), so `panic = "abort"`, the biggest size lever Rust has, is not used. Line tables stay (the symbol files above), the shipped copies are stripped as before, and the host build, which runs your core's tests and `undra bindgen`, keeps `opt-level = 3`.
+
+| Hello-world core | Before (`opt-level = 3`) | Now (`release-mobile`) | Gate |
+| --- | --- | --- | --- |
+| Android arm64-v8a `.so` | 987.7 KB | 905.5 KB | at most 1.2 MB, and 5% over the record |
+| Android x86_64 `.so` | 1,054.3 KB | 971.5 KB | at most 1.2 MB, and 5% over the record |
+| iOS arm64, added to an app | 859.8 KB | 793.5 KB | at most 900 KB, and 5% over the record |
+
+The Android numbers are the stripped, 16 KB aligned file Gradle packages. The iOS number is what the device slice of the XCFramework adds to an app once its link has kept what is reachable and dropped the local symbols; the `.a` file itself is larger and is not a measure. A bigger core is bigger: the playground, with queries, persistence and several stores, is 2.50 MB for arm64-v8a (2.86 MB before, 13% less).
+
+The sizes are gated in CI (`scripts/native-size.sh`: over the design's budget, or more than 5% over the recorded size, fails). To measure your own core, `undra build --release` prints each library's size at the end. To see where the bytes are, the NDK's tools read the unstripped twin that `--release` keeps in `build/symbols/android/<abi>/`:
+
+sh
+
+```sh
+NDK_BIN=$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/<host>/bin
+$NDK_BIN/llvm-size -A build/android/jniLibs/arm64-v8a/lib<ns>.so            # sections: .text, .eh_frame, .rela.dyn, ...
+$NDK_BIN/llvm-nm --print-size --size-sort -C --defined-only \
+  build/symbols/android/arm64-v8a/lib<ns>.so | tail -40               # the largest functions
+```
+
+What is left is mostly the runtime, your core and Rust's standard library: a Rust library that does nothing but catch a panic is about 260 KB stripped, because the standard library's panic and backtrace support comes with it, and the unwind tables that make a contained panic possible are about a tenth of a core. Two linker options save more and are not applied for you: `-Wl,--pack-dyn-relocs=android` (about 3%; the loader of every Android version you support has to read the packed format, so that is your call) and `-Wl,--icf=all` (about 0.5%, merges functions with equal bodies, which changes function addresses); set them with `RUSTFLAGS` if your app can take them.
 
 ## Debugging into Rust
 
@@ -2077,7 +2102,7 @@ Builds the core for each platform and puts the result where the app shells look 
 
 **Not a manual step.** In a project made by `undra init` the app builds run `undra build` for you, each only when the core changed: Gradle's `undraBuild` task (`preBuild` depends on it; a release variant builds a release core), Xcode's *Build the Undra core* Run Script phase (before Compile Sources, with input and output file lists) and the `undra()` Vite plugin from `@undra/runtime/vite` (on start, and under `vite dev` on every change of `core/src`, followed by a reload). They find `undra` on `PATH`, or in `~/.undra/bin` and the other usual places, and say how to install it when it is missing (`error[undra::C0003]`).
 
-`--release` turns on LTO and one codegen unit. The web build is always optimized. Sizes are printed at the end next to the design's budgets. A debug Android core is tens of megabytes per ABI, so package with `--release`. The library is your core plus the Undra C ABI, built from a small crate generated under `target/undra/`; you never write that crate.
+`--release` turns on LTO and one codegen unit. The web build is always optimized. On iOS and Android the release build is also tuned for size (the `release-mobile` profile of the generated crate: `opt-level = "s"`, and a panic still unwinds so the core can contain it), and the host build keeps `opt-level = 3`. Sizes are printed at the end next to the design's budgets. A debug Android core is tens of megabytes per ABI, so package with `--release`. The library is your core plus the Undra C ABI, built from a small crate generated under `target/undra/`; you never write that crate.
 
 **No `-force_load`.** Each iOS slice is one prelinked object whose only global symbol is the core's entry, `hello_core_undra_api`, which the generated bindings call. It links like any other static library, in debug and release, and [another core](https://shreypdev.github.io/undra/docs/several-cores.html) can sit next to it.
 
@@ -4899,7 +4924,7 @@ Every number here comes from [bench/RESULTS.md](https://github.com/shreypdev/und
 | Decoding and replaying a one-operation patch on 10,000 rows (Rust wire crate) | 2.57 µs | [Keyed patch](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#wire-keyed-patch-undra-wire) |
 | Cold start, restoring 100 KB of state | 70.87 µs | [Snapshot](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#snapshot-and-restore) |
 | Wasm runtime plus hello-world core, gzipped | 118.4 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl) |
-| Android core, hello world, arm64-v8a, release | 978.6 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/android-size.jsonl) |
+| Android core, hello world, arm64-v8a, release | 905.5 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/android-size.jsonl) |
 
 Read these for what they are. They are core-side, on a host faster than the phones the design targets, so within budget here is necessary and not sufficient. The per-device targets (an iPhone with an A15, a 2022 mid-range Android phone, Chromium) are measured in a later device phase, and the platform half of a crossing, meaning the Swift, JNI or JavaScript side and applying a change-set to a mirror, is not in these numbers. The 46 operations covered by the CI gate have budgets about five times what they measure, so the gate catches an operation that becomes several times slower, not a few percent ([the gate](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#the-ci-gate)). We have not published a stress benchmark for sustained very high write rates, and we have not compared Undra against other tools, so this page makes no such comparison.
 

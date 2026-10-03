@@ -37,8 +37,8 @@ updated by compact binary change-sets, once per transaction. Lists cross as O(ch
 patches, not O(list) copies, and a filtered or sorted view of a list costs what changed. The
 numbers below are measured by the benchmark suite in [`bench/`](bench/RESULTS.md) on an
 Apple-Silicon host. The core operations are gated in CI against host budgets (a regression fails
-the build), and so is the web size; the Android size is measured with `undra build` and recorded,
-not gated. The "Budget" column holds the design's per-device targets. Rows from the iPhone
+the build), and so are the web size and the sizes of the native cores (Android per ABI, iOS). The
+"Budget" column holds the design's per-device targets. Rows from the iPhone
 simulator, the Android emulator and headless Chromium are in
 [`bench/RESULTS.md`](bench/RESULTS.md#device-numbers-ios-android-web); none is from a physical
 phone, so no device target is claimed as met:
@@ -52,7 +52,7 @@ phone, so no device target is claimed as met:
 | Change-set for 100 dirty signals | **2.3 µs** | ≤ 100 µs |
 | Cold start restoring 100 KB of state | **85 µs** | ≤ 3 ms |
 | Web core: Undra's runtime and a hello-world core, one wasm module | **<!--measured:web-size-->118.4 KB<!--/measured-->** gzipped | ≤ 120 KB |
-| Android core (`.so`, arm64-v8a, release, hello world) | **<!--measured:android-size-->978.6 KB<!--/measured-->** | ≤ 1.2 MB |
+| Android core (`.so`, arm64-v8a, release, hello world) | **<!--measured:android-size-->905.5 KB<!--/measured-->** | ≤ 1.2 MB |
 
 The web size is measured, not typed: [`scripts/wasm-size.sh`](scripts/wasm-size.sh) builds the
 `undra init` template for the web the way an app does (`wasm-opt -Oz`, gzip level 9), and CI fails
@@ -63,8 +63,11 @@ The JavaScript runtime the page loads up front with it is gated the same way:
 build of `@undra/runtime` as an app installs it (what only a feature or a mode needs, such as streams, the worker and
 remote transports and the default ports, loads when the app asks for it and is not in it; messages are an error code
 with a link, and the readable sentences ship in the development build,
-[ADR-057](.10x/adrs/ADR-057-js-runtime-16kb.md)). The Android size is
-a measurement of the same kind ([`bench/results/android-size.jsonl`](bench/results/android-size.jsonl)).
+[ADR-057](.10x/adrs/ADR-057-js-runtime-16kb.md)). The Android and iOS cores are gated the same
+way: [`scripts/native-size.sh`](scripts/native-size.sh) builds the template with `undra build --release`
+(the size-tuned `release-mobile` profile, which still unwinds on a panic) and CI fails a library that is
+over the design's budget or more than 5% over its record
+([`bench/results/native-size.jsonl`](bench/results/native-size.jsonl)).
 Sustained-load results (a firehose, keyed churn, fan-out, a 60-second soak) are under
 [Harsh conditions](bench/RESULTS.md#harsh-conditions).
 
