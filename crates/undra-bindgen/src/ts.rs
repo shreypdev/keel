@@ -99,11 +99,6 @@ impl Module {
 
 const RUNTIME: &str = "@undra/runtime";
 
-/// The range of `@undra/runtime` the generated package asks for: the release this generator belongs to and the ones
-/// compatible with it (ADR-063: `@undra/runtime` is installed from the release's asset, and npm checks a peer range
-/// against the installed package's version). `scripts/bump-version.sh` moves every copy of it in the repository.
-const RUNTIME_RANGE: &str = concat!("^", env!("CARGO_PKG_VERSION"));
-
 pub(crate) fn generate(model: &Model, cfg: &Generator) -> Vec<GeneratedFile> {
     let ts = TsGen {
         model,
@@ -1350,10 +1345,10 @@ impl TsGen<'_> {
                 "typecheck": "tsc -p tsconfig.json --noEmit"
             },
             "peerDependencies": {
-                "@undra/runtime": RUNTIME_RANGE
+                "@undra/runtime": self.cfg.ts_runtime_range
             },
             "devDependencies": {
-                "@undra/runtime": RUNTIME_RANGE,
+                "@undra/runtime": self.cfg.ts_runtime_range,
                 "typescript": "^5.5.0"
             }
         });

@@ -154,7 +154,9 @@ pub fn plan_files(schema: &Schema, plan: &Plan) -> Result<Vec<GeneratedFile>> {
         files.push(attributes("ts"));
         files.extend(prefixed(
             "ts",
-            plan.generator.typescript(schema).map_err(bindgen_failure)?,
+            ts_generator(&plan.generator, &plan.runtimes.ts)
+                .typescript(schema)
+                .map_err(bindgen_failure)?,
         ));
     }
     // The exclusions the repository's linters read, beside each tree (ADR-061).
@@ -165,6 +167,23 @@ pub fn plan_files(schema: &Schema, plan: &Plan) -> Result<Vec<GeneratedFile>> {
     ));
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
+}
+
+/// The generator of the TypeScript tree. A released project's package asks for the runtime of the release it pins
+/// (`[undra] version`, ADR-063), as its Swift package and Kotlin module do, so what `undra bindgen --check` compares does
+/// not depend on which `undra` generated it; a checkout's asks for this generator's own release, the checkout's.
+fn ts_generator<'a>(
+    generator: &'a Generator,
+    runtime: &RuntimeRef,
+) -> std::borrow::Cow<'a, Generator> {
+    match runtime {
+        RuntimeRef::Path(_) => std::borrow::Cow::Borrowed(generator),
+        RuntimeRef::Release { version, .. } => {
+            let mut released = generator.clone();
+            released.ts_runtime_range = format!("^{version}");
+            std::borrow::Cow::Owned(released)
+        }
+    }
 }
 
 fn bindgen_failure(errors: Vec<BindgenError>) -> CliError {
@@ -633,6 +652,29 @@ mod tests {
         assert!(flag.what.contains("--swift-observation"), "{flag:?}");
         assert!(configured(&config("17.0", None), None, Some("14.0")).is_err());
         assert!(configured(&config("17.0", None), None, Some("seventeen")).is_err());
+    }
+
+    #[test]
+    fn a_released_projects_typescript_package_asks_for_its_own_release() {
+        // ADR-063: every manifest names the release `[undra] version` pins, whichever `undra` generated it.
+        let package = |runtimes: Runtimes| -> serde_json::Value {
+            let files = plan_files(&schema(), &plan(vec![Platform::Web], runtimes)).unwrap();
+            let file = files.iter().find(|f| f.path == "ts/package.json").unwrap();
+            serde_json::from_str(&file.contents).unwrap()
+        };
+        let released = package(Runtimes::released("7.8.9", &Dist::github()));
+        assert_eq!(released["peerDependencies"]["@undra/runtime"], "^7.8.9");
+        assert_eq!(released["devDependencies"]["@undra/runtime"], "^7.8.9");
+        // A checkout's package asks for this generator's release: the checkout's own.
+        let checkout = package(Runtimes {
+            swift: RuntimeRef::Path(PathBuf::from("/k/swift")),
+            kotlin: RuntimeRef::Path(PathBuf::from("/k/kotlin")),
+            ts: RuntimeRef::Path(PathBuf::from("/k/ts")),
+        });
+        assert_eq!(
+            checkout["peerDependencies"]["@undra/runtime"],
+            undra_bindgen::RUNTIME_RANGE
+        );
     }
 
     #[test]
