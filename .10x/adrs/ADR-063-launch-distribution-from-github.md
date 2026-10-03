@@ -6,7 +6,9 @@ generated public shapes (the dependency lines of the projects `undra init` write
 `undra bindgen` writes, and of what `undra adopt` tells an author to add), the meaning of `[undra] version`, and the release
 pipeline. It does **not** touch the wire, the C or wasm ABI, the schema, the schema hash or any runtime's behaviour. Constitution
 R7 (compatibility is checked at load and at build: every dependency of a generated app names one release), R8 (the new settings
-fail with taught errors), R10 (the playground and the other examples keep using the checkout and are unaffected), R11.
+fail with taught errors), R10 (the playground and the other examples keep using the checkout and are unaffected), R11. It amends ADR-030
+decision 3: `@undra/cli`, its platform packages and the unscoped `undra` are no longer built or published (the names stay
+unclaimed until the npm organisation exists).
 
 ## Context
 
