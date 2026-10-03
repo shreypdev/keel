@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your network stack · Undra cookbook</title>
+<meta name="description" content="Your OkHttpClient, URLSession or fetch behind the Http, WebSocket and Sse ports: its token refresh, interceptors and pinning apply to the core's requests.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/cookbook/network-stack.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Your network stack · Undra cookbook">
+<meta property="og:description" content="Your OkHttpClient, URLSession or fetch behind the Http, WebSocket and Sse ports: its token refresh, interceptors and pinning apply to the core's requests.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/cookbook/network-stack.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Your network stack · Undra cookbook">
+<meta name="twitter:description" content="Your OkHttpClient, URLSession or fetch behind the Http, WebSocket and Sse ports: its token refresh, interceptors and pinning apply to the core's requests.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/cookbook/network-stack.html#article","headline":"Your network stack · Undra cookbook","description":"Your OkHttpClient, URLSession or fetch behind the Http, WebSocket and Sse ports: its token refresh, interceptors and pinning apply to the core's requests.","url":"https://shreypdev.github.io/undra/docs/cookbook/network-stack.html","inLanguage":"en","dateModified":"2026-10-02","datePublished":"2026-10-02","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Real-time","item":"https://shreypdev.github.io/undra/docs/cookbook/network-stack.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../../assets/base.css">
+<link rel="stylesheet" href="../../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../../docs/" aria-current="page">Docs</a>
+      <a href="../../blog/">Blog</a>
+      <a href="../../roadmap/">Roadmap</a>
+      <a href="../../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Core</p><ul><li><a href="../concepts.html">Core concepts</a></li><li><a href="../queries.html">Queries &amp; mutations</a></li><li><a href="../ports.html">Ports &amp; adapters</a></li><li><a href="../objects.html">Objects and identity</a></li><li><a href="../callbacks.html">Host callbacks</a></li><li><a href="../types.html">Newtypes, generics and decimals</a></li><li><a href="../generics.html">Generic functions, objects and stores</a></li></ul></div><div class="side-group"><p class="side-title">Data and live data</p><ul><li><a href="../paging.html">Paging and lazy lists</a></li><li><a href="../polling.html">Polling</a></li><li><a href="../realtime.html">WebSocket &amp; server-sent events</a></li><li><a href="../db.html">Local database</a></li></ul></div><div class="side-group"><p class="side-title">Test, ship, operate</p><ul><li><a href="../testing.html">Testing your app</a></li><li><a href="../updates.html">Shipping an update</a></li><li><a href="../reviewing-generated-code.html">Reviewing generated code</a></li><li><a href="../web.html">Workers &amp; crash recovery</a></li><li><a href="../production.html">Operating in production</a></li><li><a href="../several-cores.html">One core or several</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="index.html">All recipes</a></li><li><a href="auth.html">Auth</a></li><li><a href="pagination.html">Pagination</a></li><li><a href="forms.html">Forms</a></li><li><a href="upload.html">File upload</a></li><li><a href="realtime.html">Real-time</a></li><li><a href="offline.html">Offline-first</a></li><li><a href="network-stack.html" aria-current="page">Your network stack</a></li></ul></div><div class="side-group"><p class="side-title">Adopting Undra</p><ul><li><a href="from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="from-uniffi.html">From UniFFI</a></li><li><a href="ios-15-16.html">iOS 15 and 16</a></li><li><a href="../sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../cli.html">The CLI</a></li><li><a href="../architecture.html">Architecture</a></li><li><a href="../errors.html">Error codes</a></li><li><a href="../../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../api-swift.html">Swift</a></li><li><a href="../api-kotlin.html">Kotlin</a></li><li><a href="../api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Core</p><ul><li><a href="../concepts.html">Core concepts</a></li><li><a href="../queries.html">Queries &amp; mutations</a></li><li><a href="../ports.html">Ports &amp; adapters</a></li><li><a href="../objects.html">Objects and identity</a></li><li><a href="../callbacks.html">Host callbacks</a></li><li><a href="../types.html">Newtypes, generics and decimals</a></li><li><a href="../generics.html">Generic functions, objects and stores</a></li></ul></div><div class="side-group"><p class="side-title">Data and live data</p><ul><li><a href="../paging.html">Paging and lazy lists</a></li><li><a href="../polling.html">Polling</a></li><li><a href="../realtime.html">WebSocket &amp; server-sent events</a></li><li><a href="../db.html">Local database</a></li></ul></div><div class="side-group"><p class="side-title">Test, ship, operate</p><ul><li><a href="../testing.html">Testing your app</a></li><li><a href="../updates.html">Shipping an update</a></li><li><a href="../reviewing-generated-code.html">Reviewing generated code</a></li><li><a href="../web.html">Workers &amp; crash recovery</a></li><li><a href="../production.html">Operating in production</a></li><li><a href="../several-cores.html">One core or several</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="index.html">All recipes</a></li><li><a href="auth.html">Auth</a></li><li><a href="pagination.html">Pagination</a></li><li><a href="forms.html">Forms</a></li><li><a href="upload.html">File upload</a></li><li><a href="realtime.html">Real-time</a></li><li><a href="offline.html">Offline-first</a></li><li><a href="network-stack.html" aria-current="page">Your network stack</a></li></ul></div><div class="side-group"><p class="side-title">Adopting Undra</p><ul><li><a href="from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="from-uniffi.html">From UniFFI</a></li><li><a href="ios-15-16.html">iOS 15 and 16</a></li><li><a href="../sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../cli.html">The CLI</a></li><li><a href="../architecture.html">Architecture</a></li><li><a href="../errors.html">Error codes</a></li><li><a href="../../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../api-swift.html">Swift</a></li><li><a href="../api-kotlin.html">Kotlin</a></li><li><a href="../api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Cookbook</p>
+    <h1>Your network stack</h1>
+    <p class="lede">Your app already has one: a token it refreshes, interceptors, tracing, certificate pinning. Hand it to the core's network ports and every request the core makes goes through it, with nothing Undra-specific to configure.</p>
+<h2 id="the-problem">The problem<a class="anchor" href="#the-problem" aria-label="Link to this section">#</a></h2>
+<p>The core never makes a request; the platform does, through the <code>Http</code> port (and <code>WebSocket</code> and <code>Sse</code> where the core asks for them). The default adapters use the platform's own client. That is not <em>your</em> client: on Android <code>HttpURLConnection</code> is OkHttp underneath, but the platform's instance, so a request from the core carries no token, shows in no trace and is not pinned. The fix is not an adapter of your own (the contract is hundreds of lines: typed errors, a timeout that covers the body, cancellation that closes the socket, streams that stop the server when the core stops reading). It is passing your client to the adapter that already is that contract.</p>
+<h2 id="the-recipe">The recipe<a class="anchor" href="#the-recipe" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Android:</strong> add the optional <code>dev.undra:okhttp-adapters</code> module and call <code>AndroidPlatformDefaults.installWithOkHttp(core, context, client)</code> in place of <code>install</code>. <code>Http</code>, <code>WebSocket</code> and <code>Sse</code> go through your <code>OkHttpClient</code>: its interceptors, its <code>Authenticator</code> (a <code>401</code> is answered with a refreshed token and the request goes again), its event listeners, its <code>CertificatePinner</code>. One exception is OkHttp's own: a WebSocket's upgrade is seen by your application interceptors, not by your network interceptors or your event listener.</li><li><strong>iOS:</strong> pass your <code>URLSession</code> to <code>HttpAdapter</code>, <code>URLSessionWebSocketAdapter</code> and <code>URLSessionSseAdapter</code>. Its configuration, its delegate (server trust and the pinning built on it, authentication challenges) and its <code>URLProtocol</code> classes apply. Give event streams a session with the same delegate and a configuration that lets a stream stay quiet.</li><li><strong>Web:</strong> pass your <code>fetch</code> and <code>WebSocket</code> to <code>fetchHttp</code>, <code>fetchSse</code> and <code>browserWebSocket</code>. Whatever your wrapper does to a request, it does to the core's.</li><li><strong>React Native:</strong> nothing to pass. <code>reactNativeHttp()</code> is React Native's <code>fetch</code>, which is the app's networking module, so what the app configures there applies.</li></ul>
+<details class="reveal-code"><summary>Show the Swift, Kotlin and TypeScript</summary>
+<div data-tabs data-label="Platform">
+<div class="tab-panel" data-label="Swift">
+<!-- snippet:examples/cookbook/snippets/swiftui/Sources/Snippets/Snippets.swift#network-swift swift -->
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">/// The app's session delegate: pinning and authentication challenges are answered here, for every request the core makes.
+final class AppSessionDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge
+    ) async -&gt; (URLSession.AuthChallengeDisposition, URLCredential?) {
+        // Your pinning goes here: compare challenge.protectionSpace.serverTrust with the certificate you ship.
+        return (.performDefaultHandling, nil)
+    }
+}
+
+/// The ports that carry the core's traffic, over the app's own session. Event streams get a session of their own, with the
+/// same delegate and a configuration that lets a stream stay quiet.
+func appAdapters(configuration: URLSessionConfiguration, delegate: AppSessionDelegate) -&gt; Adapters {
+    configuration.httpAdditionalHeaders = [&quot;X-App-Version&quot;: &quot;1.4.2&quot;]   // on everything the core sends
+    let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+
+    let streaming = (configuration.copy() as? URLSessionConfiguration) ?? .default
+    streaming.timeoutIntervalForRequest = 24 * 60 * 60
+    streaming.httpMaximumConnectionsPerHost = 1_024
+    let streams = URLSession(configuration: streaming, delegate: delegate, delegateQueue: nil)
+
+    return Adapters.platformDefault
+        .replacing(HttpAdapter(session: session))
+        .replacing(URLSessionWebSocketAdapter(session: session))
+        .replacing(URLSessionSseAdapter(session: streams))
+}</code></pre></div>
+<!-- /snippet -->
+</div>
+<div class="tab-panel" data-label="Kotlin">
+<!-- snippet:runtimes/kotlin/undra-runtime/okhttp-adapters/src/test/kotlin/dev/undra/okhttp/NetworkStackRecipe.kt#network-kotlin kotlin -->
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">/** The app's one client: a token on every request, a refresh when the server says 401, and pinning. */
+fun appClient(tokens: TokenStore): OkHttpClient =
+    OkHttpClient.Builder()
+        .addInterceptor { chain -&gt;
+            val signed = chain.request().newBuilder().header(&quot;Authorization&quot;, &quot;Bearer ${tokens.access}&quot;).build()
+            chain.proceed(signed)
+        }
+        .authenticator { _, response -&gt;
+            // OkHttp asks on a 401. A request that is already a retry gives up: the refresh did not help.
+            if (response.priorResponse != null) return@authenticator null
+            val fresh = tokens.refresh() ?: return@authenticator null
+            response.request.newBuilder().header(&quot;Authorization&quot;, &quot;Bearer $fresh&quot;).build()
+        }
+        .certificatePinner(CertificatePinner.Builder().add(&quot;api.example.com&quot;, &quot;sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=&quot;).build())
+        .build()
+
+/** In `Application.onCreate`, in place of `AndroidPlatformDefaults.install(core, this)`: Http, WebSocket and Sse go through [client]. */
+fun installNetwork(core: UndraCore, context: Context, client: OkHttpClient) {
+    AndroidPlatformDefaults.installWithOkHttp(core, context, client)
+}</code></pre></div>
+<!-- /snippet -->
+</div>
+<div class="tab-panel" data-label="TypeScript">
+<!-- snippet:examples/cookbook/snippets/ts/snippets.tsx#network-ts tsx -->
+<div class="code"><div class="code-bar"><span><span class="lang">tsx</span></span></div><pre><code data-lang="tsx">// The app's fetch: a token on every request, a refresh when the server says 401. The core's requests go through it too.
+const appFetch: typeof fetch = async (input, init) =&gt; {
+  const send = () =&gt; {
+    const headers = new Headers(init?.headers);
+    headers.set(&quot;authorization&quot;, `Bearer ${session.accessToken}`);
+    return fetch(input, { ...init, headers });
+  };
+  const first = await send();
+  if (first.status !== 401) return first;
+  await session.refresh();
+  return send();
+};
+
+export const adapters = { ...browserAdapters(), http: fetchHttp({ fetch: appFetch }) };
+export const ports = {
+  [OptInPortIds.WebSocket.portId]: webSocketPort(browserWebSocket({ WebSocket: AppWebSocket })),
+  [OptInPortIds.Sse.portId]: ssePort(fetchSse({ fetch: appFetch })),
+};</code></pre></div>
+<!-- /snippet -->
+</div>
+</div>
+</details>
+<h2 id="what-goes-through">What goes through your stack, and what is yours<a class="anchor" href="#what-goes-through" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>Port</th><th>Kotlin on OkHttp</th><th>Swift on URLSession</th></tr></thead><tbody><tr><td><code>Http</code></td><td>the whole call, as the app's own requests go</td><td>the whole task</td></tr><tr><td><code>WebSocket</code></td><td>the upgrade request (OkHttp gives its listener no WebSocket events)</td><td>the upgrade: the connection is a task of your session</td></tr><tr><td><code>Sse</code></td><td>the request, on a client derived from yours with no read timeout and HTTP/1.1</td><td>the request, on the session you give the Sse adapter</td></tr></tbody></table></div>
+<p>What your client decides stays yours: redirects, retries, the timeouts when a request has none of its own, compression, caching, how many calls run at once (the core's requests wait their turn with yours). The core's contract holds on top: an error status is a response, a failure is a typed error, the request's own timeout bounds the whole exchange, cancelling the call closes the socket.</p>
+<h2 id="what-the-tests-prove">What the tests prove<a class="anchor" href="#what-the-tests-prove" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Kotlin:</strong> the Http, WebSocket and Sse contract suites that run on the default adapters run on OkHttp's too, on the JVM and on a device. An interceptor sees every request and changes a header, an <code>Authenticator</code> refreshes a token and the request, its body included, goes again, an event listener sees each call, and the recipe's client above is run against a local server.</li><li><strong>Swift:</strong> the WebSocket suite runs a second time on an app's session, and Http, Sse and WebSocket are shown to carry the session's configuration and to reach its delegate.</li><li><strong>TypeScript:</strong> a wrapped <code>fetch</code> sees every request, adds a header and answers a <code>401</code> with a refreshed token; an app's <code>WebSocket</code> constructor adds a token to the upgrade.</li></ul>
+<h2 id="limits">Limits<a class="anchor" href="#limits" aria-label="Link to this section">#</a></h2>
+<ul><li>OkHttp's WebSocket repairs malformed UTF-8 in a text frame (U+FFFD) where the default adapter fails the connection with close code 1007; keep <code>ClientWebSocketAdapter</code> for the port if you need the check.</li><li>The default OkHttp client follows redirects from <code>https</code> to <code>http</code>; the other adapters never do. <code>followSslRedirects(false)</code> gives the same rule.</li><li>The Kotlin lines are compiled and tested with the <code>okhttp-adapters</code> module (they need OkHttp, which the other modules never carry); the Swift and TypeScript lines are checked like the rest of the cookbook.</li></ul>
+<p>Source: <a href="https://github.com/shreypdev/undra/blob/main/runtimes/kotlin/undra-runtime/okhttp-adapters/README.md" rel="noopener"><code class="cw">okhttp-adapters/README.md</code></a> and <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-060-app-network-stack-in-ports.md" rel="noopener">ADR-060</a>. The ports: <a href="../ports.html#your-network-stack-inside">Your network stack inside</a>.</p>
+  
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/cookbook/network-stack.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="offline.html"><span>Previous</span><b>Offline-first</b></a>
+    <a class="next" href="from-kmp.html"><span>Next</span><b>Cookbook, from Kotlin Multiplatform</b></a>
+  </nav>
+  </main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#the-problem">The problem</a></li><li><a href="#the-recipe">The recipe</a></li><li><a href="#what-goes-through">What goes through your stack, and what is yours</a></li><li><a href="#what-the-tests-prove">What the tests prove</a></li><li><a href="#limits">Limits</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose, React and React Native.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../../docs/cli.html">The CLI</a></li>
+          <li><a href="../../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../../blog/">Blog</a></li>
+          <li><a href="../../roadmap/">Roadmap</a></li>
+          <li><a href="../../playground/">Playground</a></li>
+          <li><a href="../../feed.xml">RSS feed</a></li>
+          <li><a href="../../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../../assets/site.js" defer></script>
+</body>
+</html>

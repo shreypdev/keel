@@ -34,6 +34,20 @@ sources. To change one port, register another implementation afterwards: `core.r
 replaces what `install` registered. `install(core, context, http = AndroidHttpAdapter(connectTimeoutMs = ...))` changes
 the HTTP limits; `requireValidatedNetwork = true` makes the Connectivity adapter wait for Android's own reachability check.
 
+**Your own network stack: [`okhttp-adapters`](../okhttp-adapters/README.md).** `HttpURLConnection` on Android is OkHttp underneath, but it
+is the platform's instance, which the app's `OkHttpClient` (its interceptors, its `Authenticator` that refreshes a token, its
+tracing, its certificate pinner) cannot reach: requests through `AndroidHttpAdapter` carry none of it. An app that has a client of
+its own adds the optional `dev.undra:okhttp-adapters` module and makes one call in place of `install`:
+
+```kotlin
+AndroidPlatformDefaults.installWithOkHttp(core, this, appGraph.okHttpClient) // Http, WebSocket and Sse now go through your client
+```
+
+Every request the core makes then goes through that client (ADR-060), one it makes while the install runs included: the network ports
+are registered before `Kv` (a core replays its offline queue as soon as `Kv` answers), and `installWithOkHttp` passes its own to
+`installWithNetworkPorts` (`install` with other implementations of `Http`, `WebSocket` and `Sse`, behind `@UndraEmbeddingApi`), so the
+platform's are never registered. This module stays free of OkHttp: it would be a second HTTP stack for an app that has none.
+
 Install before the first activity starts: in `Application.onCreate`, or in the first activity's `onCreate` when the core is
 loaded there (the playground and the `undra init` template do, so that a debug build can choose between the in-process core
 and `undra dev`). The Lifecycle adapter counts started and resumed activities from the moment it is installed; installed
@@ -98,8 +112,8 @@ the runtime logs it at error level, naming the port method, passes it to `LoadOp
 **Why no `androidx` dependency.** `androidx.security:security-crypto` (`EncryptedFile`) is deprecated and pulls in a large
 cryptography library for what is about eighty lines of `javax.crypto` and `AndroidKeyStore` here. `ProcessLifecycleOwner`
 (`lifecycle-process`) would add AndroidX to every app for a dozen lines of activity counting (ADR-046's default Lifecycle reporting is
-this adapter). OkHttp would be a second
-HTTP stack next to the platform's; `HttpURLConnection` on Android *is* OkHttp.
+this adapter). OkHttp would be a second HTTP stack next to the platform's for an app that has none; the app that has one uses the
+optional [`okhttp-adapters`](../okhttp-adapters/README.md) module instead (ADR-060), which is why this one has no dependency on it.
 
 ## Background work (ADR-046)
 
@@ -137,7 +151,8 @@ failure is a typed `Network` error naming the policy. The playground allows only
 * **JVM unit tests** (`./gradlew :android-adapters:test`): the pure logic (URL and header rules, error mapping, redirect rules,
   secret sealing, network classification, the lifecycle state machine, log levels), plus the Http, Kv, Fs and SecureStore
   adapters against a local server and temporary directories (`src/test`, `src/sharedTest`), and `NoKeystoreTest` (the real
-  SecureStore where there is no Keystore: `Unavailable`).
+  SecureStore where there is no Keystore: `Unavailable`). The Http cases are `HttpAdapterContract` (`../adapter-contracts`), written
+  once for every Http adapter of the Kotlin runtime: `AndroidHttpAdapterTest` runs it here, and `:okhttp-adapters` runs it on OkHttp.
 * **`StorageFailureTests`** (`src/sharedTest`, so on the JVM and on the device): ADR-049's failure injection. The real Kv,
   SecureStore and Fs adapters run over `FaultyFileSystem` (`../test-support`, shared with `:runtime`'s tests), a file system
   that fails on demand the way the platform does, and over key sources that throw what the Keystore throws; every port

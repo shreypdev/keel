@@ -8,7 +8,7 @@
 //! | `Cargo.toml` of the core (and any crate of the project) | `undra = { git = "...", tag = "v1.0.0" }`, or a registry version | `tag = "v1.2.3"` / `"1.2.3"` |
 //! | `undra.toml` | `[undra] version = "1.0"` | `"1.2"` |
 //! | `web/package.json` (any `package.json`) | `"@undra/runtime": "^1.0.0"`, `"@undra/react-native"` | `"^1.2.0"` |
-//! | `android/**/*.gradle(.kts)` | `dev.undra:runtime:1.0.0`, `dev.undra:android-adapters:1.0.0`, `dev.undra:android-work:1.0.0` | `1.2.0` |
+//! | `android/**/*.gradle(.kts)` | `dev.undra:runtime:1.0.0`, `dev.undra:android-adapters:1.0.0`, `dev.undra:android-work:1.0.0`, `dev.undra:okhttp-adapters:1.0.0` | `1.2.0` |
 //! | `ios/**/project.pbxproj` | the `undra-swift` package's `minimumVersion = 1.0.0;` | `1.2.0` |
 //! | `.github/workflows/*.yml` | `UNDRA_VERSION: "1.0.0"` | `"1.2.3"` |
 //!
@@ -826,8 +826,10 @@ fn gradle_comment_mask(line: &str, in_block: &mut bool) -> Vec<bool> {
     mask
 }
 
-/// Moves `dev.undra:runtime:<v>`, `dev.undra:android-adapters:<v>` and the optional WorkManager module
-/// `dev.undra:android-work:<v>` (ADR-046) to `<major>.<minor>.0`.
+/// Moves `dev.undra:runtime:<v>`, `dev.undra:android-adapters:<v>` and the optional modules
+/// `dev.undra:android-work:<v>` (WorkManager, ADR-046) and `dev.undra:okhttp-adapters:<v>` (the app's
+/// `OkHttpClient` behind the network ports, ADR-060, built on the runtime's embedding API, so it must move
+/// with the runtime) to `<major>.<minor>.0`.
 ///
 /// Only a version written out is moved; a variable (`$undraVersion`), a dynamic version (`+`) and
 /// anything in a comment are left as they are (a variable is reported: its definition is where the
@@ -862,8 +864,10 @@ pub fn edit_gradle(text: &str, target: &Target) -> FileResult {
             let version = &after[..end];
             let version_start = start + "dev.undra:".len() + colon + 1;
             search_from = version_start + end;
-            if !matches!(module, "runtime" | "android-adapters" | "android-work")
-                || version.is_empty()
+            if !matches!(
+                module,
+                "runtime" | "android-adapters" | "android-work" | "okhttp-adapters"
+            ) || version.is_empty()
             {
                 continue;
             }
@@ -1464,6 +1468,16 @@ mod tests {
         let r = edit_gradle(on, &target("0.2.1"));
         assert_eq!(r.after, on.replace("0.1.0", "0.2.0"));
         assert_eq!(r.pins[0].what, "dev.undra:android-work");
+    }
+
+    #[test]
+    fn gradle_moves_the_optional_okhttp_module_with_the_runtime() {
+        // ADR-060: okhttp-adapters is compiled against the runtime's embedding API (SseStreamReader,
+        // ReadAheadSource), which may change between releases: left behind, it would meet a newer runtime.
+        let text = "dependencies {\n    implementation(\"dev.undra:runtime:0.1.0\")\n    implementation(\"dev.undra:okhttp-adapters:0.1.0\")\n}\n";
+        let r = edit_gradle(text, &target("0.2.1"));
+        assert_eq!(r.after, text.replace("0.1.0", "0.2.0"));
+        assert_eq!(r.pins[1].what, "dev.undra:okhttp-adapters");
     }
 
     #[test]

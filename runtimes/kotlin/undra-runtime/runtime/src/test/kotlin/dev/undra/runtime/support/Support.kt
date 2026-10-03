@@ -1,6 +1,5 @@
 package dev.undra.runtime.support
 
-import dev.undra.runtime.testing.fail
 import dev.undra.runtime.wire.Handle
 import dev.undra.runtime.wire.Payloads
 import java.io.File
@@ -17,15 +16,6 @@ import java.util.logging.Logger
 const val HASH: ULong = 0x691eee0733e4a44fuL
 
 val NO_BYTES = ByteArray(0)
-
-/** Polls [condition] every 5 ms until it holds; fails with [message] after [timeoutMs]. */
-fun eventually(message: String = "condition", timeoutMs: Long = 10_000, condition: () -> Boolean) {
-    val deadline = System.nanoTime() + timeoutMs * 1_000_000
-    while (!condition()) {
-        if (System.nanoTime() > deadline) fail("timed out after ${timeoutMs}ms waiting for: $message")
-        Thread.sleep(5)
-    }
-}
 
 /** A `ChangeSet` payload with one entry per argument. */
 fun changeSet(txn: ULong, vararg entries: Payloads.ChangeEntry): ByteArray = Payloads.ChangeSet(txn, entries.toList()).toByteArray()

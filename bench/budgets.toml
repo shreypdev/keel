@@ -436,6 +436,15 @@ measured_ns = 260625.0
 blueprint_ns = 100000000
 blueprint = "Web crash recovery from snapshot: <= 100 ms for a 1 MB state (restore only here)"
 
+# The part of a cold start that is the schema, not the restore: `Schema::hash` of what this binary
+# registered (about 40 KB of canonical JSON), which `Runtime::new` computes (RESULTS.md, Finding 8).
+# Most of it is `fnv1a64` over those bytes. The canonical form through a clone of the schema and
+# `serde`, as it was before the `schema_json` writer, measures 88 us: under this budget, over the
+# baseline gates (1.5x).
+[bench."snapshot/cold_start_schema_hash"]
+budget_ns = 240000
+measured_ns = 47869.5
+
 [bench."snapshot/cold_start_restore_100kb"]
 budget_ns = 340000
 measured_ns = 66459.0

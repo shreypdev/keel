@@ -1,5 +1,6 @@
 package dev.undra.runtime.adapters
 
+import dev.undra.runtime.UndraEmbeddingApi
 import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
@@ -192,6 +193,15 @@ private fun closeQuietly(stream: InputStream) {
     }
 }
 
+/** Closes [stream] after its connection was aborted, when whatever the platform throws for that no longer matters. */
+private fun releaseQuietly(stream: InputStream) {
+    try {
+        stream.close()
+    } catch (e: Exception) {
+        // already released, or the socket under it is gone: either way nothing is held
+    }
+}
+
 /** Daemon threads for the blocking parts of opening a stream with `HttpURLConnection`. */
 private val openThreads: ExecutorService = Executors.newCachedThreadPool { task ->
     Thread(task, "undra-sse-open").also { it.isDaemon = true }
@@ -225,11 +235,17 @@ private suspend fun <T> CompletableFuture<T>.awaitCancellable(): T =
  * An [SseStream] over a response body: a reader thread decodes the bytes as UTF-8, parses them with [SseParser] and hands
  * the events to [events]; it reads the next chunk only while fewer events wait than the binding's buffer has room for.
  *
+ * It is what the default adapters return and what an adapter over any other HTTP client returns too (the OkHttp one does, ADR-060):
+ * check the answer, then `return SseStreamReader(body, lastEventId) { cancelTheCall() }`. It is part of the embedding API: it may
+ * change between releases.
+ *
  * @param body the response body.
  * @param lastEventId the `Last-Event-ID` the request sent: the parser's last event id to begin with.
- * @param abort releases the connection; it must make a read that is blocked fail (or end).
+ * @param abort releases the connection; it must make a read that is blocked fail (or end). It is called from the reader thread when
+ *   the body ended or failed, and from [close].
  */
-internal class SseStreamReader(
+@UndraEmbeddingApi
+public class SseStreamReader(
     private val body: InputStream,
     private val lastEventId: String?,
     private val abort: () -> Unit,
@@ -273,6 +289,16 @@ internal class SseStreamReader(
     }
 
     private fun readLoop() {
+        try {
+            readAll()
+        } finally {
+            // The reader is the one thread that reads the body, so it is the one that lets it go, however the stream ended: a body
+            // left open keeps its connection (an OkHttp call holds it in its pool) even after [abort] closed the socket.
+            releaseQuietly(body)
+        }
+    }
+
+    private fun readAll() {
         val parser = SseParser(lastEventId)
         val decoder = StandardCharsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
@@ -335,7 +361,12 @@ internal class SseStreamReader(
         stopping = true
         gate.withLock { roomChanged.signalAll() }
         inbox.close()
-        withContext(Dispatchers.IO) { abort() }
+        // A stream nobody started reading has no reader to let its body go: this does, and no reader starts after it.
+        val unread = started.compareAndSet(false, true)
+        withContext(Dispatchers.IO) {
+            abort()
+            if (unread) releaseQuietly(body)
+        }
     }
 
     override fun setRoom(room: Int) {

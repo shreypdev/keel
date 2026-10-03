@@ -232,7 +232,11 @@ public class AndroidHttpAdapter internal constructor(
                     throw HttpError.InvalidUrl("header '${header.name}' is not allowed: ${e.message}")
                 }
             }
-            val payload = body ?: if (HttpRules.requiresBody(method)) NO_BODY else null
+            // A GET or HEAD sends no body (checkBody refused a non-empty one): `doOutput` would turn the request into a POST.
+            val payload = when (method) {
+                HttpMethod.GET, HttpMethod.HEAD -> null
+                else -> body ?: if (HttpRules.requiresBody(method)) NO_BODY else null
+            }
             if (payload != null) {
                 opened.doOutput = true
                 if (payload.size > STREAMING_THRESHOLD) opened.setFixedLengthStreamingMode(payload.size)

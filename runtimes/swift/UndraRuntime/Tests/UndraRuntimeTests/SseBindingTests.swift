@@ -285,6 +285,83 @@ final class SseParserTests: XCTestCase {
         XCTAssertEqual(try parser.push(Array("data: cut".utf8)), [])
     }
 
+    /// The standard splits a line at the code point U+003A, drops one U+0020 after it and refuses an id with a U+0000 in it, as
+    /// the Kotlin and TypeScript parsers do (on UTF-16 code units). A combining mark after the colon, the space or the NUL belongs
+    /// to the value: Swift's `Character`s would join it to them (`":\u{301}"` is one grapheme, not `":"`).
+    func testAColonSpaceOrNulBeforeACombiningMarkIsStillOne() throws {
+        var parser = SseParser()
+        XCTAssertEqual(try parser.push(Array("data:\u{301}x\n\n".utf8)), [SseEvent(data: "\u{301}x")])
+        XCTAssertEqual(try parser.push(Array("event: \u{301}\ndata: \u{301}y\n\n".utf8)), [SseEvent(event: "\u{301}", data: "\u{301}y")])
+        XCTAssertEqual(try parser.push(Array("id:\u{301}\ndata: z\n\n".utf8)), [SseEvent(id: "\u{301}", data: "z")])
+        XCTAssertEqual(try parser.push(Array("id: 7\u{0}\u{301}\ndata: w\n\n".utf8)), [SseEvent(id: "\u{301}", data: "w")], "an id with a NUL is ignored")
+        XCTAssertEqual(try parser.push(Array(":\u{301} a comment\ndata: v\n\n".utf8)), [SseEvent(id: "\u{301}", data: "v")])
+    }
+
+    /// Bytes in contiguous storage (an array, a slice, a chunk of `Data`) are parsed a run at a time; any other sequence a byte at
+    /// a time. Seeded bodies of awkward pieces (every line end, a byte order mark, characters of two to four bytes, combining
+    /// marks, NUL, bytes that are not UTF-8), cut into seeded chunks, give the same events, the same error and the same last id
+    /// both ways.
+    func testRunsAndSingleBytesParseTheSame() throws {
+        struct OneByteAtATime: Sequence {
+            let bytes: ArraySlice<UInt8>
+            func makeIterator() -> IndexingIterator<ArraySlice<UInt8>> {
+                return bytes.makeIterator()
+            }
+        }
+        let pieces: [[UInt8]] = [
+            "data: ", "data:", "id: ", "id:", "event: ", "retry: ", "1500", "x", " ", ":", ": comment", "foo", "\u{E9}", "\u{65E5}\u{672C}",
+            "\u{1F600}", "\u{301}", "\u{0}", "\n", "\r", "\r\n", "\n\n", "\r\r", "\r\n\r\n",
+        ].map { Array($0.utf8) } + [[0xFF], [0xE6, 0x97], [0xEF, 0xBB, 0xBF]]
+        var seed: UInt64 = 0x00C0_FFEE_2026_1002
+        func next(_ bound: Int) -> Int {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return Int((seed >> 33) % UInt64(bound + 1))
+        }
+        var errors = 0
+        for round in 0 ..< 400 {
+            var body: [UInt8] = next(3) == 0 ? [0xEF, 0xBB, 0xBF] : []
+            for _ in 0 ..< 60 {
+                // Bytes that are not UTF-8 are rare, so that most bodies parse to their end.
+                var piece = pieces[next(pieces.count - 1)]
+                while piece.first.map({ $0 == 0xFF || $0 == 0xE6 }) == true && next(20) != 0 {
+                    piece = pieces[next(pieces.count - 4)]
+                }
+                body += piece
+            }
+            var runs = SseParser(lastEventId: "start")
+            var single = SseParser(lastEventId: "start")
+            var byRuns: [SseEvent] = []
+            var bySingle: [SseEvent] = []
+            var runsError: SseError?
+            var singleError: SseError?
+            var start = 0
+            while start < body.count {
+                let end = min(body.count, start + 1 + next(40))
+                if runsError == nil {
+                    do throws(SseError) {
+                        try runs.push(body[start ..< end], into: &byRuns)
+                    } catch {
+                        runsError = error
+                    }
+                }
+                if singleError == nil {
+                    do throws(SseError) {
+                        try single.push(OneByteAtATime(bytes: body[start ..< end]), into: &bySingle)
+                    } catch {
+                        singleError = error
+                    }
+                }
+                start = end
+            }
+            XCTAssertEqual(byRuns, bySingle, "round \(round)")
+            XCTAssertEqual(runsError, singleError, "round \(round)")
+            XCTAssertEqual(runs.lastId, single.lastId, "round \(round)")
+            errors += runsError == nil ? 0 : 1
+        }
+        XCTAssertGreaterThan(errors, 0, "some bodies were not UTF-8")
+        XCTAssertLessThan(errors, 400, "some bodies parsed to their end")
+    }
+
     func testAByteOrderMarkAtTheStartIsSkippedAndInvalidUtf8IsAProtocolError() throws {
         var parser = SseParser()
         XCTAssertEqual(try parser.push([0xEF, 0xBB]), [])
