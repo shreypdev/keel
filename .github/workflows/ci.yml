@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "wt/**"]
+    branches: [main]
   pull_request:
 
 # A piece's branch `wt/<slug>` is built on every push: a piece lands on main only when CI, Bench, Two cores (and Site, when the
@@ -11,8 +11,8 @@ on:
 # run in a group shared by main's commits is replaced by the next one, which drops a result that matters;
 # .10x/reviews/2026-10-01-bench-followups-review.md, H2).
 concurrency:
-  group: ci-${{ startsWith(github.ref, 'refs/heads/wt/') && github.ref || github.run_id }}
-  cancel-in-progress: ${{ startsWith(github.ref, 'refs/heads/wt/') }}
+  group: ci-${{ github.event_name == 'pull_request' && github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The Rust version is pinned, not "stable": the compile-fail goldens (trybuild) quote rustc's
 # wording and the bench budgets are baselined on one compiler, so a new stable release must land
@@ -626,3 +626,20 @@ jobs:
           export UNDRA_TS_DIST="$GITHUB_WORKSPACE/runtimes/ts/@undra/runtime/dist/index.js"
           npm test
           npm run test:contract
+
+  # The one check branch protection requires: green only when every job above succeeded (a failed, cancelled or
+  # skipped job fails it). `if: always()` so it reports after failures too; without it a failed job leaves the
+  # check "expected" forever and a pull request can never merge. Name and job id are the same in every workflow.
+  all-green:
+    name: All green
+    if: always()
+    needs: [rust, leaf-features, ts, kotlin, wasm-ffi, macos, ios-floor, android, ffi-miri, ffi-asan, contracts, contracts-swift, playground-web, react-native]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' >/dev/null
