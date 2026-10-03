@@ -6,7 +6,7 @@
 #                                 from the main checkout: land wt/<slug> on main. Refuses unless the branch contains main and
 #                                 is pushed. By default it goes through a pull request: opens one if none is open, waits for
 #                                 its checks, requires the "All green" check of CI, Bench, Two cores and Site on the exact head,
-#                                 and merges with a merge commit (main is protected; GitHub refuses anything else). Then it
+#                                 and merges the way main's ruleset allows (squash; main is protected). Then it
 #                                 verifies that origin/main contains the head and leaves nothing behind: the remote branch, the
 #                                 local branch, the worktree with its build output, the ci-local.sh clone, and the piece's helper
 #                                 branches (proto/<slug>, wt/<slug>-*, and each --also <branch>) when they are merged; anything
@@ -33,6 +33,8 @@ die() { echo "wt.sh: $*" >&2; exit 2; }
 need_slug() { [ -n "${2:-}" ] || die "usage: wt.sh $1 <slug>"; }
 
 REMOTE="${UNDRA_WT_REMOTE:-origin}"
+MERGE_METHOD="${UNDRA_WT_MERGE_METHOD:-squash}"
+landed=""
 CI_LOCAL_BASE="${UNDRA_CI_LOCAL_DIR:-${TMPDIR:-/tmp}/undra-ci-local}"
 
 # The path of the worktree that has branch $1 checked out, if any.
@@ -65,6 +67,13 @@ is_new_empty_piece() {
 
 # Delete branch $1 (its worktree with the build output, its remote branch, the local branch, the ci-local clone) only when
 # every commit of it is in origin/main. Prints what it removed and what it kept, and why. Returns 0 when nothing is left.
+# Did branch $1, at tip $2, land through a merged pull request? A squash (or a rebase) puts a new commit on main, so
+# ancestry cannot say; GitHub can: a merged pull request from this branch whose head was exactly this tip.
+landed_by_pr() {
+  command -v gh >/dev/null || return 1
+  [ "$(gh pr list --head "$1" --base main --state merged --json headRefOid --jq '.[0].headRefOid // empty' 2>/dev/null)" = "$2" ]
+}
+
 sweep_branch() {
   local b="$1" tip wt left=0 ahead_note="" slug_dir
   if git show-ref --verify --quiet "refs/heads/$b"; then
@@ -75,7 +84,7 @@ sweep_branch() {
   else
     return 0
   fi
-  if ! git merge-base --is-ancestor "$tip" "refs/remotes/$REMOTE/main" 2>/dev/null; then
+  if ! git merge-base --is-ancestor "$tip" "refs/remotes/$REMOTE/main" 2>/dev/null && ! landed_by_pr "$b" "$tip"; then
     if git merge-base --is-ancestor "$tip" main 2>/dev/null; then
       echo "  kept    $b: merged into the local main only; $REMOTE/main does not contain it yet (push main first)"
     else
@@ -197,6 +206,7 @@ pr_number() { gh pr list --head "wt/$1" --base main --state open --json number -
 # protection on main makes GitHub refuse anything else; this script only says what is missing and how to get it.
 pr_land() {
   local slug="$1" head="$2" num remote_head title body checks
+  landed=""
   command -v gh >/dev/null || die "gh is needed to land wt/$slug through a pull request (or --ff on a repository without branch protection)"
   remote_reachable || die "$REMOTE is not reachable"
   remote_head="$(git ls-remote "$REMOTE" "refs/heads/wt/$slug" | cut -f1)"
@@ -231,9 +241,10 @@ pr_land() {
   [ "$(gh pr view "$num" --json headRefOid --jq .headRefOid)" = "$head" ] \
     || die "pull request #$num moved past ${head:0:12} while the checks ran: run merge again"
   # No --delete-branch: gh would also delete the local branch and its worktree, and the sweep below does that
-  # uniformly (remote, local, worktree, ci-local clone) only after main is verified to contain the head.
-  gh pr merge "$num" --merge \
-    || die "GitHub refused to merge #$num (branch protection: is every required check green?); nothing was deleted"
+  # uniformly (remote, local, worktree, ci-local clone) only after main is verified to contain what landed.
+  # The method is the one main's ruleset allows: squash (UNDRA_WT_MERGE_METHOD=merge or rebase for another repository).
+  gh pr merge "$num" "--$MERGE_METHOD" \
+    || die "GitHub refused to merge #$num (the ruleset: is every required check green, and is $MERGE_METHOD allowed?); nothing was deleted"
   # With a merge queue on main, `gh pr merge` only enqueues: the queue builds the merge result, runs the workflows on
   # it (`merge_group`), and merges when they are green. Wait for the merge itself, and say so if the queue dropped it.
   local waited=0
@@ -244,8 +255,15 @@ pr_land() {
     sleep 10; waited=$((waited + 10))
     [ "$waited" -le 7200 ] || die "pull request #$num was not merged within two hours: gh pr view $num --web"
   done
-  echo "wt.sh: merged pull request #$num (a merge commit of ${head:0:12})"
+  landed="$(gh pr view "$num" --json mergeCommit --jq '.mergeCommit.oid // empty')"
+  [ -n "$landed" ] || die "pull request #$num is merged but GitHub names no commit for it: gh pr view $num --web"
+  echo "wt.sh: merged pull request #$num ($MERGE_METHOD: ${head:0:12} landed as ${landed:0:12})"
   git pull -q --ff-only "$REMOTE" main || die "main is merged on $REMOTE but the local main did not fast-forward: fix the local checkout, then run scripts/wt.sh clean"
+  # A squash is a new commit: what proves the landing is its tree. When nothing else landed in between, main's tree is
+  # the tested head's tree (the head contained main, or merging main into it changed nothing).
+  if [ "$(git rev-parse main)" = "$landed" ] && [ "$(git rev-parse 'main^{tree}')" != "$(git rev-parse "$head^{tree}")" ]; then
+    die "main's tree after #$num is not the tree of ${head:0:12} that CI tested: nothing was deleted; compare \`git diff $head main\`"
+  fi
 }
 
 case "$cmd" in
@@ -313,12 +331,13 @@ case "$cmd" in
       git push -q "$REMOTE" main \
         || die "main is merged locally but the push to $REMOTE failed; nothing was deleted. Fix the push, then run scripts/wt.sh clean"
     fi
-    # (a) verify: the head is in main, and the pushed main contains it (by sha: the branch ref may already be gone).
-    git merge-base --is-ancestor "$head" main || die "${head:0:12} is not an ancestor of main after the merge: nothing was deleted"
+    # (a) verify: what landed (the head itself, or the commit GitHub made of it) is in main and in the pushed main.
+    [ -n "${landed:-}" ] || landed="$head"
+    git merge-base --is-ancestor "$landed" main || die "${landed:0:12} is not an ancestor of main after the merge: nothing was deleted"
     fetch_remote_main
-    git merge-base --is-ancestor "$head" "refs/remotes/$REMOTE/main" \
-      || die "$REMOTE/main does not contain ${head:0:12} after the push: nothing was deleted"
-    echo "wt.sh: verified: wt/$slug (${head:0:12}) is in main and in $REMOTE/main"
+    git merge-base --is-ancestor "$landed" "refs/remotes/$REMOTE/main" \
+      || die "$REMOTE/main does not contain ${landed:0:12} after the merge: nothing was deleted"
+    echo "wt.sh: verified: wt/$slug (${head:0:12}) is in main and in $REMOTE/main as ${landed:0:12}"
     # (b) the piece itself, (c) its helper branches, merged ones only.
     echo "wt.sh: cleaning up:"
     kept=0

@@ -92,13 +92,14 @@ cause (not the test) and pushes again.
 The order is: the review is done, the branch contains `main` (`git merge main` in the worktree), the branch is
 pushed, and `scripts/wt.sh merge <slug>` from the primary checkout does the rest: opens the pull request if none is
 open (`scripts/wt.sh pr <slug>` opens a draft early, so CI runs from the first push), marks it ready, waits for the
-checks, requires the four "All green" on the head (`scripts/wt-ci-check.sh pr-verdict`), merges with a merge commit
-(the tree that lands is the tree CI tested), verifies that `origin/main` contains the head, and cleans up (section
-5). `main` uses GitHub's merge queue, not "require branches to be up to date": `gh pr merge` enqueues, the queue
-builds the merge result, runs the same workflows on it (`merge_group`), and merges when they are green, so the
-tree that lands is always a tested tree and a piece never has to re-run CI only because another landed first.
-The script's own check is the same idea: the branch contains `main`, or merging `main` into it changes nothing
-(a piece stacked on the one landing before it: `git merge origin/wt/<that>` before the final push). State commits (`.10x/status.md`,
+checks, requires the four "All green" on the head (`scripts/wt-ci-check.sh pr-verdict`), squash-merges (the tree
+that lands is the tree CI tested), verifies that `origin/main` contains the commit GitHub made, and cleans up
+(section 5). `main`'s ruleset allows squash merges only and does not ask for "branches up to date", so the script keeps the
+rule itself: the branch contains `main`, or merging `main` into it changes nothing (a piece stacked on the one
+landing before it: `git merge origin/wt/<that>` before the final push, and build the whole stack before pushing —
+two clean merges can still fail to compile together). A squash is a new commit, so what is verified after the
+merge is the tree: `main`'s tree is the tested head's tree. The workflows also run on `merge_group`, for the day a
+merge queue is turned on. State commits (`.10x/status.md`,
 `.10x/handoff.md`) ride in the piece's pull request, pushed before its last run, or in a small pull request of
 their own. `--ff` is the fast-forward path for a repository without branch protection and for the scratch
 repositories of the tests; `--no-ci` goes with it only.
