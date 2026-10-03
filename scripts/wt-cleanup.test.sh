@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# `scripts/wt.sh merge` and `clean` end to end, against scratch repositories (a bare origin, a main checkout, worktrees):
+# `scripts/wt.sh merge --ff` and `clean` end to end (the pull-request path needs GitHub; its verdict is unit-tested in wt-ci-check.test.sh), against scratch repositories (a bare origin, a main checkout, worktrees):
 # after a merge nothing of the piece is left, and nothing that is not merged is ever deleted. docs/AGENT_WORKFLOW.md, section 5.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,7 +67,7 @@ git -C "$MAINDIR" branch spike/unmerged wt/alpha
 git -C "$MAINDIR" worktree add -q "$W/.work/spike-u" spike/unmerged
 echo u > "$W/.work/spike-u/u.txt"; git -C "$W/.work/spike-u" add u.txt; git -C "$W/.work/spike-u" commit -qm "spike: not merged"
 mkdir -p "$UNDRA_CI_LOCAL_DIR/wt-alpha"; echo clone > "$UNDRA_CI_LOCAL_DIR/wt-alpha/marker"
-out="$(wt merge alpha --no-ci --also spike/merged --also spike/unmerged 2>&1)"; rc=$?
+out="$(wt merge alpha --ff --no-ci --also spike/merged --also spike/unmerged 2>&1)"; rc=$?
 [ "$rc" = 0 ] && ok "merge succeeds" || { bad "merge succeeds (exit $rc)"; echo "$out" | sed 's/^/    /'; }
 check "main is fast-forwarded to the piece" test -f "$MAINDIR/alpha.txt"
 check "the pushed main is the merged main" same_main
@@ -89,7 +89,7 @@ check "the output says something was kept" has "$out" "something above was kept"
 # ---- 2. --no-push deletes nothing; clean refuses a branch main's remote lacks, then removes it once main is pushed -----
 world two
 piece beta
-out="$(wt merge beta --no-ci --no-push 2>&1)"; rc=$?
+out="$(wt merge beta --ff --no-ci --no-push 2>&1)"; rc=$?
 [ "$rc" = 0 ] && ok "--no-push merges" || { bad "--no-push merges (exit $rc)"; echo "$out" | sed 's/^/    /'; }
 check "--no-push: main has the piece" test -f "$MAINDIR/beta.txt"
 check "--no-push: nothing is deleted (branch, remote branch, worktree)" bash -c "git -C '$MAINDIR' show-ref --verify --quiet refs/heads/wt/beta && git -C '$W/origin.git' show-ref --verify --quiet refs/heads/wt/beta && test -d '$W/.work/beta'"
@@ -106,7 +106,7 @@ world three
 piece gamma
 printf '#!/bin/sh\nwhile read old new ref; do [ "$ref" = refs/heads/main ] && exit 1; done\nexit 0\n' > "$W/origin.git/hooks/pre-receive"
 chmod +x "$W/origin.git/hooks/pre-receive"
-out="$(wt merge gamma --no-ci 2>&1)"; rc=$?
+out="$(wt merge gamma --ff --no-ci 2>&1)"; rc=$?
 [ "$rc" != 0 ] && ok "a rejected push fails the merge" || bad "a rejected push fails the merge"
 check "...and says nothing was deleted" has "$out" "nothing was deleted"
 check "...and the branch, the remote branch and the worktree are still there" bash -c "git -C '$MAINDIR' show-ref --verify --quiet refs/heads/wt/gamma && git -C '$W/origin.git' show-ref --verify --quiet refs/heads/wt/gamma && test -d '$W/.work/gamma'"
