@@ -288,6 +288,24 @@ final class SseSessionDelegateTests: XCTestCase {
         XCTAssertEqual(delegate.seen.first, "session \(NSURLAuthenticationMethodServerTrust)")
     }
 
+    /// A background session takes no task delegate (setting one raises an Objective-C exception, "Task delegate is not supported
+    /// on background session task", which no Swift code can catch: the app would abort). The adapter refuses it at `open`, typed,
+    /// before any task exists. Needs no server.
+    func testABackgroundSessionIsRefusedAtOpenInsteadOfAborting() async throws {
+        let configuration = URLSessionConfiguration.background(withIdentifier: "dev.undra.tests.sse.\(UUID().uuidString)")
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let adapter = URLSessionSseAdapter(session: session)
+        let result = await capture { () async throws(SseError) -> Bool in
+            _ = try await adapter.open(url: "http://127.0.0.1:9/sse", headers: [], lastEventId: nil)
+            return true
+        }
+        guard case .failure(.refused(status: nil, message: let message)) = result else {
+            return XCTFail("a background session was not refused: \(result)")
+        }
+        XCTAssertTrue(message.contains("background"), message)
+    }
+
     /// A delegate that answers every challenge at the task level gets the stream's server trust and its HTTP authentication.
     func testATaskLevelDelegateAnswersTheStreamsTrustAndAuthentication() async throws {
         let server = try sharedServer()

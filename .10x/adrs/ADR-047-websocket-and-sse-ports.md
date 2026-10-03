@@ -210,7 +210,10 @@ what it should be, and the code confirmed it: `URLSessionSseStream` pulled `URLS
   still be forwarded", `NSURLSession.h`). Over TLS (`SseSessionDelegateTests`): a session-level pinning delegate decides the stream's
   server trust (a pin that does not match refuses it), a task-level one gets the trust and HTTP Basic challenges, both get the metrics.
   This is better than before: `bytes(for:)` never asked a session-level `urlSession(_:didReceive:completionHandler:)`. The trade-off is
-  that the parse runs on the session's delegate queue (main, if the app's session uses `.main`; documented on the type). *Counted
+  that the parse runs on the session's delegate queue (main, if the app's session uses `.main`; documented on the type). *A background
+  session* takes no task delegate (setting one raises "Task delegate is not supported on background session task", an `NSException` that
+  aborted the app); `open` now refuses it, `Refused(status: nil)`, before a task exists. `bytes(for:)` had streamed on one in the
+  foreground, so this is a behavior change for that configuration, chosen over keeping a second reader for it. *Counted
   suspends.* `URLSessionTask` counts suspends, and a `resume` of a running task is not a no-op (it cancels the next `suspend`), so the
   stream calls them strictly in turn (a seeded test). *Cancellation.* A cancelled pull ends the stream with `Network("cancelled")` and
   cancels the request, as an `AsyncBytes` read did (the first version left it waiting). *The parser* now splits lines on bytes, not

@@ -29,7 +29,8 @@ import Foundation
 /// The chunks are parsed on the `session`'s delegate queue, which must be serial, as Apple asks of
 /// any delegate queue and as URLSession makes the queue it creates itself (the default session's,
 /// and any session made without one). Give the adapter a session whose queue is not the main one,
-/// or the main thread parses the event streams.
+/// or the main thread parses the event streams. A background session takes no task delegate, so
+/// `open` refuses it (``SseError/refused(status:message:)`` with no status).
 public final class URLSessionSseAdapter: SseAdapter, UndraAdapter, @unchecked Sendable {
     private let session: URLSession
     private let bindings = BindingSet<SseBinding>()
@@ -62,6 +63,15 @@ public final class URLSessionSseAdapter: SseAdapter, UndraAdapter, @unchecked Se
               scheme == "http" || scheme == "https", target.host != nil
         else {
             throw SseError.refused(status: nil, message: "invalid URL: \(url)")
+        }
+        // A background session (the only kind with an identifier) takes no task delegate: setting one raises an Objective-C
+        // exception that would abort the app, so the stream is refused before a task exists.
+        guard session.configuration.identifier == nil else {
+            throw SseError.refused(
+                status: nil,
+                message: "a background URLSession cannot carry an event stream (it takes no task delegate): "
+                    + "give URLSessionSseAdapter a default or ephemeral session"
+            )
         }
         var request = URLRequest(url: target)
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")

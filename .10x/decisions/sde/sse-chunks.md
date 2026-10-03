@@ -122,6 +122,7 @@ step on large events. The user's 2.4x is inside the range.
 * The session's delegate: challenges (server trust at the session or the task level, HTTP authentication) and metrics reach it, over
   TLS (`SseSessionDelegateTests`); `bytes(for:)` had never asked a session-level challenge handler. The parse runs on the session's
   delegate queue (documented on the type).
+* A background session aborted the app at `task.delegate = self` (an `NSException`); `open` now refuses one, `Refused(status: nil)`.
 * `URLSessionTask` counts suspends and a `resume` of a running task cancels the next `suspend` (measured), so the strict alternation
   the stream keeps is now a seeded test.
 * `SseParser` splits lines on bytes (a combining mark after `:`, the space or NUL was joined to it as a `Character`, unlike Kotlin,
