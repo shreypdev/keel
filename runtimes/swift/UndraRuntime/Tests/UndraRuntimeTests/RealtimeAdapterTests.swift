@@ -183,17 +183,24 @@ final class RealtimeServer: @unchecked Sendable {
 // MARK: - WebSocket against the server
 
 /// The default WebSocket adapter (`URLSessionWebSocketAdapter`) behind the binding the core talks
-/// to, against the shared server: the failure-injection suite of the ports-v2 brief §5.
-final class URLSessionWebSocketAdapterTests: XCTestCase {
-    private var server: RealtimeServer!
-    private var binding: WebSocketBinding!
+/// to, against the shared server: the failure-injection suite of the ports-v2 brief §5. A subclass
+/// runs the same suite on the adapter made another way (``makeAdapter()``): `URLSessionWebSocketOnAppSessionTests`,
+/// on the app's own session (ADR-060).
+class URLSessionWebSocketAdapterTests: XCTestCase {
+    var server: RealtimeServer!
+    var binding: WebSocketBinding!
 
     override func setUpWithError() throws {
         if RealtimeAdapterServer.current == nil {
             RealtimeAdapterServer.current = try RealtimeServer.start()
         }
         server = RealtimeAdapterServer.current
-        binding = WebSocketBinding(adapter: URLSessionWebSocketAdapter())
+        binding = WebSocketBinding(adapter: makeAdapter())
+    }
+
+    /// The adapter under test.
+    func makeAdapter() -> URLSessionWebSocketAdapter {
+        return URLSessionWebSocketAdapter()
     }
 
     override func tearDown() {
@@ -268,7 +275,7 @@ final class URLSessionWebSocketAdapterTests: XCTestCase {
             }
         }
         await expectThrows(WsError.refused(status: nil, message: "invalid URL: ws://")) { () async throws(WsError) -> any WebSocketConnection in
-            try await URLSessionWebSocketAdapter().connect(url: "ws://", protocols: [], headers: [])
+            try await makeAdapter().connect(url: "ws://", protocols: [], headers: [])
         }
     }
 
@@ -342,6 +349,131 @@ final class URLSessionWebSocketAdapterTests: XCTestCase {
         let conn = try await binding.connect(url: "\(server.ws)/ws/stall", protocols: [], headers: []).conn
         try await binding.close(conn: conn, code: 1001, reason: "")
         try await server.waitForTheClientsClose("/ws/stall", code: 1001, reason: nil)
+    }
+}
+
+// MARK: - WebSocket on the app's own session
+
+/// What an app's `URLSession` sees: a delegate that records the tasks it was asked to run (`URLSessionTaskDelegate`'s metrics, which
+/// a pinning or authenticating delegate sits next to).
+/// Records the path of every task that finished on the app's session (the SSE tests have their own recorder, with pinning).
+final class MetricsRecordingSessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let seen = Locked<[String]>([])
+
+    /// The paths of the tasks that finished, in order.
+    var paths: [String] {
+        return seen.withLock { $0 }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        let path = task.originalRequest?.url?.path ?? "?"
+        seen.withLock { $0.append(path) }
+    }
+}
+
+/// An app's session delegate that answers an HTTP authentication challenge with the credentials it holds (the realtime server's
+/// `/ws/auth` wants `undra:secret`), and records the methods it was asked about.
+final class AnsweringSessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let asked = Locked<[String]>([])
+
+    /// The authentication methods of the challenges it answered, in order.
+    var methods: [String] {
+        return asked.withLock { $0 }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge
+    ) async -> (URLSession.AuthChallengeDisposition, URLCredential?) {
+        let method = challenge.protectionSpace.authenticationMethod
+        guard method == NSURLAuthenticationMethodHTTPBasic else {
+            return (.performDefaultHandling, nil)
+        }
+        asked.withLock { $0.append(method) }
+        if challenge.previousFailureCount > 0 {
+            return (.cancelAuthenticationChallenge, nil)
+        }
+        return (.useCredential, URLCredential(user: "undra", password: "secret", persistence: .none))
+    }
+}
+
+/// The same suite on the app's own session (ADR-060): `URLSessionWebSocketAdapter(session:)`, a session with a recording delegate and a
+/// configuration of its own, so every case also shows that the adapter works as a task of a session it does not own.
+final class URLSessionWebSocketOnAppSessionTests: URLSessionWebSocketAdapterTests {
+    private var delegate: MetricsRecordingSessionDelegate!
+    private var session: URLSession!
+
+    override func makeAdapter() -> URLSessionWebSocketAdapter {
+        delegate = MetricsRecordingSessionDelegate()
+        let configuration = URLSessionConfiguration.default
+        configuration.httpAdditionalHeaders = ["X-Traced": "yes"]
+        session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        return URLSessionWebSocketAdapter(session: session)
+    }
+
+    override func tearDown() {
+        super.tearDown()
+        session?.invalidateAndCancel()
+    }
+
+    func testTheSessionsConfigurationAndDelegateAreInThePathOfTheUpgrade() async throws {
+        let opened = try await binding.connect(url: "\(server.ws)/ws/headers", protocols: [], headers: [Header(name: "X-Token", value: "t")])
+        let first = try await binding.receive(conn: opened.conn, max: 1)
+        guard case .text(let json)? = first.first,
+              let headers = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        else {
+            return XCTFail("the first message is the upgrade's headers as JSON: \(first)")
+        }
+        // The configuration's header went with the upgrade, beside the core's own.
+        XCTAssertEqual(headers["x-traced"] as? String, "yes")
+        XCTAssertEqual(headers["x-token"] as? String, "t")
+        try await binding.close(conn: opened.conn, code: 1000, reason: "")
+        // And the session's delegate was told of the task, as it is of every other.
+        let deadline = Date().addingTimeInterval(5)
+        while !delegate.paths.contains("/ws/headers"), Date() < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(delegate.paths.contains("/ws/headers"), "the session's delegate saw \(delegate.paths)")
+    }
+
+    /// The connection is the task's delegate for the handshake and the close frame only: a challenge on the upgrade (here HTTP Basic,
+    /// what a client certificate or a task-level server-trust handler meets the same way) still reaches the app's session delegate.
+    func testTheSessionsDelegateAnswersTheUpgradesAuthenticationChallenge() async throws {
+        let answering = AnsweringSessionDelegate()
+        let appSession = URLSession(configuration: .ephemeral, delegate: answering, delegateQueue: nil)
+        defer {
+            appSession.invalidateAndCancel()
+        }
+        let appBinding = WebSocketBinding(adapter: URLSessionWebSocketAdapter(session: appSession))
+        defer {
+            appBinding.detach()
+        }
+        let conn = try await appBinding.connect(url: "\(server.ws)/ws/auth", protocols: [], headers: []).conn
+        try await appBinding.close(conn: conn, code: 1000, reason: "")
+        XCTAssertEqual(answering.methods, [NSURLAuthenticationMethodHTTPBasic])
+        let seen = try await server.last("/ws/auth")
+        XCTAssertEqual(seen?.headers["authorization"], "Basic dW5kcmE6c2VjcmV0")
+    }
+
+    func testTheAdapterNeverInvalidatesTheAppsSession() async throws {
+        for _ in 0 ..< 3 {
+            let conn = try await binding.connect(url: "\(server.ws)/ws/echo", protocols: [], headers: []).conn
+            try await binding.close(conn: conn, code: 1000, reason: "")
+        }
+        do {
+            _ = try await binding.connect(url: "\(server.ws)/ws/deny?status=401", protocols: [], headers: [])
+            XCTFail("the upgrade was refused")
+        } catch {
+            guard case .refused(let status, _) = error else {
+                return XCTFail("\(error)")
+            }
+            XCTAssertEqual(status, 401)
+        }
+        // After connections that ended every way, the app's session still runs its other requests.
+        let (data, response) = try await session.data(from: URL(string: "\(server.http)/stats")!)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertFalse(data.isEmpty)
     }
 }
 

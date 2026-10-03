@@ -683,6 +683,45 @@ On Android the playground keeps every default: its Remote tab talks to a small H
 
 Register the ports your core needs when you load it. A core's start-up work (query hydration reads the `Kv` port) runs as soon as the runtime exists. It asks for `Kv` every 100 ms for five seconds, so adapters registered right after the load (Android's `install`) are in time; a port registered later than that is missed, and the cache then starts empty.
 
+## Your network stack inside
+
+The defaults above are the platform's own. If your app has a network stack of its own (a token that is refreshed, interceptors, tracing, certificate pinning), a request the core makes through a default adapter does not go through it: on Android `HttpURLConnection` is OkHttp underneath, but the platform's instance, not your `OkHttpClient`. Hand your stack to the three network ports instead (`Http`, `WebSocket`, `Sse`) and every request the core makes goes through it. You do not write the adapters: the contract the core relies on (typed errors, a timeout that covers the body, cancellation that closes the socket, a size cap, streams that stop the server when the core stops reading) is already implemented, and the same test suites check it on each.
+
+| Platform | You pass | Your stack applies |
+| --- | --- | --- |
+| Android | your `OkHttpClient`, to the optional `okhttp-adapters` module | interceptors, `Authenticator` (a `401` is answered with a refreshed token and the request goes again), event listeners, `CertificatePinner`, `Dns`, proxy, cookie jar, dispatcher (a WebSocket's upgrade is the exception OkHttp makes: your application interceptors see it, your network interceptors and event listener do not) |
+| iOS and macOS | your `URLSession`, to `HttpAdapter`, `URLSessionWebSocketAdapter` and `URLSessionSseAdapter` | its configuration and `URLProtocol` classes, its delegate (server trust and pinning, authentication challenges), proxy, cookies |
+| Web | your `fetch` and `WebSocket`, to `fetchHttp`, `fetchSse` and `browserWebSocket` | whatever your wrapper does to a request: a token, a retry on `401`, a trace header |
+| React Native | nothing: `reactNativeHttp()` is React Native's `fetch` | React Native's own networking module, so what the app configures there |
+
+kotlin
+
+```kotlin
+// In place of AndroidPlatformDefaults.install(core, this): the same ten ports, and Http, WebSocket and Sse go through your client.
+AndroidPlatformDefaults.installWithOkHttp(core, this, appGraph.okHttpClient)
+```
+
+swift
+
+```swift
+let adapters = Adapters.platformDefault
+    .replacing(HttpAdapter(session: session))
+    .replacing(URLSessionWebSocketAdapter(session: session))
+    .replacing(URLSessionSseAdapter(session: streamingSession)) // same delegate, a configuration that lets a stream be quiet
+```
+
+ts
+
+```ts
+const adapters = { ...browserAdapters(), http: fetchHttp({ fetch: appFetch }) };
+const ports = {
+  [OptInPortIds.WebSocket.portId]: webSocketPort(browserWebSocket({ WebSocket: AppWebSocket })),
+  [OptInPortIds.Sse.portId]: ssePort(fetchSse({ fetch: appFetch })),
+};
+```
+
+The pieces and the places they differ from the defaults are documented where they live: the [okhttp-adapters README](https://github.com/shreypdev/undra/blob/main/runtimes/kotlin/undra-runtime/okhttp-adapters/README.md) (redirects, retries and timeouts are your client's; a WebSocket on OkHttp repairs malformed UTF-8 in a text frame instead of failing the connection, and OkHttp tells neither your event listener nor your network interceptors about a WebSocket's upgrade; a stream is opened on a client derived from yours with no read timeout and HTTP/1.1), and the [cookbook recipe](https://shreypdev.github.io/undra/docs/cookbook/network-stack.html), with the code of all three. The decision is [ADR-060](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-060-app-network-stack-in-ports.md).
+
 ## When a port is missing
 
 An unavailable port is a normal outcome, not a bug. A port nobody registered behaves as unavailable, a call can be cancelled, and a host can reply with bytes that do not decode. The core handles all three without panicking:
@@ -1932,6 +1971,49 @@ A cached list, a write that returns when the server has it, and a count for the 
 - A migration across two builds needs two builds to prove end to end. The recipe tests the hooks directly; the playground's contract scenarios run build A's data under build B on all three platforms ([Shipping an update](https://shreypdev.github.io/undra/docs/updates.html)).
 
 Source: [`examples/cookbook/core/src/offline.rs`](https://github.com/shreypdev/undra/blob/main/examples/cookbook/core/src/offline.rs).
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/cookbook/network-stack.html
+
+# Your network stack
+
+Your app already has one: a token it refreshes, interceptors, tracing, certificate pinning. Hand it to the core's network ports and every request the core makes goes through it, with nothing Undra-specific to configure.
+
+## The problem
+
+The core never makes a request; the platform does, through the `Http` port (and `WebSocket` and `Sse` where the core asks for them). The default adapters use the platform's own client. That is not *your* client: on Android `HttpURLConnection` is OkHttp underneath, but the platform's instance, so a request from the core carries no token, shows in no trace and is not pinned. The fix is not an adapter of your own (the contract is hundreds of lines: typed errors, a timeout that covers the body, cancellation that closes the socket, streams that stop the server when the core stops reading). It is passing your client to the adapter that already is that contract.
+
+## The recipe
+
+- **Android:** add the optional `dev.undra:okhttp-adapters` module and call `AndroidPlatformDefaults.installWithOkHttp(core, context, client)` in place of `install`. `Http`, `WebSocket` and `Sse` go through your `OkHttpClient`: its interceptors, its `Authenticator` (a `401` is answered with a refreshed token and the request goes again), its event listeners, its `CertificatePinner`. One exception is OkHttp's own: a WebSocket's upgrade is seen by your application interceptors, not by your network interceptors or your event listener.
+- **iOS:** pass your `URLSession` to `HttpAdapter`, `URLSessionWebSocketAdapter` and `URLSessionSseAdapter`. Its configuration, its delegate (server trust and the pinning built on it, authentication challenges) and its `URLProtocol` classes apply. Give event streams a session with the same delegate and a configuration that lets a stream stay quiet.
+- **Web:** pass your `fetch` and `WebSocket` to `fetchHttp`, `fetchSse` and `browserWebSocket`. Whatever your wrapper does to a request, it does to the core's.
+- **React Native:** nothing to pass. `reactNativeHttp()` is React Native's `fetch`, which is the app's networking module, so what the app configures there applies.
+
+## What goes through your stack, and what is yours
+
+| Port | Kotlin on OkHttp | Swift on URLSession |
+| --- | --- | --- |
+| `Http` | the whole call, as the app's own requests go | the whole task |
+| `WebSocket` | the upgrade request (OkHttp gives its listener no WebSocket events) | the upgrade: the connection is a task of your session |
+| `Sse` | the request, on a client derived from yours with no read timeout and HTTP/1.1 | the request, on the session you give the Sse adapter |
+
+What your client decides stays yours: redirects, retries, the timeouts when a request has none of its own, compression, caching, how many calls run at once (the core's requests wait their turn with yours). The core's contract holds on top: an error status is a response, a failure is a typed error, the request's own timeout bounds the whole exchange, cancelling the call closes the socket.
+
+## What the tests prove
+
+- **Kotlin:** the Http, WebSocket and Sse contract suites that run on the default adapters run on OkHttp's too, on the JVM and on a device. An interceptor sees every request and changes a header, an `Authenticator` refreshes a token and the request, its body included, goes again, an event listener sees each call, and the recipe's client above is run against a local server.
+- **Swift:** the WebSocket suite runs a second time on an app's session, and Http, Sse and WebSocket are shown to carry the session's configuration and to reach its delegate.
+- **TypeScript:** a wrapped `fetch` sees every request, adds a header and answers a `401` with a refreshed token; an app's `WebSocket` constructor adds a token to the upgrade.
+
+## Limits
+
+- OkHttp's WebSocket repairs malformed UTF-8 in a text frame (U+FFFD) where the default adapter fails the connection with close code 1007; keep `ClientWebSocketAdapter` for the port if you need the check.
+- The default OkHttp client follows redirects from `https` to `http`; the other adapters never do. `followSslRedirects(false)` gives the same rule.
+- The Kotlin lines are compiled and tested with the `okhttp-adapters` module (they need OkHttp, which the other modules never carry); the Swift and TypeScript lines are checked like the rest of the cookbook.
+
+Source: [`okhttp-adapters/README.md`](https://github.com/shreypdev/undra/blob/main/runtimes/kotlin/undra-runtime/okhttp-adapters/README.md) and [ADR-060](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-060-app-network-stack-in-ports.md). The ports: [Your network stack inside](https://shreypdev.github.io/undra/docs/ports.html#your-network-stack-inside).
 
 ---
 

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The adapters open sockets (through the app's OkHttpClient). :android-adapters declares it too; both merge into the app's. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+</manifest>

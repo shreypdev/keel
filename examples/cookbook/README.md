@@ -14,6 +14,12 @@ compiler and by `cargo test`, not only read.
 | `offline.rs` | persisted queries, writes that queue, an outbox, an update (`#[undra(default)]`, `#[undra::migrate]`) |
 | `realtime.rs` | a WebSocket that reconnects in the core, server-sent events as the fallback (feature `realtime`) |
 
+One recipe has no Rust module, because it is about what is under the ports, not what is above them: **Your network stack**
+(`site/docs/cookbook/network-stack.html`, ADR-060), the app's `OkHttpClient`, `URLSession` or `fetch` behind the `Http`, `WebSocket`
+and `Sse` ports. Its Swift and TypeScript lines are in `snippets/` like the others; its Kotlin lines need OkHttp, which this check
+does not have, so they are compiled and run with the `okhttp-adapters` module
+(`runtimes/kotlin/undra-runtime/okhttp-adapters/src/test/kotlin/dev/undra/okhttp/NetworkStackRecipe.kt`, and its test).
+
 ```sh
 cargo test -p cookbook                                   # every recipe, against the fakes
 undra bindgen -C examples/cookbook --check --docs        # the bindings in generated/ are what the core generates

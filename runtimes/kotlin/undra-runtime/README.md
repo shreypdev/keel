@@ -16,9 +16,9 @@ It has two layers:
 
 ```
 undra-runtime/
-  settings.gradle.kts        includes :runtime and :testkit, and :android-adapters, :android-work and :undra-compose when an Android SDK is found
+  settings.gradle.kts        includes :runtime and :testkit, and :android-adapters, :android-work, :okhttp-adapters and :undra-compose when an Android SDK is found
   build.gradle.kts           group / version, Kotlin plugin declared once
-  gradle/libs.versions.toml  Kotlin 2.0.21, coroutines 1.6.4, JUnit 5.10.3 (+ AGP 8.7.3, JUnit 4 and AndroidX Test for :android-adapters' tests)
+  gradle/libs.versions.toml  Kotlin 2.0.21, coroutines 1.6.4, JUnit 5.10.3 (+ AGP 8.7.3, JUnit 4 and AndroidX Test for :android-adapters' tests, OkHttp 4.12.0 for :okhttp-adapters)
   gradlew, gradle/wrapper/   Gradle 8.14.3 wrapper
   runtime/                   the library
     src/main/kotlin/dev/undra/runtime/
@@ -40,7 +40,11 @@ undra-runtime/
   android-adapters/          the Android module: the adapters of the ten standard ports + the Choreographer frame pacer
   undra-compose/             the optional Compose module: items(list) for a lazily paged list, LoadMoreWhenNearEnd for an infinite query
   android-work/              the optional WorkManager module (ADR-046): UndraWorker + UndraWork, background drains of the offline queue
-  test-support/kotlin/       test code shared by both modules' tests (FaultyFileSystem: a file system that fails on demand)
+  okhttp-adapters/           the optional OkHttp module (ADR-060): Http, WebSocket and Sse over the app's own OkHttpClient, installWithOkHttp
+  test-support/kotlin/       test code shared by :runtime's, :android-adapters' and :okhttp-adapters' tests (FaultyFileSystem: a file system that
+                             fails on demand; the Suite runner and its assertions; the realtime test server; RealtimeAdapterContract)
+  adapter-contracts/         what every adapter meets, written once: HttpAdapterContract, the loopback server it runs against, RecordingCore (JUnit 4,
+                             run on the JVM and on the device by :android-adapters and :okhttp-adapters), and the realtime contract's device half
   scripts/
     test-local.sh            build + test without Gradle or JUnit
     gen-vectors.py           regenerates WireVectors.kt from contract-tests/wire-vectors.json
@@ -51,7 +55,9 @@ undra-runtime/
 installed by `AndroidPlatformDefaults.install(core, context)`, and the Choreographer frame pacer); see
 [android-adapters/README.md](android-adapters/README.md). `:runtime` never depends on it, and never touches an Android API at
 compile time (Android is detected by reflection). `:android-work` is the one module with a WorkManager dependency, so an app that
-does not drain in the background does not carry it; see [android-work/README.md](android-work/README.md).
+does not drain in the background does not carry it; see [android-work/README.md](android-work/README.md). `:okhttp-adapters` is the one
+module with an OkHttp dependency: an app that has its own `OkHttpClient` adds it to put that client (its interceptors, token refresh,
+tracing and pinning) in the path of the core's `Http`, `WebSocket` and `Sse` traffic; see [okhttp-adapters/README.md](okhttp-adapters/README.md).
 
 ## Using it
 
@@ -341,7 +347,7 @@ What runs (see `TestMain.kt`): the wire suites, then
 | `StorageFailureTests` | ADR-049's failure injection: every `Kv` / `SecureStore` method with every `StorageError` through the real port registry (exact `PortReply` bytes: status 1 and the error), an untyped throw (status 2, one ERROR record, `onError`), and `FileKv` / `FsAdapter` over `test-support`'s `FaultyFileSystem` (a full disk is `Full`, a damaged entry `Corrupt`, the rest `Io`) |
 | `PortsV2RecordTests`, `PortsV2TextTests` | the twelve records of the opt-in ports (the Rust unit tests' exact bytes, round trips, `#[error]` texts, ids), SQLite result codes; the event-stream parser and SQL statement splitting / parameter counts |
 | `PortsV2BindingTests` | the WebSocket, Sse and Db bindings over scripted adapters: ids, the window and one pending pull, burst coalescing, ends, close and detach, migrations, transactions and `Busy`, the serial queue |
-| `RealtimeAdapterTests` | the default WebSocket and Sse adapters against `contract-tests/servers/realtime-server.mjs` (Node): echo, subprotocols and headers, refusals with status, peer close, drop, invalid UTF-8, a flood under a stalled reader, the SSE feed and resume, `/sse/hang` closed. Skipped without Node (failed with `UNDRA_REQUIRE_TOOLCHAINS=1`) |
+| `RealtimeAdapterTests` | the default WebSocket and Sse adapters, through `RealtimeAdapterContract` (`test-support`, which `:okhttp-adapters` runs on OkHttp's too: ADR-060), against `contract-tests/servers/realtime-server.mjs` (Node): echo, subprotocols and headers, refusals with status, peer close, drop, invalid UTF-8, a flood under a stalled reader, the SSE feed and resume, `/sse/hang` closed. Skipped without Node (failed with `UNDRA_REQUIRE_TOOLCHAINS=1`) |
 | `JdbcDbAdapterTests` | `JdbcDbAdapter` through the binding against real SQLite: constraint kinds, busy, a corrupt file, migrations, typed cells, one statement, the parameter count. Needs `UNDRA_SQLITE_JDBC` (the driver jar, on the test class path only); skipped without it (failed with `UNDRA_REQUIRE_TOOLCHAINS=1`) |
 | `LazyListTests` | `UndraLazyList` against a fake page server: the prefetch window and coalescing, requests deduplicated, `callSync` vs `call`, versions and races, invalidation re-paging O(window), eviction, restart, every hostile reply, a store routing the signal, threads |
 | `ErrorTests`, `StatsTests`, `CleanerTests`, `DispatcherTests` | exception shapes, the statistics parser, both cleaner backends, main-thread and delivery dispatchers |

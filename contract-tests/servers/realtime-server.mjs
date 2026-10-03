@@ -16,8 +16,11 @@
 //   /ws/close?code=C&reason=R  sends "hello", then a close frame (C, R)
 //   /ws/drop                 sends "hello", then destroys the socket without a close frame
 //   /ws/deny?status=S        answers the upgrade with HTTP S
+//   /ws/auth                 answers the upgrade 401 with a Basic challenge (realm "undra") unless it carries the credentials
+//                            undra:secret, then accepts it and sends nothing (an app's authenticator or session delegate answers)
 //   /ws/bad-utf8             sends a text frame that is not UTF-8
 //   /ws/stall                accepts and sends nothing
+//   /ws/deaf                 accepts, sends nothing and never answers a close frame (the client must give up and leave)
 // Server-sent events:
 //   /sse/feed                the scripted feed below (comments, retry, ids, multi-line data, CRLF, an event
 //                            with no data), resumed after the event whose id is the Last-Event-ID header; ends
@@ -223,6 +226,10 @@ export function startRealtimeServer({ port = 0, host = "127.0.0.1" } = {}) {
       socket.end(`HTTP/1.1 ${status} Refused\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`);
       return;
     }
+    if (path === "/ws/auth" && req.headers.authorization !== `Basic ${Buffer.from("undra:secret").toString("base64")}`) {
+      socket.end('HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="undra"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+      return;
+    }
     const key = req.headers["sec-websocket-key"];
     if (!key || !path.startsWith("/ws/")) {
       socket.end("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
@@ -265,6 +272,7 @@ export function startRealtimeServer({ port = 0, host = "127.0.0.1" } = {}) {
           if (opcode === 0x8) {
             c.closeCode = payload.length >= 2 ? payload.readUInt16BE(0) : 1005;
             c.closeReason = payload.length > 2 ? payload.subarray(2).toString("utf8") : "";
+            if (path === "/ws/deaf") return;
             sendClose(c.closeCode === 1005 ? 1000 : c.closeCode, "");
             socket.end();
             return;
