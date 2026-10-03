@@ -633,7 +633,7 @@ jobs:
   all-green:
     name: All green
     if: always()
-    needs: [rust, leaf-features, ts, kotlin, wasm-ffi, macos, ios-floor, android, ffi-miri, ffi-asan, contracts, contracts-swift, playground-web, react-native]
+    needs: [rust, leaf-features, ts, kotlin, wasm-ffi, macos, ios-floor, android, ffi-miri, ffi-asan, contracts, contracts-swift, bazel-example, bazel-example-macos, playground-web, react-native]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
