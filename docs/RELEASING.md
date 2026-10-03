@@ -64,7 +64,7 @@ build fails cannot build. Do not go on to step 4 until steps 7 and 8 pass for th
 ```sh
 scripts/bump-version.sh 1.0.0-rc.1         # step 4 says what it sets
 git switch -c release/1.0.0-rc.1 && git commit -qam "chore(release): 1.0.0-rc.1"
-git push -u origin release/1.0.0-rc.1 && gh pr create --fill     # four "All green", then squash-merge
+git push -u origin release/1.0.0-rc.1 && gh pr create --fill     # the "All green" check (the Gate workflow), then squash-merge
 git switch main && git pull && git tag v1.0.0-rc.1 && git push origin v1.0.0-rc.1
 gh run watch
 ```
@@ -101,7 +101,7 @@ under `1.0.0-rc.1`, which a `0.1.0` project crosses too. Verify: `bash scripts/b
 ```sh
 git switch -c release/1.0.0 && git commit -qam "chore(release): 1.0.0"
 git push -u origin release/1.0.0 && gh pr create --fill
-gh pr checks --watch                # the four "All green"
+gh pr checks --watch                # "All green" (the Gate workflow)
 gh pr merge --squash
 ```
 
