@@ -28,7 +28,8 @@ show is listed at the end; the checklist's release candidate (step 4) exercises 
 | M7 | Medium | `swift_manifests.rs` compared products, dependencies, headers and paths only: a `swiftSettings`/`resources`/`exclude` added to a runtime target would not reach the root package. | Fixed (`28ae1a6`): whole-target comparison, shown to fail on an added `swiftSettings` |
 | M8 | Medium | `docs/RELEASING.md` step 4 sends the founder through step 9's `brew` lines for a prerelease the tap never gets. | Fixed (`915d9df`) |
 | M9 | Medium | Supply chain, not in ADR-063: the `@undra` npm scope is unclaimed while `@undra/react-native`, `@undra/testkit` and generated packages name `@undra/runtime` by a range and npm auto-installs a missing peer from the registry; JitPack's trust (it builds and serves unsigned bytes) and how an app pins it were not stated. | Documented (`915d9df`): ADR-063 §4 and Negative, RELEASING.md (reserve the scope; record JitPack's sha256s; Gradle dependency verification). **The founder's step.** |
-| M10 | Medium | The *Launch rehearsal* workflow had never passed: on 70cf7f7 bash 3.2's empty array (fixed by the implementer, 17d5ded), on 824dc20 `bump-version.sh: cargo update --workspace --offline failed` 5 s in, because a fresh runner's Cargo cache lacks the workspace's dependencies. Reproduced with an empty `CARGO_HOME`; a founder's fresh clone hits the same at RELEASING step 5. | Fixed: the rehearsal runs `cargo fetch --locked` before the bump; the script's error says to run `cargo fetch` (shown on an empty `CARGO_HOME`: only the workspace's 17 entries of Cargo.lock move) |
+| M10 | Medium | The *Launch rehearsal* workflow had never passed: on 70cf7f7 bash 3.2's empty array (fixed by the implementer, 17d5ded), on 824dc20 `bump-version.sh: cargo update --workspace --offline failed` 5 s in, because a fresh runner's Cargo cache lacks the workspace's dependencies. Reproduced with an empty `CARGO_HOME`; a founder's fresh clone hits the same at RELEASING step 5. | Fixed (`c3abbd2`): the rehearsal runs `cargo fetch --locked` before the bump; the script's error says to run `cargo fetch` (shown on an empty `CARGO_HOME`: only the workspace's 17 entries of Cargo.lock move). The run on 7b36eec then stopped at `test-npm-assets.sh`: "the web server did not start", log empty after 10 s with the server alive (`python3 -m http.server` resolves the host's name before it prints; slow on the macOS runner). Fixed (`7c2e2fe`): `packaging/serve-dir.py`, the same server without the lookup, 30 s wait |
+| M11 | Medium | RELEASING step 5's hand re-key of the first migration entry (`0.1.0` → `1.0.0`) would itself turn the version PR red: `migrations.rs`'s unit test hard-codes `0.1.0`. | Fixed (`ce83e35`): the version script files notes kept under a never-released version (no tag `v<old>`) under the new one and leaves a released one's; the unit test reads the key. A copy bumped to 1.0.0 with no hand edit: 37 test binaries pass. RELEASING step 4 (the rc) is now **required** |
 | L1 | Low | The runtimes' `Hello` versions (`RUNTIME_VERSION`, `UNDRA_RUNTIME_VERSION`) were not moved by the version script (the TS comment named a test that does not exist); the release would report `undra=0.1.0` from a 1.0.0 runtime in `undra dev`'s log. Swift's `UndraCore.undraVersion` is documented as the protocol's and left. | Fixed (`d6b8bd7`: script, `--check`, test) |
 | L2 | Low | `launch-rehearsal.yml` did not run for changes of the runtime packages' manifests, the Vite plugin or the Swift runtime's manifest. | Fixed (`0ca510c`) |
 | L3 | Low | The playground RN lock keeps `0.1.0` for its two linked packages after a bump (`npm ci` accepts it: run on the bumped copy). `bazel/MODULE.bazel` and its synthesized runtime say `0.1.0`. | Left (cosmetic; Bazel's own version) |
@@ -71,6 +72,18 @@ show is listed at the end; the checklist's release candidate (step 4) exercises 
   through two core edits without `UNDRA_SKIP_BUILD` (console: "kept its state"), the wasm page reloaded; a schema change
   left the served page with "The schema changed, state reset: run undra bindgen, then reload", and `undra bindgen`
   reloaded it through Vite. `test/vite.test.ts` with main's `vite.ts`: 7 of 32 fail. Devtools icon: the mark, with a test.
+
+## CI on the way
+
+* **Bench / Budgets (host, release), 824dc20: noise.** `stream/backpressure` throughput 12.41 M/s against the base
+  measured in the same job at 18.97 M/s (gate: 1.5x), three attempts. The runtime is byte-identical to main's (`git diff
+  origin/main 824dc20` over `crates/undra-{runtime,ffi,wire,meta,ports,macros}`, `crates/undra`, `bench`, `Cargo.lock`:
+  empty). The row on main's last three Bench runs: 12.1 to 12.5 M/s (Xeon 8370C), 18.8 (EPYC 7763), 24.1 (EPYC 9V74);
+  on 7b36eec, with this piece's code: 17.2 to 17.3 M/s, Bench green. No size row moved (Web size and iOS size green).
+* **CI / Kotlin runtime (JVM), 7b36eec: a timing test.** `RemoteReconnectTests > the policy gives up after maxAttempts
+  and closes the core as failed` timed out at 10 s; this piece changes no Kotlin source (build files and READMEs only),
+  the job runs `test-local.sh` (kotlinc, no Gradle), which passes here (891 + 32 cases), and the job has not failed in
+  the 40 CI runs before. Re-run on the final head.
 
 ## The *Launch rehearsal* workflow
 
