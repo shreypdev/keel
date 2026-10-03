@@ -1304,9 +1304,14 @@ fn shipped_artefacts_do_not_grow_and_no_symbols_writes_none() {
             run_capture(Command::new("xcrun").args(["strip", "-S", "-x"]).arg(&app));
             size(&app)
         };
+        // The same code, so the same size, up to what LLVM's output with line tables costs at a
+        // size-optimising profile (`release-mobile`, ADR-052's amendment of 2026-10-02): the sign of
+        // a few bytes of function alignment, measured +16 in one run and -2,324 in another, over
+        // 2.3 MB. Strict `<=` held at opt-level 3 and fails here on the sign: a thousandth.
+        let without = linked(plain, "plain");
         before_after(
             "ios app (linked, stripped)",
-            linked(plain, "plain"),
+            without + without / 1000,
             linked(with, "symbols"),
         );
         compared += 1;
