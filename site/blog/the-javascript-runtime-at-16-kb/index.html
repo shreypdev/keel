@@ -79,7 +79,7 @@
 <section id="the-budget">
 <h2>Where the bytes were</h2>
 <p>The web size decision (ADR-052) asked for 16 KB of runtime up front. An earlier piece reached 21.2 KB and concluded that 16 KB would mean removing behaviour; five pieces then added 0.9 KB, and the gate stood at 22,100 bytes with no room. Instead we attributed every byte: a script charges each byte of the minified chunk, and each bit of its gzip stream, to its declaration. The largest shares:</p>
-<div class="table-wrap"><table class="compare"><thead><tr><th>Concern</th><th>gzipped bytes</th></tr></thead><tbody>
+<div class="table-wrap"><table><thead><tr><th>Concern</th><th>gzipped bytes</th></tr></thead><tbody>
 <tr><td>wire: reader, writer, codecs</td><td>3,702</td></tr>
 <tr><td>the mirror</td><td>2,867</td></tr>
 <tr><td>the in-process wasm host</td><td>2,521</td></tr>
