@@ -172,10 +172,11 @@ cd myapp/web && npm install && npm run dev    # the web app on its core: http://
 Edit `core/src/lib.rs` and save: the Vite plugin rebuilds the core and reloads the page. `undra dev` (in `myapp`)
 serves one core to every running app and keeps its state across a rebuild.
 
-A new project depends on the Undra crates at the git tag of the `undra` that created it, `@undra/runtime` from npm,
-and the Swift and Kotlin runtimes as a Swift package and from Maven Central. Those two are not published yet, so an
-app that runs on iOS or Android builds against a checkout of this repository, whose crates and runtimes are then used
-by path:
+A new project depends on the release of the `undra` that created it, all from this repository (ADR-063): the crates
+by its git tag, the Swift package at its root (`.package(url: "https://github.com/shreypdev/undra", from: "1.0.0")`),
+the Kotlin runtime from JitPack (`com.github.shreypdev.undra:runtime:v1.0.0`) and `@undra/runtime` as the GitHub
+Release's asset. No registry account, no token. To work on Undra itself, a project can use a checkout's crates and
+runtimes by path instead:
 
 ```bash
 git clone https://github.com/shreypdev/undra.git && cd undra
@@ -237,8 +238,8 @@ And, each with its page:
 Open, with the work done around it (the same list as the [roadmap](https://shreypdev.github.io/undra/roadmap/)):
 
 * Benchmark rows from physical phones; today's device rows are a simulator, an emulator and headless Chromium.
-* The Swift runtime as a published Swift package and the Kotlin runtime on Maven Central (until then, iOS and
-  Android apps build against a checkout), then the crates on crates.io.
+* Maven Central and the npm registry beside GitHub (the launch ships everything from this repository's tags), then
+  the crates on crates.io.
 * The `undra-compose`, `android-adapters` and `android-work` tests in CI (they pass locally and on the emulator);
   Android under Bazel, built and tested; a byte-reproducible `undra build`.
 * A cancelled port call reaching the platform (today it is abandoned in the core); a Windows CLI; Dart and Flutter.

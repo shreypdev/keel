@@ -147,7 +147,7 @@ export PATH="$JAVA_HOME/bin:$PATH"    # Homebrew's openjdk@17 is keg-only: not o
 #### Gradle wrapper
 
 A generated project's `android/` has `./gradlew` (`undra init` copies it from a checkout or creates it with
-`gradle wrapper`). Doctor checks for it inside a project.
+`gradle wrapper`, so install Gradle before `undra init`). Doctor checks for it inside a project.
 
 ```bash
 brew install gradle
@@ -263,7 +263,9 @@ Every suite is local; nothing needs the network after install (the Bazel suite f
 | `undra upgrade` end to end (regenerates the bindings against a local clone standing in for GitHub) | `UNDRA_TEST_UPGRADE_E2E=1 cargo test -p undra-cli --test upgrade` | 15 pass |
 | Symbol files and `undra symbolicate` (R9, ADR-046): the playground core built in release for each platform, made to panic (in a call, and in a task) in a booted iOS simulator, on the emulator, under node and natively, and its frames resolved to the `lab.rs` line; `--no-symbols` and the sizes of the shipped artefacts | `UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test symbols -- --test-threads=1` (needs Xcode with a booted simulator, the Android NDK, `cargo-ndk` and the emulator, node and `wasm-opt`; minutes) | 5 pass; skips, saying why, where a toolchain is missing |
 | The debugger path into Rust (ADR-046): LLDB in batch mode stops at `breakpoint set -f lab.rs -l <line>` in a debug core, on the host and in a simulator process | `UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test debugging -- --test-threads=1` (run it from a login session: LLDB needs Developer Tools access) | 3 pass |
-| Distribution: npm packages (build, pack, `npm install -g`, run) | `bash packaging/npm/test.sh` | all checks pass |
+| Distribution: the release's npm assets (`@undra/runtime`, `@undra/testkit`, `@undra/react-native` packed, installed by URL from a local server with no registry, every peer satisfied) | `bash packaging/pack-npm.sh --out /tmp/assets && bash packaging/test-npm-assets.sh --release-dir /tmp/assets` | all checks pass |
+| Distribution: the version script on a copy with a throwaway version | `bash scripts/bump-version.test.sh` | all checks pass |
+| Distribution: the launch rehearsal (ADR-063): a copy of the repository tagged as a release, the npm assets served, JitPack's command into a local Maven repository, then `undra init` (no checkout) and its web, iOS and Android apps built | `bash packaging/rehearse-launch.sh` (macOS for iOS; the Android SDK, NDK and Gradle for Android; minutes) | "Every platform built from the rehearsal release alone." |
 | Distribution: the curl installer against a served release (checksums, tampering, platforms) | `bash packaging/test-install.sh` | all checks pass |
 | Bazel rules and example (ADR-061): the core for the host and the web, the bindings from the host library, the Kotlin (JNI) and TypeScript (Node, wasm) consumers against the real core, ktlint over the generated Kotlin with and without the exclusions `undra bindgen` writes, and on macOS the Swift consumer; `bazel build //:mobile_ios` builds the XCFramework | `cd examples/bazel && bazel test //...` (first run downloads the toolchains: minutes; `--jobs=4` is in its `.bazelrc`); the rules' own unit tests: `cd bazel && bazel test //tests/...` | the example: 4 pass on macOS (Kotlin, ktlint, TypeScript, Swift), 3 on Linux; the rules' tests: 2 pass |
 | Benchmark budget gate | `cargo test -p undra-bench --test budgets --release` | pass |

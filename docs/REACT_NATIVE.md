@@ -56,10 +56,14 @@ its own once per display frame (ADR-031), exactly as on the web.
    also compiles `AcmePayCoreTable.m`, the class `UndraCoreTable_acme_pay` through which the module
    finds the core by its namespace (the module is built once for every core, so it names none).
 
-2. **Add the packages** (`@undra/runtime` and `react-native` are its peers) and your generated bindings:
+2. **Add the packages** (`@undra/runtime` and `react-native` are its peers) and your generated bindings. Both are
+   assets of the Undra release on GitHub (ADR-063): install them by URL, at the version of your `undra`
+   (`undra --version`), and `undra upgrade` moves both URLs together:
 
    ```sh
-   npm install @undra/react-native @undra/runtime
+   v=1.0.0
+   npm install https://github.com/shreypdev/undra/releases/download/v$v/undra-react-native-$v.tgz \
+               https://github.com/shreypdev/undra/releases/download/v$v/undra-runtime-$v.tgz
    ```
 
 3. **Babel**: Hermes cannot compile `import.meta`, which `@undra/runtime`'s `wasm-worker` mode contains

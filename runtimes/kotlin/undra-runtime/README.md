@@ -1,7 +1,10 @@
 # Undra Kotlin runtime
 
 The JVM/Android runtime for Undra (`docs/SPEC.md` §11, §17.2). Dependencies: Kotlin stdlib and
-kotlinx-coroutines, nothing else. Group `dev.undra`, package root `dev.undra.runtime`.
+kotlinx-coroutines, nothing else. Group `dev.undra` in this repository (what a checkout's composite build substitutes),
+package root `dev.undra.runtime`. A release is published by JitPack from its tag as `com.github.shreypdev.undra:<module>:v<version>`
+(`jitpack.yml`, `scripts/jitpack-install.sh`; ADR-063): `runtime`, `testkit`, `android-adapters`, `android-work`, `undra-compose`,
+`okhttp-adapters`.
 
 It has two layers:
 

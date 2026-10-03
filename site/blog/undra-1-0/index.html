@@ -105,7 +105,7 @@
 undra init myapp
 cd myapp/web &amp;&amp; npm install &amp;&amp; npm run dev</code></pre>
 <p>The installer script and cargo work too. <code>undra init</code> writes a core with a to-do store, its bindings and an app per platform, downloading nothing. <code>npm run dev</code> builds the core to WebAssembly and serves the app at <code>http://localhost:5173</code>. Edit <code>core/src/lib.rs</code> and save: the page is on the new core. <code>undra dev</code> serves one core to every app at once.</p>
-<p>One limit of the first days: the Swift and Kotlin runtimes are not yet published as a Swift package and on Maven Central, so the iOS and Android apps build against a checkout (<code>undra init myapp --undra-path ~/src/undra</code>). <a href="../../docs/getting-started.html">Getting started</a> has every step, as we ran it.</p>
+<p>The iOS and Android apps get their runtimes from the same GitHub release, with no account: the Swift package at the repository's root and the Kotlin modules from JitPack. <a href="../../docs/getting-started.html">Getting started</a> has every step, as we ran it.</p>
 </section>
 <section id="what-it-is-not">
 <h2>What it is not</h2>
