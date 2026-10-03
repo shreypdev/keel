@@ -8,7 +8,7 @@ import XCTest
 /// authentication challenges sits beside the tasks: every request the core makes goes through it, with nothing Undra-specific configured.
 final class AppSessionTests: XCTestCase {
     private var server: RealtimeServer!
-    private var delegate: RecordingSessionDelegate!
+    private var delegate: MetricsRecordingSessionDelegate!
     private var session: URLSession!
 
     override func setUpWithError() throws {
@@ -16,7 +16,7 @@ final class AppSessionTests: XCTestCase {
             RealtimeAdapterServer.current = try RealtimeServer.start()
         }
         server = RealtimeAdapterServer.current
-        delegate = RecordingSessionDelegate()
+        delegate = MetricsRecordingSessionDelegate()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpAdditionalHeaders = ["X-Traced": "yes"]
         session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
