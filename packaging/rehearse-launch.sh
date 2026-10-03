@@ -115,16 +115,16 @@ t0=$(now)
 www=$tmp/www
 (cd "$src" && bash packaging/pack-npm.sh --out "$www/v$version")
 (cd "$src" && bash packaging/test-npm-assets.sh --release-dir "$www/v$version" --version "$version")
-python3 -u -m http.server 0 --bind 127.0.0.1 --directory "$www" >"$tmp/server.log" 2>&1 &
+python3 -u "$repo/packaging/serve-dir.py" "$www" >"$tmp/server.log" 2>&1 &
 server_pid=$!
 port=""
-for _ in $(seq 1 100); do
+for _ in $(seq 1 300); do
   port=$(sed -n 's/^Serving HTTP on 127.0.0.1 port \([0-9]*\).*/\1/p' "$tmp/server.log" | head -n 1)
   [ -z "$port" ] || break
   kill -0 "$server_pid" 2>/dev/null || fail "the web server exited: $(cat "$tmp/server.log")"
   sleep 0.1
 done
-[ -n "$port" ] || fail "the web server did not start"
+[ -n "$port" ] || fail "the web server did not start in 30 s: $(cat "$tmp/server.log")"
 release_url=http://127.0.0.1:$port
 curl -fsS -o /dev/null "$release_url/v$version/undra-runtime-$version.tgz" || fail "the assets are not served at $release_url"
 record "npm assets (3 tarballs)" ok "$release_url/v$version ($(($(now) - t0)) s)"

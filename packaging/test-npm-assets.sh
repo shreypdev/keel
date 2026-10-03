@@ -3,7 +3,7 @@
 # server, with no registry at all.
 #
 # It serves <release-dir> as GitHub serves a release (v<version>/undra-runtime-<version>.tgz, ...) with
-# `python3 -m http.server` on 127.0.0.1, makes a project that depends on the three tarballs by URL (and on a
+# packaging/serve-dir.py on 127.0.0.1, makes a project that depends on the three tarballs by URL (and on a
 # stand-in for react-native, the React Native host's other peer), and installs it with npm pointed at a registry
 # that does not exist. Checked: the install needs no registry (so nothing names @undra/runtime by a range a
 # registry would have to answer), `npm ls --all` finds every peer satisfied (@undra/react-native and @undra/testkit
@@ -54,16 +54,16 @@ for stem in undra-runtime undra-testkit undra-react-native; do
   [ -f "$file" ] || fail "$file is missing"
   cp "$file" "$tmp/www/v$version/"
 done
-python3 -u -m http.server 0 --bind 127.0.0.1 --directory "$tmp/www" >"$tmp/server.log" 2>&1 &
+python3 -u "$root/packaging/serve-dir.py" "$tmp/www" >"$tmp/server.log" 2>&1 &
 server_pid=$!
 port=""
-for _ in $(seq 1 100); do
+for _ in $(seq 1 300); do
   port=$(sed -n 's/^Serving HTTP on 127.0.0.1 port \([0-9]*\).*/\1/p' "$tmp/server.log" | head -n 1)
   [ -z "$port" ] || break
   kill -0 "$server_pid" 2>/dev/null || fail "the web server exited: $(cat "$tmp/server.log")"
   sleep 0.1
 done
-[ -n "$port" ] || fail "the web server did not start: $(cat "$tmp/server.log")"
+[ -n "$port" ] || fail "the web server did not start in 30 s: $(cat "$tmp/server.log")"
 base=http://127.0.0.1:$port/v$version
 
 # --- a project that depends on them by URL --------------------------------------------------------
