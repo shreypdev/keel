@@ -85,6 +85,9 @@ git_q() { git -C "$src" -c user.name=rehearsal -c user.email=rehearsal@example.i
 git_q init -q
 git_q add -A
 git_q commit -qm "the working tree"
+# The version script refreshes Cargo.lock offline (no dependency but the workspace's own may move): on a machine whose Cargo
+# cache does not hold the workspace's dependencies yet (a fresh CI runner) they are fetched first, at the locked versions.
+(cd "$src" && cargo fetch --locked -q)
 (cd "$src" && bash scripts/bump-version.sh "$version")
 git_q add -A
 git_q commit -qm "chore(release): $version"

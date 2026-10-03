@@ -180,7 +180,7 @@ fi
 if [ ${#changed[@]} -gt 0 ] && [ -f Cargo.lock ]; then
   if command -v cargo >/dev/null 2>&1; then
     before=$(cat Cargo.lock)
-    cargo update --workspace --offline >/dev/null 2>&1 || die "cargo update --workspace --offline failed; run it by hand and re-run this script"
+    cargo update --workspace --offline >/dev/null 2>&1 || die "cargo update --workspace --offline failed: the version files are written, Cargo.lock is not. It needs the workspace's dependencies in Cargo's cache, which a fresh clone or CI runner does not have: run \`cargo fetch\` (it records the workspace's new version in Cargo.lock and keeps every other dependency at its locked version; check \`git diff Cargo.lock\`)"
     [ "$before" = "$(cat Cargo.lock)" ] || changed+=("Cargo.lock")
   else
     printf 'bump-version.sh: cargo is not on PATH; run `cargo update --workspace` before committing, or the release build (--locked) will fail\n' >&2
