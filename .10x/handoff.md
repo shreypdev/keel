@@ -45,9 +45,9 @@ merge the PR, then clean up" before it is used again (propose the change first; 
 [[undra-ci-green-gate]] describe the gate). Landed today, in order: `ci-green` (`fc326d6`), `diagram-rn`
 (`b7efd61`), `generics-fn-obj` (`aa04821`), `generics-followups` (`3c279a6`). Main is `3c279a6` plus state commits.
 
-Landed after that: `test-pacing` (`14a4689`) and `reload-handles` (`7e5d238`) — status checkpoint 32. Open:
-- `wt/ts-runtime-16k` `093a457` (contains main `7e5d238`) — ADR-057 at 15,774 B (gate 16,000); every review
-  finding closed (four Highs and L3/L5/L6); CI running on that head at the time of writing. Land it, then clean up.
+Landed after that: `test-pacing` (`14a4689`), `reload-handles` (`7e5d238`), `ts-runtime-16k` (`784c361`) —
+status checkpoints 32 and 33. **Nothing of the wave is open.** `main` is `784c361` plus the checkpoint-33 state
+commit; its own CI runs on those heads are the proof to look at first in a new session.
 - **On hold by the founder:** the Android emulator CI job for `android-adapters`, `android-work` and
   `undra-compose`. Not started. Ask him before starting it. (The "Android emulator (API 34, x86_64)" job in
   `two-cores.yml` is older and unrelated.)
