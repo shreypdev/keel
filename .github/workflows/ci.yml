@@ -354,6 +354,14 @@ jobs:
       - name: The playground's Android app builds, Compose previews and the testing kit included
         working-directory: examples/playground/android
         run: ./gradlew --no-daemon :app:assembleDebug
+      # The optional OkHttp module (ADR-060): its three adapters pass the shared adapter contracts on the JVM, against the
+      # loopback servers of test-support, so a change to the contracts or to OkHttp's behaviour is caught here, not on a device.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: The OkHttp adapters pass the shared adapter contracts (JVM)
+        working-directory: runtimes/kotlin/undra-runtime
+        run: UNDRA_REQUIRE_TOOLCHAINS=1 ./gradlew --no-daemon :okhttp-adapters:testDebugUnitTest --console=plain
 
   ffi-miri:
     # macOS, not Linux: Miri's strict c-variadic check currently flags parking_lot_core's
