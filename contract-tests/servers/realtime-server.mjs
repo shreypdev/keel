@@ -20,6 +20,7 @@
 //                            undra:secret, then accepts it and sends nothing (an app's authenticator or session delegate answers)
 //   /ws/bad-utf8             sends a text frame that is not UTF-8
 //   /ws/stall                accepts and sends nothing
+//   /ws/deaf                 accepts, sends nothing and never answers a close frame (the client must give up and leave)
 // Server-sent events:
 //   /sse/feed                the scripted feed below (comments, retry, ids, multi-line data, CRLF, an event
 //                            with no data), resumed after the event whose id is the Last-Event-ID header; ends
@@ -271,6 +272,7 @@ export function startRealtimeServer({ port = 0, host = "127.0.0.1" } = {}) {
           if (opcode === 0x8) {
             c.closeCode = payload.length >= 2 ? payload.readUInt16BE(0) : 1005;
             c.closeReason = payload.length > 2 ? payload.subarray(2).toString("utf8") : "";
+            if (path === "/ws/deaf") return;
             sendClose(c.closeCode === 1005 ? 1000 : c.closeCode, "");
             socket.end();
             return;

@@ -363,6 +363,18 @@ public open class RealtimeAdapterContract(
             assertEq("enough", server.last("/ws/flood").closeReason)
         }
 
+        case("WebSocket: a server that never answers the core's close is left after a grace period: close returns, the socket goes") {
+            val server = server()
+            val port = ws()
+            within {
+                val conn = port.connect("${server.ws}/ws/deaf", emptyList(), emptyList()).conn
+                port.close(conn, 1000u, "bye")
+                assertEq(emptyList<WsMessage>(), port.receive(conn, 16u))
+            }
+            eventually("the server got the core's close frame") { server.last("/ws/deaf").closeCode == 1000 }
+            eventually("the client left a server that never answered", timeoutMs = 10_000) { server.last("/ws/deaf").clientClosed }
+        }
+
         case("WebSocket: a connection dropped without a close frame is Network") {
             val server = server()
             val port = ws()

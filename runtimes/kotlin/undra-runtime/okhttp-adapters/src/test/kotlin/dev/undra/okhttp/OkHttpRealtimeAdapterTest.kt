@@ -147,6 +147,22 @@ class OkHttpRealtimeAdapterTest : RealtimeAdapterContract(
             eventually("the server saw the client's close", timeoutMs = 5_000) { server.last("/ws/stall").closeCode == 1000 }
         }
 
+        case("WebSocket: a closed connection leaves no reader running on the app's dispatcher, whether it was held or idle") {
+            val server = server()
+            val client = appClient()
+            val port = WebSocketPortAdapter(OkHttpWebSocketAdapter(client))
+            within {
+                // Nobody reads: OkHttp's reader thread is held in the listener until there is room.
+                val held = port.connect("${server.ws}/ws/flood?n=2000&size=65536", emptyList(), emptyList()).conn
+                eventually("the server is writing") { server.last("/ws/flood").written > 0 }
+                port.close(held, 1000u, "")
+                port.close(port.connect("${server.ws}/ws/stall", emptyList(), emptyList()).conn, 1000u, "")
+            }
+            // Each connection's reader runs as a call of the client's dispatcher for as long as the connection lives.
+            eventually("the readers are gone") { client.dispatcher.runningCallsCount() == 0 }
+            eventually("no connection is in use") { client.connectionPool.connectionCount() == client.connectionPool.idleConnectionCount() }
+        }
+
         case("WebSocket: a client provider is asked at every connect") {
             val server = server()
             var current = appClient()
