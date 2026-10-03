@@ -157,6 +157,12 @@ pub fn plan_files(schema: &Schema, plan: &Plan) -> Result<Vec<GeneratedFile>> {
             plan.generator.typescript(schema).map_err(bindgen_failure)?,
         ));
     }
+    // The exclusions the repository's linters read, beside each tree (ADR-061).
+    files.extend(crate::lint::fragments(
+        &plan.platforms,
+        &plan.generator.swift_module,
+        &plan.generator.core_names().ffi_module(),
+    ));
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }
@@ -453,6 +459,17 @@ mod tests {
             paths.contains(&"ts/src/types.ts") && paths.contains(&"ts/package.json"),
             "{paths:?}"
         );
+        for lint in [
+            "kotlin/.editorconfig",
+            "swift/.swiftlint.yml",
+            "ts/.eslintrc.json",
+            "ts/eslint.config.undra.mjs",
+        ] {
+            assert!(
+                paths.contains(&lint),
+                "the lint exclusion {lint} is written with its tree: {paths:?}"
+            );
+        }
         assert!(paths.windows(2).all(|w| w[0] <= w[1]), "sorted");
     }
 

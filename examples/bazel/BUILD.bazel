@@ -1,0 +1,60 @@
+load("@undra_rules//undra:defs.bzl", "undra_bindings", "undra_core")
+load("@undra_rules//undra:ts.bzl", "undra_ts_library")
+
+package(default_visibility = ["//:__subpackages__"])
+
+exports_files(["undra.toml"])
+
+undra_core(
+    name = "core",
+    srcs = glob(["core/**"]) + ["Cargo.toml"],
+    config = "undra.toml",
+    namespace = "hello_core",
+    platforms = ["host", "web"],
+    wasm_opt = "@undra_binaryen//:wasm_opt",
+)
+
+undra_bindings(
+    name = "bindings",
+    core = ":core_host",
+    config = "undra.toml",
+    # rules_swift compiles files, not a directory: the Swift files of the tree, as `undra bindgen` writes them for this core.
+    # A different list fails the build and says which one is right.
+    swift_files = [
+        "Sources/HelloCore/Generated/Core.swift",
+        "Sources/HelloCore/Generated/Errors.swift",
+        "Sources/HelloCore/Generated/Ids.swift",
+        "Sources/HelloCore/Generated/Objects.swift",
+        "Sources/HelloCore/Generated/Ports.swift",
+        "Sources/HelloCore/Generated/Queries.swift",
+        "Sources/HelloCore/Generated/Stores.swift",
+        "Sources/HelloCore/Generated/Types.swift",
+        "Sources/HelloCoreFFI/hello_core_undra.c",
+        "Sources/HelloCoreFFI/include/hello_core_undra.h",
+        "Sources/HelloCoreFFI/include/module.modulemap",
+    ],
+)
+
+# The TypeScript bindings, compiled against the runtime and linked into node_modules for the tests under ts/.
+undra_ts_library(
+    name = "hello_ts",
+    bindings = ":bindings",
+    package = "@bazel-hello/core",
+    visibility = ["//:__subpackages__"],
+)
+
+# The cores of the mobile apps. They build when asked for by name, because their toolchains are the machine's, not Bazel's:
+#
+#   bazel build //:mobile_ios       an XCFramework (macOS with Xcode; CI builds it)
+#   //:mobile_android               declared, does not build here: rules_rust needs a C++ toolchain for the Android platforms
+#                                   (rules_android_ndk), which this example does not set up (ADR-061)
+undra_core(
+    name = "mobile",
+    srcs = glob(["core/**"]) + ["Cargo.toml"],
+    config = "undra.toml",
+    namespace = "hello_core",
+    platforms = [
+        "ios",
+        "android",
+    ],
+)

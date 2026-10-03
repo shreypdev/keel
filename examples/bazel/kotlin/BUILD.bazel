@@ -1,0 +1,49 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("@rules_java//java:java_test.bzl", "java_test")
+load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
+load("@undra_rules//undra:defs.bzl", "undra_kt_jvm_library")
+
+# The generated Kotlin bindings of the core, over the Kotlin runtime.
+undra_kt_jvm_library(
+    name = "hello",
+    bindings = "//:bindings",
+    visibility = ["//:__subpackages__"],
+)
+
+kt_jvm_library(
+    name = "hello_test_lib",
+    testonly = True,
+    srcs = ["HelloTest.kt"],
+    deps = [":hello"],
+)
+
+# `bazel test //kotlin:hello_test`: the JVM loads libhello_core through JNI and calls the real core.
+java_test(
+    name = "hello_test",
+    data = ["//:core_host"],
+    jvm_flags = ["-Dundra.test.library=$(rootpath //:core_host)"],
+    main_class = "dev.undra.bazel.hello.test.HelloTestKt",
+    use_testrunner = False,
+    runtime_deps = [":hello_test_lib"],
+)
+
+# The generated Kotlin tree, as a label.
+filegroup(
+    name = "tree",
+    srcs = ["//:bindings"],
+    output_group = "kotlin",
+)
+
+# `bazel test //kotlin:lint_test`: ktlint over the generated Kotlin, with and without the exclusions `undra bindgen` writes.
+sh_test(
+    name = "lint_test",
+    srcs = ["lint_test.sh"],
+    args = [
+        "$(rootpath @rules_kotlin//kotlin/internal/lint:ktlint)",
+        "$(rootpath :tree)",
+    ],
+    data = [
+        ":tree",
+        "@rules_kotlin//kotlin/internal/lint:ktlint",
+    ],
+)

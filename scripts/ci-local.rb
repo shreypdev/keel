@@ -61,7 +61,8 @@ module CiLocal
     [%r{\Atwo-cores/ios\z}, /\AThe newest stable Xcode\z/, "provisioning: sudo xcode-select; this machine's Xcode is used (DEVELOPER_DIR from scripts/env.sh)"],
     [%r{\Asite/build\z}, /\AInstall binaryen\z/, "provisioning: apt on the runner (checked: wasm-opt is on PATH)"],
     [%r{\Abench/size\z}, /\AInstall binaryen version_133\z/, "provisioning: the Linux tarball of binaryen version_133 (the Size gate checks wasm-opt reports 133)"],
-    [%r{\Abench/size\z}, /\AInstall cargo-ndk\z/, "provisioning: `cargo install cargo-ndk` once (checked: cargo-ndk is on PATH)"]
+    [%r{\Abench/size\z}, /\AInstall cargo-ndk\z/, "provisioning: `cargo install cargo-ndk` once (checked: cargo-ndk is on PATH)"],
+    [%r{\Aci/bazel-example(-macos)?\z}, /\AInstall Bazelisk\z/, "provisioning: `brew install bazelisk` once (checked: bazel is on PATH); the job's own pin is .bazelversion"]
   ].freeze
 
   # Lines of a step's script that are runner provisioning and are dropped (the rest of the step runs). Accepting the

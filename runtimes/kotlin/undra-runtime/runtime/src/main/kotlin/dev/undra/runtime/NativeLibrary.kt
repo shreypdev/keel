@@ -6,7 +6,8 @@ package dev.undra.runtime
  *
  * The library is `lib<namespace>.so` (Android: from the APK's `jniLibs/<abi>/`), `lib<namespace>.dylib` or
  * `<namespace>.dll`, found on `java.library.path`. The system property `undra.native.<namespace>.path`, when set,
- * is the absolute path of the library file and wins over the search (for tests and development builds):
+ * is the path of the library file and wins over the search (for tests and development builds). A relative path is
+ * taken from the working directory, which is what a Bazel test's `$(rootpath ..)` of the core's host build needs:
  *
  * ```
  * java -Dundra.native.playground_core.path=/path/to/build/host/libplayground_core.dylib ...
@@ -26,7 +27,8 @@ public object NativeLibrary {
         try {
             val path = System.getProperty(pathProperty(namespace))
             if (path != null && path.isNotEmpty()) {
-                System.load(path)
+                // `System.load` takes absolute paths only.
+                System.load(java.io.File(path).absolutePath)
             } else {
                 System.loadLibrary(namespace)
             }

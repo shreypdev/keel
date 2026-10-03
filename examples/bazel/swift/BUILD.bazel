@@ -1,0 +1,42 @@
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("@rules_swift//swift:swift_binary.bzl", "swift_binary")
+load("@undra_rules//undra:defs.bzl", "undra_swift_library")
+
+# Swift builds on macOS (rules_swift with Xcode); a Linux run of `bazel test //...` skips these targets.
+_MACOS = ["@platforms//os:macos"]
+
+undra_swift_library(
+    name = "hello",
+    bindings = "//:bindings",
+    ffi_module = "HelloCoreFFI",
+    module_name = "HelloCore",
+    target_compatible_with = _MACOS,
+)
+
+# The core the bindings call: the host library undra_core built (an app links the XCFramework of `core_ios` instead).
+cc_import(
+    name = "core",
+    shared_library = "//:core_host",
+    target_compatible_with = _MACOS,
+)
+
+swift_binary(
+    name = "hello_main",
+    testonly = True,
+    srcs = ["main.swift"],
+    target_compatible_with = _MACOS,
+    deps = [
+        ":core",
+        ":hello",
+    ],
+)
+
+# `bazel test //swift:hello_test`: the binary loads the core in process and calls it.
+sh_test(
+    name = "hello_test",
+    srcs = ["hello_test.sh"],
+    args = ["$(rootpath :hello_main)"],
+    data = [":hello_main"],
+    target_compatible_with = _MACOS,
+)

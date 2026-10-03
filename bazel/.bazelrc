@@ -1,0 +1,5 @@
+# Bounded: other builds share the machine.
+build --jobs=4
+common --enable_bzlmod
+# aspect_rules_js and aspect_rules_ts depend on aspect_tools_telemetry, which reports the rulesets a build uses to Aspect.
+common --repo_env=DO_NOT_TRACK=1

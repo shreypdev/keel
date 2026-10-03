@@ -55,6 +55,7 @@ mod detect;
 mod devtools;
 pub mod error;
 mod fsutil;
+mod lint;
 mod migrations;
 mod names;
 mod project;

@@ -465,6 +465,65 @@ jobs:
       - name: Run the Swift scenario runner
         run: bash contract-tests/run-all.sh swift
 
+  # ADR-061: the Bazel rules (bazel/) and their example workspace (examples/bazel). `bazel test //...` builds the to-do core for the
+  # host and the web with the pinned Rust 1.99.0 that Bazel fetches (rules_rust, by checksum), generates the bindings from the host
+  # library, compiles the Kotlin and TypeScript consumers and runs them against the real core (JNI, Node), and runs ktlint over the
+  # generated Kotlin with and without the exclusions `undra bindgen` writes. Bazel is pinned by .bazelversion (Bazelisk; the example's
+  # is a link to bazel/'s), the rulesets by MODULE.bazel, whose lock file is committed. The lock is not run with
+  # --lockfile_mode=error here: it records what the machine that wrote it resolved, per OS, and a Linux runner would fail on every
+  # entry a macOS developer made.
+  bazel-example:
+    name: Bazel example
+    runs-on: ubuntu-latest
+    env:
+      BAZELISK_VERSION: v1.29.0
+      # The sha256 of that release's bazelisk-linux-amd64.
+      BAZELISK_SHA256: 5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Bazelisk
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfLo "$RUNNER_TEMP/bin/bazel" "https://github.com/bazelbuild/bazelisk/releases/download/$BAZELISK_VERSION/bazelisk-linux-amd64"
+          echo "$BAZELISK_SHA256  $RUNNER_TEMP/bin/bazel" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bin/bazel"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # What the rulesets download (the Rust toolchain, the JDK, Node, binaryen, the crates): Bazel's repository cache, keyed by the
+      # lock files that name them.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/bazel-repository
+          key: bazel-repository-${{ runner.os }}-${{ hashFiles('examples/bazel/MODULE.bazel.lock', 'bazel/MODULE.bazel.lock', 'Cargo.lock') }}
+          restore-keys: bazel-repository-${{ runner.os }}-
+      - name: The rules' own tests (the Cargo.lock reader)
+        working-directory: bazel
+        run: bazel test //tests/... --repository_cache="$HOME/.cache/bazel-repository" --test_output=errors
+      - name: bazel test //... (host and web cores, bindings, Kotlin and TypeScript consumers, ktlint)
+        working-directory: examples/bazel
+        run: bazel test //... --repository_cache="$HOME/.cache/bazel-repository" --test_output=errors
+
+  # What only macOS can run, where rules_swift and the iOS core have Xcode: the Swift consumer runs the core in process, and the
+  # XCFramework (device and simulator slices) builds in a Bazel action. The Kotlin and TypeScript targets are the Linux job's.
+  # Every change runs it, like the other macOS jobs: what moves its result is the Undra crates, the Swift runtime, the CLI and
+  # the rules, which is nearly every change, and a job that can be skipped cannot be part of "All green".
+  bazel-example-macos:
+    name: "Bazel example (macOS, Swift and iOS)"
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Bazelisk
+        run: brew install bazelisk
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/bazel-repository
+          key: bazel-repository-${{ runner.os }}-${{ hashFiles('examples/bazel/MODULE.bazel.lock', 'bazel/MODULE.bazel.lock', 'Cargo.lock') }}
+          restore-keys: bazel-repository-${{ runner.os }}-
+      - name: The Swift consumer and the iOS core
+        working-directory: examples/bazel
+        run: |
+          bazel test //swift/... --repository_cache="$HOME/.cache/bazel-repository" --test_output=errors
+          bazel build //:mobile_ios --repository_cache="$HOME/.cache/bazel-repository"
+
   playground-web:
     # The playground's web app and its stories page (src/stories, rendered by stories.html with Vite alone; the modules are Component Story Format
     # over @undra/testkit): type-checked and built against the wasm core `undra build` makes.
@@ -586,7 +645,7 @@ jobs:
   all-green:
     name: All green
     if: always()
-    needs: [rust, leaf-features, ts, kotlin, wasm-ffi, macos, ios-floor, android, ffi-miri, ffi-asan, contracts, contracts-swift, playground-web, react-native]
+    needs: [rust, leaf-features, ts, kotlin, wasm-ffi, macos, ios-floor, android, ffi-miri, ffi-asan, contracts, contracts-swift, bazel-example, bazel-example-macos, playground-web, react-native]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
