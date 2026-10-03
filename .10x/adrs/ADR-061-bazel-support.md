@@ -51,7 +51,8 @@ The web size gate (ADR-052, R9: 120 KB gzipped for the hello-world core, measure
 every ruleset by version in `MODULE.bazel` with `MODULE.bazel.lock` committed (R7: the build's inputs are named).
 
 ```starlark
-load("@undra_rules//undra:defs.bzl", "undra_core", "undra_bindings", "undra_kt_jvm_library", "undra_ts_library", "undra_swift_library")
+load("@undra_rules//undra:defs.bzl", "undra_core", "undra_bindings", "undra_kt_jvm_library", "undra_swift_library")
+load("@undra_rules//undra:ts.bzl", "undra_ts_library")                # its own file: it loads aspect_rules_js (telemetry; review)
 load("@undra_rules//undra:android.bzl", "undra_android_library")      # its own file: it loads the Android rules
 
 undra_core(name, namespace, config = "undra.toml", srcs, workspace, platforms = ["host", "web"], release, symbols, wasm_opt, extra_path)
@@ -109,11 +110,13 @@ things, each a decision here:
    same toolchain and vendored crates, so the `undra` that builds a core is the `undra` of the checkout the core is built
    against, and a change to `undra-cli` or `undra-bindgen` is a change to an action's input. (When a release exists, `undra.source`
    with `urls` and an integrity is the same thing from an archive; a prebuilt binary would be a second way and is not added.)
-4. **The sources are a private copy, in a place named by what is built.** The action copies the project and the checkout into a
-   scratch directory (`tar -h`), so `undra build` writes `build/` and the shim into a place of its own whatever the sandbox does,
-   and the user's tree is never written to. The directory is `/tmp/undra-bazel/<digest of the inputs>`, not a random name, for the
-   reason in Consequences: Cargo hashes the absolute path of the core and of the Undra crates into every symbol, so a build in
-   another directory is another file. With the location a function of the inputs, the same inputs give the same bytes (below).
+4. **The sources are a private copy, in a place named by what is built.** The action copies the files its target declares (a
+   manifest the rule writes; `tar -h` follows the sandbox's symlinks) into a scratch directory, so `undra build` writes `build/` and
+   the shim into a place of its own whatever the spawn strategy, and the user's tree is never written to or read beyond what is
+   declared. The directory is `/tmp/undra-bazel-<hash of the mode, the target's label and the platform>`, not a random name, for
+   the reason in Consequences: the build's path reaches the symbol names, so a build in another directory is another file. With the
+   location a function of the target, the same inputs give the same bytes in every checkout (below). (As implemented first it was
+   named by a digest of the inputs, which the adversarial review found hashed nothing in a sandbox; see the Amendment.)
    The crates are unpacked where Cargo's own registry would put them (`$CARGO_HOME/registry/src/index.crates.io-1949cf8c6b5b557f`),
    so the `RemapRoots` of a release build map them to the label they get in a build that downloaded them.
 5. **The Undra crates stand in for the registry.** A core depends on `undra = "0.1"` like any app (the crates are not on crates.io
@@ -242,13 +245,15 @@ documented, and not built: the Rust toolchain of an Android *platform* needs a C
   web core of the example on an M-series Mac, and a fresh clone with a fresh Bazel output root runs the whole example (cores,
   bindings, four tests, Swift included) in 73 s once the toolchains are in the repository cache.
 * **The bytes are a function of the inputs, because the rules make the build location one; `undra build` alone is not.** Measured:
-  the same core built by `undra build` in three different directories gave three different wasm modules, 274.6 KB within 0.1% (Cargo
-  hashes a path dependency outside the workspace by its absolute path into `-C metadata`, which names the symbols `wasm-opt` and the
-  linker order their output by; `RemapRoots` keeps the path *strings* out of a release build, not that hash). A build in a random
-  scratch directory per action reproduced it: 274.1 to 275.1 KB over five runs of one action. Naming the directory by a digest of the
-  inputs fixed it for Bazel: the web core and the host library are **byte-identical** (sha256 `c47ec84c..`, `f002f43c..`) between two
-  clones, one built from the checkout by path and one from a source archive, each with a fresh output root. The CLI's own fix (build
-  the core from inside the shim's workspace) is a follow-up; nothing here depends on it.
+  the same core built by `undra build` in two directories gave two modules of 274,598 bytes (118,223 and 118,226 gzipped) with
+  different hashes, and Bazel's 274,053; `wasm-size.sh`'s hello world (the same template) is 274,592 / 118,234. The causes (the
+  adversarial review's measurement; the first text named only the second): the shim crate is named `undra_core_<hash of the project's
+  path>`, Cargo's disambiguator of a path package outside the workspace it builds (the core, the Undra crates) hashes its absolute
+  path, and LLVM's and `wasm-opt`'s folding and ordering go by those names (919 against 927 functions). `RemapRoots` keeps the path
+  *strings* out of a release build (both modules carry the same ones), not the names. The CLI run by hand in the action's directory
+  gives the action's bytes exactly, so the pipeline is the CLI's. With the directory named by the target, the web core, the host
+  library and the bindings are **byte-identical** between two clones with fresh output roots (sha256 `6e1c9ca6..`, 274,559 bytes,
+  118,209 gzipped; `1f6d743a..`). The CLI's own fix is a follow-up; nothing here depends on it.
 * Every committed generated Kotlin tree gains one line per file and four lint files per project; no declaration, no id and no
   schema hash moves. Merging with ADR-062's piece (`.gitattributes`, two JSON headers) is mechanical: regenerate each tree with
   `undra bindgen` after the merge.
@@ -258,8 +263,8 @@ documented, and not built: the Rust toolchain of an Android *platform* needs a C
   that link the XCFramework into an app; a published `undra` release as an archive for `undra.source` (the `urls` form is verified
   with a local archive); a crates.io flavour of the Undra crates when they are published (delete the `[patch]`).
 * The aspect rules (`aspect_rules_js`, `aspect_rules_ts`) depend on `aspect_tools_telemetry`, which reports which rulesets a build
-  uses to Aspect. The example sets `--repo_env=DO_NOT_TRACK=1` in its `.bazelrc` and says so; a repository that adopts the rules
-  decides for itself.
+  uses to Aspect unless the repository environment has `DO_NOT_TRACK`. Only `ts.bzl` loads them (Amendment 3); the docs tell a
+  TypeScript user to set `common --repo_env=DO_NOT_TRACK=1`, and the example and `bazel/` do.
 
 
 ## Implementation note
@@ -312,3 +317,47 @@ two crates; `build-all.mjs`, `check-links.mjs` and `sync-chrome --check` on the 
 `find`, `sed` forms that both accept, and the Linux sandbox's private `/tmp`), the macOS job on GitHub's `macos-15` image (Xcode 16 or
 17, not 26), the Android core and `undra_android_library` (no NDK C++ toolchain configured, above), SwiftLint's and ESLint's
 reading of the fragments (not installed), and `undra.source` from a published release (there is none).
+
+
+## Amendment (adversarial review, 2026-10-02)
+
+`.10x/reviews/2026-10-02-bazel-review.md` has the findings and the runs; what changed in the design:
+
+1. **What an action reads.** The stage was a copy of the execution root. In a sandbox every input is a symlink, so the "digest of
+   the inputs" (`find -type f`) hashed nothing and was a constant per platform; with `--spawn_strategy=local` the execution root is
+   the source tree, and the core action read the example's undeclared `.cargo/config.toml` and failed (reproduced). Every rule now
+   writes a manifest of its declared files and the action copies exactly those, then runs `undra` from the project's directory (Cargo
+   reads configuration from its working directory up: the execution root's parents are the output base's, on Linux below the home).
+2. **Where it builds, and why not a content digest.** The cause of the bytes moving with the directory is three things, measured on
+   the example's web core: `undra build` names the shim crate `undra_core_<fnv1a32 of the project's path>` (`shim.rs`), Cargo's crate
+   disambiguator of a path package outside the workspace it builds (the core, the Undra crates) hashes its absolute path, and LLVM's
+   and `wasm-opt`'s folding and ordering pick by those names: 919 against 927 functions, 274,053 against 274,598 bytes. The CLI run by
+   hand at the stage's path gave Bazel's bytes exactly (sha256 `c47ec84c..`), so the action builds what the CLI builds and only the
+   location differs. The stage is named by the target, not by the inputs' contents: a stable name keeps an unrelated change (a doc
+   comment) from renaming every symbol. The directory is its own lock (`mkdir -m 700` in sticky `/tmp`); a directory another user
+   holds sends the build to one of its own (the old shared `/tmp/undra-bazel` parent, `0755` and its creator's, made a second user's
+   build wait 30 minutes and fail, and let its owner tamper with others' builds). Under the output base it cannot live: that path is
+   per checkout and per user, which is exactly what must not reach the symbols.
+3. **Telemetry.** `defs.bzl` no longer loads `undra_ts_library`: it is in `ts.bzl`, because `aspect_rules_js` loads
+   `@aspect_tools_telemetry_report`, whose repository rule reports to Aspect unless `DO_NOT_TRACK` (or `ASPECT_TOOLS_TELEMETRY`) is in
+   the repository environment, which only the root repository's `.bazelrc` can set. A package that uses only the core, the bindings,
+   Kotlin or Swift never loads it; the docs' set-up section gives TypeScript users the line.
+4. **Linux.** `undra_swift_library` dropped its `target_compatible_with`; the first Linux run failed analysing the Swift toolchain.
+   Every target it makes, and the runtime's, is now Apple-only.
+5. **Android, exactly.** `undra_core(platforms = ["android"])` stops at analysis ("Unable to find a CC toolchain") even on a Mac with
+   NDK r27 and `cargo-ndk`: rules_rust needs a C++ toolchain for the Android platforms, which nothing registers. Declared, not built.
+   `undra_android_library` needs the SDK only and builds (`//android:hello --config=android`, by hand on macOS); CI does not run it,
+   since `rules_android` then fetches its own tools, one from android.googlesource.com without a checksum.
+6. **A JVM test loads the core by `$(rootpath)`.** The Kotlin runtime takes `undra.native.<namespace>.path` relative to the working
+   directory; `System.load` alone refused the relative path the rule's own docs led to.
+7. **The Kotlin annotation is not a compiler suppression.** kotlinc 2.4.20 still reports its warnings under `@file:Suppress("ALL",
+   "ktlint")` (only `"warnings"` silences them), so the runtime's `-Werror` build of the golden bindings is unaffected; the files say
+   ktlint 1.x, not "every version". Kept with the `.editorconfig`: the annotation travels with a file that leaves its tree (a source
+   jar, a copy) and is what detekt reads.
+8. **CI.** The macOS job runs only what Linux cannot (the Swift test, the iOS core); both jobs stay in "All green" and run on every
+   change: the Undra crates, the runtimes, the CLI and the rules move their results, which is nearly every change.
+
+Follow-ups, none blocking: `undra build` location-independent (name the shim by the project's id, build the core inside the shim's
+workspace; until then two checkouts of an app get different bytes outside Bazel); the Android core under Bazel (a C++ toolchain for
+the Android platforms; a stub one would do, since `cargo ndk` links); `node` for the web action (without it the CLI builds a debug
+host library to read the schema hash for the symbol manifest, about 5 s per web build); a Bazel disk or remote cache in CI.
