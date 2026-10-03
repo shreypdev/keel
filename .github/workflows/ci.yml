@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 
 # A piece's branch `wt/<slug>` is built on every push: a piece lands on main only when CI, Bench, Two cores (and Site, when the
 # branch touches its paths) are green on that branch's exact head (docs/AGENT_WORKFLOW.md, `scripts/wt.sh merge`). A newer push

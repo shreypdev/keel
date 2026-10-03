@@ -94,8 +94,11 @@ pushed, and `scripts/wt.sh merge <slug>` from the primary checkout does the rest
 open (`scripts/wt.sh pr <slug>` opens a draft early, so CI runs from the first push), marks it ready, waits for the
 checks, requires the four "All green" on the head (`scripts/wt-ci-check.sh pr-verdict`), merges with a merge commit
 (the tree that lands is the tree CI tested), verifies that `origin/main` contains the head, and cleans up (section
-5). GitHub refuses a merge whose checks are not green or whose branch is behind `main` when "require branches to
-be up to date" is on: then merge `main` in, push, and run it again. State commits (`.10x/status.md`,
+5). `main` uses GitHub's merge queue, not "require branches to be up to date": `gh pr merge` enqueues, the queue
+builds the merge result, runs the same workflows on it (`merge_group`), and merges when they are green, so the
+tree that lands is always a tested tree and a piece never has to re-run CI only because another landed first.
+The script's own check is the same idea: the branch contains `main`, or merging `main` into it changes nothing
+(a piece stacked on the one landing before it: `git merge origin/wt/<that>` before the final push). State commits (`.10x/status.md`,
 `.10x/handoff.md`) ride in the piece's pull request, pushed before its last run, or in a small pull request of
 their own. `--ff` is the fast-forward path for a repository without branch protection and for the scratch
 repositories of the tests; `--no-ci` goes with it only.
