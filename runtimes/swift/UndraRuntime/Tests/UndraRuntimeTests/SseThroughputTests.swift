@@ -99,9 +99,16 @@ final class SseThroughputTests: XCTestCase {
         let medium = try await best(rounds) { try await self.readThroughTheAdapter(server, n: 20_000, size: 512) }
         let large = try await best(rounds) { try await self.readThroughTheAdapter(server, n: 2_000, size: 4_096) }
         let binding = try await best(rounds) { try await self.readThroughTheBinding(server, n: 20_000, size: 512) }
+        // `swift test` builds for debugging (the package's tests do not build in release), so these lines are a debug build's and
+        // say so: the release figures of the ADR-047 amendment come from a harness outside the repository.
+        #if DEBUG
+            let build = "debug build"
+        #else
+            let build = "release build"
+        #endif
         func line(_ name: String, _ events: Int, _ pass: (seconds: Double, bytes: Int), _ note: String = "") {
-            print(String(format: "BENCH swift sse/%@ %.0f events/s (%.1f MB/s, %d events of %d bytes%@)", name,
-                         Double(events) / pass.seconds, Double(pass.bytes) / pass.seconds / 1e6, events, pass.bytes / events, note))
+            print(String(format: "BENCH swift sse/%@ %.0f events/s (%.1f MB/s, %d events of %d bytes%@, %@)", name,
+                         Double(events) / pass.seconds, Double(pass.bytes) / pass.seconds / 1e6, events, pass.bytes / events, note, build))
         }
         line("adapter_64B", 20_000, small)
         line("adapter_512B", 20_000, medium)
