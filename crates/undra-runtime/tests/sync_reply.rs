@@ -175,6 +175,7 @@ const fn method(
         takes_ctx: false,
         coalesce: false,
         docs: "",
+        generic: None,
     }
 }
 
@@ -229,6 +230,7 @@ static TRIPLE_META: FunctionMeta = FunctionMeta {
     takes_ctx: false,
     docs: "",
     dispatch: fn_dispatch,
+    generic: None,
 };
 
 inventory::submit! { Registration::Object(&FAST_META) }

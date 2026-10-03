@@ -1,0 +1,26 @@
+[
+ {
+  "workflow": "CI",
+  "name": "Kotlin runtime (JVM)",
+  "bucket": "fail",
+  "state": "FAILURE"
+ },
+ {
+  "workflow": "CI",
+  "name": "All green",
+  "bucket": "fail",
+  "state": "FAILURE"
+ },
+ {
+  "workflow": "Bench",
+  "name": "All green",
+  "bucket": "pending",
+  "state": "IN_PROGRESS"
+ },
+ {
+  "workflow": "Two cores",
+  "name": "All green",
+  "bucket": "pass",
+  "state": "SUCCESS"
+ }
+]

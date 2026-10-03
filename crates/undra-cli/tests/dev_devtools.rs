@@ -185,6 +185,27 @@ impl App {
         assert_eq!(status, ReplyStatus::Ok);
     }
 
+    /// `new TickerQueryHandle()`: the playground's polling query (its handle is not a store).
+    fn ticker(&mut self) -> u64 {
+        let id = ids::fnv1a32("query.ticker");
+        let (status, body) = self.call(
+            CallTarget::Constructor {
+                type_id: id,
+                method_id: id,
+            },
+            &[],
+        );
+        assert_eq!(status, ReplyStatus::Ok);
+        u64::decode_exact(&body).unwrap()
+    }
+
+    /// The ticker's `data` as last received.
+    fn ticks(&self, ticker: u64) -> Option<u32> {
+        self.values
+            .get(&(ticker, 0))
+            .and_then(|v| Option::<u32>::decode_exact(v).ok().flatten())
+    }
+
     /// Observes everything of `handle` (the first change-set arrives before this returns).
     fn observe_all(&mut self, handle: u64) {
         let mut w = Writer::new();
@@ -524,4 +545,70 @@ fn a_rebuild_with_a_page_open_replaces_the_runner_and_the_page_finds_the_new_cor
         )
         .then_some(())
     });
+}
+
+/// A time travel leaves a live query handle alone (ADR-059): the ticker keeps polling through it, a
+/// `refetch` is accepted, and the page never listed the handle as a store.
+#[test]
+fn time_travel_leaves_a_query_handle_polling_and_the_page_never_lists_it() {
+    let project = playground_copy("devtools-ticker");
+    let dev = Dev::start(&project, &["--no-watch"]);
+    let url = page_url(&dev);
+    let mut app = App::connect(&dev);
+    let counter = app.counter();
+    app.add(counter, 5);
+    app.observe_all(counter);
+    let mut page = Page::connect(&url);
+    let first_step = page.until("the first step", |m| match m {
+        ServerMsg::Step(s) => Some(s.step),
+        _ => None,
+    });
+
+    // The Remote tab opens: a query handle that polls every second.
+    let ticker = app.ticker();
+    app.observe_all(ticker);
+    app.read_until("two ticks", |a| a.ticks(ticker).is_some_and(|n| n >= 2));
+    app.add(counter, 3);
+    app.read_until("the count 8", |a| a.count(counter) == 8);
+    page.until("a step after the change", |m| match m {
+        ServerMsg::Step(s) if s.step > first_step => Some(()),
+        _ => None,
+    });
+
+    // Back to the step before the change, which is also before the handle existed.
+    page.send(ClientMsg::Restore {
+        request_id: 1,
+        step: first_step,
+    });
+    let traveled = page.until("the answer", |m| match m {
+        ServerMsg::Traveled(t) => Some(t.clone()),
+        _ => None,
+    });
+    assert!(
+        traveled.ok && traveled.dropped == 0,
+        "no store is gone: {traveled:?}"
+    );
+    app.read_until("the count back at 5", |a| a.count(counter) == 5);
+    // The handle is untouched: it goes on polling, and `refetch` is accepted.
+    let at_travel = app.ticks(ticker).unwrap();
+    app.read_until("the ticker still polling", |a| {
+        a.ticks(ticker).is_some_and(|n| n > at_travel)
+    });
+    let (status, _) = app.call(
+        CallTarget::Method {
+            handle: Handle(ticker),
+            method_id: ids::fnv1a32("query.refetch"),
+        },
+        &[],
+    );
+    assert_eq!(status, ReplyStatus::Ok, "refetch on the live handle");
+    // What the page was told is a store: the counter, never the handle.
+    for msg in &page.seen {
+        if let ServerMsg::Stores(stores) = msg {
+            assert!(
+                stores.iter().all(|s| s.handle != ticker),
+                "a query handle is not a store: {stores:?}"
+            );
+        }
+    }
 }

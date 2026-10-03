@@ -228,6 +228,7 @@ pub const RESERVED_ENTRIES: &[&str] = &[
     "UndraError",
     "UndraException",
     "UndraFFI",
+    "UndraFeature",
     "UndraHandle",
     "UndraIds",
     "UndraInbound",

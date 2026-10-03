@@ -24,3 +24,12 @@ error[E0592]: duplicate definitions with name `__UNDRA_FIELDS`
 ...
 24 |     pub type AnotherTodoPage = Page<Todo>;
    |              --------------- other definition for `__UNDRA_FIELDS`
+
+error[E0592]: duplicate definitions with name `UNDRA_TYPE_NAME`
+  --> tests/ui/e0070_second_alias.rs:18:10
+   |
+18 | pub type TodoPage = Page<Todo>;
+   |          ^^^^^^^^ duplicate definitions for `UNDRA_TYPE_NAME`
+...
+24 |     pub type AnotherTodoPage = Page<Todo>;
+   |              --------------- other definition for `UNDRA_TYPE_NAME`

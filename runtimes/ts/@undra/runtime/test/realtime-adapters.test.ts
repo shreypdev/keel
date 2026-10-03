@@ -14,6 +14,7 @@ import {
   webSocketPort,
 } from "../src/realtime.js";
 import { Inbox } from "../src/realtime/inbox.js";
+import { QUIET_MS } from "../src/realtime/lines.js";
 import { err, ok, sseCalls, text, wsCalls } from "./support/port-calls.js";
 import { type RealtimeServer, lastOn, startRealtimeServer, stopRealtimeServer, until } from "./support/realtime-server.js";
 
@@ -140,20 +141,51 @@ describe.each(CASES)("$name against the realtime server", ({ adapter, refusedSta
     else expect(failed).toEqual(new WsError.Refused(null, "the WebSocket could not connect"));
   });
 
+  // "At once" is not a number of milliseconds a machine can be held to: a loopback round trip, and the 2 ms timer that ends a burst, take as long as the machine
+  // lets them (a timer of 2 ms fires after 17 on a busy hosted runner). So the adapter is wrapped to arm a timer of the same length at the moment it hands each message
+  // to the binding, where the binding arms its own quiet timer, and what is measured is how much later than that one the receive was answered. A message held for a
+  // linger answers milliseconds after it on a machine whose timers can tell 2 ms from 8; a slow machine moves both timers and leaves the difference alone.
   it("a lone message waiting in a receive is answered at once (2 ms of quiet), not after a long linger", async () => {
-    const { conn } = ok(await api.connect(`${server.wsUrl}/ws/echo`));
-    const times: number[] = [];
-    for (let i = 0; i < 10; i++) {
-      const waiting = api.receive(conn, 16);
-      const sent = performance.now();
-      ok(await api.send(conn, text(String(i))));
+    let reference: Promise<number> = Promise.resolve(0);
+    const inner = adapter();
+    const tapped: WebSocketAdapter = {
+      async connect(url, protocols, headers) {
+        const connection = await inner.connect(url, protocols, headers);
+        return {
+          protocol: connection.protocol,
+          send: (message) => connection.send(message),
+          close: (code, reason) => connection.close(code, reason),
+          messages: () => ({
+            [Symbol.asyncIterator]() {
+              const iterator = connection.messages()[Symbol.asyncIterator]();
+              return {
+                async next() {
+                  const step = await iterator.next();
+                  if (step.done !== true) reference = new Promise((resolve) => setTimeout(() => resolve(performance.now()), QUIET_MS));
+                  return step;
+                },
+                return: (value) => iterator.return?.(value) ?? Promise.resolve({ done: true, value: undefined }),
+              };
+            },
+          }),
+        };
+      },
+    };
+    const lone = wsCalls(webSocketPort(tapped));
+    const { conn } = ok(await lone.connect(`${server.wsUrl}/ws/echo`));
+    const after: number[] = [];
+    for (let i = 0; i < 20; i++) {
+      const waiting = lone.receive(conn, 16);
+      ok(await lone.send(conn, text(String(i))));
       expect(await waiting).toEqual({ ok: [text(String(i))] });
-      times.push(performance.now() - sent);
+      const answered = performance.now();
+      after.push(answered - (await reference));
     }
-    times.sort((a, b) => a - b);
-    expect(times[5], "the median round trip, loopback (about 3 ms)").toBeLessThan(25);
-    expect(times[9], "the slowest").toBeLessThan(100);
-    ok(await api.close(conn, 1000, ""));
+    after.sort((a, b) => a - b);
+    expect(after[10], `a lone message was answered ${after[10]} ms (the median of 20) after a quiet-period timer armed as it arrived`).toBeLessThan(4);
+    // The tail: all but three rounds (one in which the machine held up the binding's answer and not the timer beside it says nothing about the binding).
+    expect(after[17], "a lone message waited 100 ms or more past its quiet-period timer in three rounds of 20").toBeLessThan(100);
+    ok(await lone.close(conn, 1000, ""));
   });
 
   it("a drop without a close frame ends the stream with Network", async () => {
@@ -250,7 +282,8 @@ describe("a flood of 100,000 small messages while the core does not pull: what a
     await inboxHighWater(async (high) => {
       const api = wsCalls(webSocketPort(nodeWebSocket()));
       const { conn } = ok(await api.connect(`${server.wsUrl}/ws/flood?n=100000`));
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // The first socket read is parsed whole, in one callback: once the queue holds anything, that read is in it. (A fixed wait for it was a bet on the machine.)
+      await until("the first socket read to be queued", () => high().messages > 0, 10_000);
       const early = high();
       await new Promise((resolve) => setTimeout(resolve, 500));
       expect(high(), "nothing more was read while the core did not pull").toEqual(early);
@@ -342,6 +375,18 @@ describe("browserWebSocket, scripted", () => {
     socket.fire("error", { message: "" });
     socket.fire("close", { code: 1006, reason: "" });
     await expect(opening).rejects.toEqual(new WsError.Refused(null, "the WebSocket could not connect"));
+  });
+
+  it("an error before open settles the connect without waiting for a close (Node 22's WebSocket never fires one after a failed upgrade)", async () => {
+    const opening = browserWebSocket({ WebSocket: Socket }).connect("ws://x.test/", [], []);
+    const socket = FakeSocket.last as FakeSocket;
+    socket.fire("error", { message: "Received network error or non-101 status code." });
+    await expect(opening).rejects.toEqual(new WsError.Refused(null, "Received network error or non-101 status code."));
+    // A platform that does fire the close afterwards changes nothing: the connect is settled once.
+    socket.fire("close", { code: 1006, reason: "" });
+    const bare = browserWebSocket({ WebSocket: Socket }).connect("ws://x.test/", [], []);
+    (FakeSocket.last as FakeSocket).fire("error", {});
+    await expect(bare).rejects.toEqual(new WsError.Refused(null, "the WebSocket could not connect"));
   });
 
   it("past maxBufferedMessages it closes (without a code where 1008 is refused) and ends Closed(1008) after what it held", async () => {

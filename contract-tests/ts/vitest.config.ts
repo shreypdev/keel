@@ -1,20 +1,28 @@
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { againstDist } from "../../runtimes/ts/@undra/runtime/scripts/test-dist-plugin.mjs";
 import ScenarioReporter from "./src/reporter.js";
 
 const at = (path: string): string => fileURLToPath(new URL(path, import.meta.url));
 
+// UNDRA_TS_DIST=<runtime>/dist/index.js runs the scenarios against the runtime's production build (ADR-057: renamed private properties)
+// instead of its sources: what an app ships. Run `npm run build` in runtimes/ts/@undra/runtime first.
+const built = process.env.UNDRA_TS_DIST === undefined ? undefined : dirname(process.env.UNDRA_TS_DIST);
+const runtime = (module: string): string => (built === undefined ? at(`../../runtimes/ts/@undra/runtime/src/${module}.ts`) : join(built, `${module}.js`));
+
 export default defineConfig({
+  plugins: built === undefined ? [] : [againstDist(built)],
   resolve: {
     alias: {
       // The runtime and the generated bindings are used from their TypeScript sources, exactly as
       // the playground's web app does, so a change to either is tested without a build step.
       // The more specific alias first: the first match wins, and `@undra/runtime` would claim the subpath too.
-      "@undra/runtime/worker": at("../../runtimes/ts/@undra/runtime/src/worker.ts"),
-      "@undra/runtime/realtime": at("../../runtimes/ts/@undra/runtime/src/realtime.ts"),
-      "@undra/runtime/db-worker": at("../../runtimes/ts/@undra/runtime/src/db-worker.ts"),
-      "@undra/runtime/db": at("../../runtimes/ts/@undra/runtime/src/db.ts"),
-      "@undra/runtime": at("../../runtimes/ts/@undra/runtime/src/index.ts"),
+      "@undra/runtime/worker": runtime("worker"),
+      "@undra/runtime/realtime": runtime("realtime"),
+      "@undra/runtime/db-worker": runtime("db-worker"),
+      "@undra/runtime/db": runtime("db"),
+      "@undra/runtime": runtime("index"),
       "@undra/testkit": at("../../runtimes/ts/@undra/testkit/src/index.ts"),
       "@playground/core": at("../../examples/playground/generated/ts/src/index.ts"),
       // S26: the playground core under two more namespaces (ADR-044), each with its own bindings.

@@ -288,6 +288,10 @@ export function startRealtimeServer({ port = 0, host = "127.0.0.1" } = {}) {
         },
       ),
     );
+    // A client that goes away without a close frame ends its half of the connection and says nothing more (a platform that
+    // tears the connection down before the frame is written: URLSession before macOS 26 / iOS 26): answer it by ending
+    // ours, as a WebSocket server does, so that `clientClosed` says the client left.
+    socket.on("end", () => socket.end());
     socket.on("close", () => {
       c.clientClosed = true;
     });

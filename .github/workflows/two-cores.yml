@@ -23,9 +23,10 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request or to a piece's branch (`wt/<slug>`, docs/AGENT_WORKFLOW.md) cancels the run it supersedes; a run on main never is.
 concurrency:
-  group: two-cores-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: two-cores-${{ (github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/wt/')) && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/wt/') }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -38,7 +39,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
       - uses: Swatinem/rust-cache@v2
@@ -60,7 +61,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: aarch64-linux-android,x86_64-linux-android
       - uses: Swatinem/rust-cache@v2
@@ -99,7 +100,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
@@ -109,7 +110,7 @@ jobs:
           java-version: "17"
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Install kotlinc and kotlinx-coroutines
         run: |
           curl -sSfL -o kotlinc.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
@@ -127,3 +128,20 @@ jobs:
         run: examples/two-cores/jvm/run.sh
       - name: Node
         run: examples/two-cores/node/run.sh
+
+  # The one check branch protection requires: green only when every job above succeeded (a failed, cancelled or
+  # skipped job fails it). `if: always()` so it reports after failures too; without it a failed job leaves the
+  # check "expected" forever and a pull request can never merge. Name and job id are the same in every workflow.
+  all-green:
+    name: All green
+    if: always()
+    needs: [ios, android, jvm-and-node]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' >/dev/null

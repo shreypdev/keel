@@ -1,5 +1,6 @@
 import { WireError } from "./errors.js";
 import { type Uuid, encodeUuid } from "./types.js";
+import { msg } from "../messages.js";
 
 const ENCODER = new TextEncoder();
 const U32_MAX = 0xffff_ffff;
@@ -28,7 +29,7 @@ const SCRATCH = new DataView(new ArrayBuffer(8));
 const SCRATCH_BYTES = new Uint8Array(SCRATCH.buffer);
 
 function outOfRange(ty: string, value: unknown): RangeError {
-  return new RangeError(`${ty} out of range: ${String(value)}`);
+  return new RangeError(msg(233, ty, String(value)));
 }
 
 /**

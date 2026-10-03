@@ -222,7 +222,7 @@ Nothing in this ADR changes that path; both tests pass on the optimised build as
   the others, rejects a record already over its own gate, and its test fails when a record line has no
   table or a table no record line. `[size."web/hello-runtime-js"]`: `budget_gzip_bytes = 26000`, the record
   and `tolerance = 0.05` (the ceiling is the budget today: 26,000 bytes against a 24,841 record).
-* CI: a `size` job in `bench.yml` (Rust 1.98.1 with the wasm target, as every CI job pins it; binaryen
+* CI: a `size` job in `bench.yml` (Rust 1.99.0 with the wasm target, as every CI job pins it; binaryen
   `version_133` from its GitHub release, the step failing unless `wasm-opt --version` says 133; Node and
   `npm ci` for the runtime line) runs the script and uploads the JSON as an artifact. It needs no secret
   and no write permission, so it runs the same on a pull request from a fork.
@@ -303,8 +303,8 @@ script, not twiggy's shallow bytes (gzip is not additive).
 ## Risks
 
 * **A toolchain update moves the number by more than 5%.** Then the gate fails on a commit that changed no
-  code; the fix is to re-record (and to look at why). CI pins Rust (1.98.1, the version the record was
-  measured with) and binaryen, so this happens only at a deliberate toolchain bump, which re-records in the
+  code; the fix is to re-record (and to look at why). CI pins Rust (1.99.0, the version the record was
+  measured with since the bump of 2026-10-02: 116,690 gzipped bytes at 1.98.1, 116,181 at 1.99.0) and binaryen, so this happens only at a deliberate toolchain bump, which re-records in the
   same commit.
 * **The runtime-JS measurement depends on Vite's chunking and minifier.** A Vite update in the runtime's
   lockfile can move it by more than 5% with no runtime change; the fix is to re-record in the same commit
@@ -622,3 +622,32 @@ recorded 116,628 at its own path without the remap): wasm **116,864** gzipped at
 JavaScript up front **22,105**, 5 over its 22,100 (`types-paging`'s 22,068 plus this piece's +39): trimmed to **22,100** by letting an
 aborted call settle its promise before the cancel goes out (no no-op `reject` on the abandoned entry) and by the shorter name of
 the restart counter (`_era`). That is no headroom: the next change to the chunk makes room or restates the budget here.
+
+## Amendment (2026-10-02, `ts-runtime-16k`, ADR-057): the JavaScript gate is 16,000, and what it measures
+
+ADR-057 measured the levers the `ts-size-e4` amendment declined ("16 KB would mean removing behaviour") and the founder accepted
+the plan: `web/hello-runtime-js` is **15,680** bytes gzipped against a budget of **16,000** (was 22,100), and no behaviour is removed.
+What this ADR said about the number changes in four places.
+
+* **What is measured.** The runtime as an app installs it: the gate builds the package (`npm run build`, the production flavour in
+  `dist`, the readable one in `dist/dev`), links it into the project's `node_modules` and lets Vite resolve `@undra/runtime`
+  through `exports`, which selects the production flavour (messages as `T<code>` with their values and a link, private properties
+  renamed). A chunk that holds a sentence of the development table fails the run.
+* **The preload helper is not the runtime.** Vite's preload helper, the virtual module the build adds to whichever chunk has an
+  `import()`, is a chunk of its own and is reported as `bundler_gzipped` (691) beside the number. The other reading is gated too:
+  `web/hello-runtime-js-with-helper` (the helper left in the chunk, 16,191) at 16,600.
+* **The modules are part of the record.** `web-size.jsonl` lists the runtime modules that hold code in the first chunk; a run whose
+  list differs from the committed one fails and names the module, because a re-export from a module with code of its own can bring a
+  module in without any import of it (ADR-057, the module rule; `up-front.test.ts` is the cheap guard of the same rule).
+* **A page that uses everything is gated.** `web/all-features-runtime-js` (the playground's bindings with recovery, a panic handler,
+  `stats`, `snapshot`, `restore` and a background run; the first chunk plus every chunk of the runtime it loads on demand, the Worker
+  script excepted) is 40,100 against 42,400 (was 42,385): the plan may move bytes out of the first chunk, it may not make that
+  page load more.
+
+The "Why it stops at 21 KB" section of the `ts-size-e4` amendment is superseded; its levers (the on-demand transports and default
+ports) stand, and ADR-057's rows 1 to 15 are what came after. `scripts/wasm-size.sh`, `scripts/web-size-runtime.mjs`,
+`scripts/web-size-all-features.ts`, `bench/budgets.toml` (three `[size]` tables for the JavaScript, comments with the history) and the
+size job of `bench.yml` follow. The wasm line is unchanged by this piece.
+The piece's review moved 131 bytes back into the first chunk (`snapshot`/`restore` at the call, the background window without a
+fetch: ADR-057, "Review"): recorded **15,811**, with the helper 16,333, all features 40,221; after its lows and the merge of ADR-059,
+**15,774**, 16,285 and 39,922.

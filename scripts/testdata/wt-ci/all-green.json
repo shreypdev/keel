@@ -1,0 +1,7 @@
+[
+  {"workflowName":"CI","status":"completed","conclusion":"success","createdAt":"2026-10-02T14:00:00Z","databaseId":101},
+  {"workflowName":"Bench","status":"completed","conclusion":"success","createdAt":"2026-10-02T14:00:01Z","databaseId":102},
+  {"workflowName":"Two cores","status":"completed","conclusion":"success","createdAt":"2026-10-02T14:00:02Z","databaseId":103},
+  {"workflowName":"Site","status":"completed","conclusion":"success","createdAt":"2026-10-02T14:00:03Z","databaseId":104},
+  {"workflowName":"RN devices","status":"completed","conclusion":"failure","createdAt":"2026-10-02T14:00:04Z","databaseId":105}
+]

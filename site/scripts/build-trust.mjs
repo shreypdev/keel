@@ -28,8 +28,13 @@ const scenarios = [...read(join(ROOT, "contract-tests", "scenarios.md")).matchAl
   title: m[2].replace(/\s*\([^)]*\)\s*$/, ""),
   webOnly: /TypeScript only/.test(m[2]),
 }));
-scenarios.forEach((s, i) => {
-  if (s.id !== `S${String(i + 1).padStart(2, "0")}`) throw new Error(`contract-tests/scenarios.md: ${s.id} is out of order (expected S${String(i + 1).padStart(2, "0")})`);
+// In order, each id above the last. A number may be skipped: one is held for a piece that has not landed yet (S34, ADR-059 took
+// S35), and the grid counts the scenarios the file defines, not the highest id.
+let previous = 0;
+scenarios.forEach((s) => {
+  const n = Number(s.id.slice(1));
+  if (n <= previous) throw new Error(`contract-tests/scenarios.md: ${s.id} is out of order (after S${String(previous).padStart(2, "0")})`);
+  previous = n;
 });
 const runs = (s, platform) => !s.webOnly || platform === "TS";
 const cells = scenarios.length * PLATFORMS.length - scenarios.filter((s) => s.webOnly).length * (PLATFORMS.length - 1);

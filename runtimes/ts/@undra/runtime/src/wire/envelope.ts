@@ -1,6 +1,7 @@
 import { WireError } from "./errors.js";
 import { Kind } from "./kind.js";
 import { UndraReader } from "./reader.js";
+import { msg } from "../messages.js";
 
 export { Kind };
 
@@ -38,11 +39,11 @@ export interface Envelope {
  */
 export function encodeEnvelope(kind: Kind, seq: number, schemaHash: bigint, payload: Uint8Array): Uint8Array {
   if (!Number.isInteger(kind) || kind < MIN_KIND || kind > MAX_KIND) {
-    throw new RangeError(`unknown envelope kind: ${String(kind)}`);
+    throw new RangeError(msg(220, String(kind)));
   }
-  if (seq >>> 0 !== seq) throw new RangeError(`envelope seq out of range: ${String(seq)}`);
+  if (seq >>> 0 !== seq) throw new RangeError(msg(221, String(seq)));
   if (BigInt.asUintN(64, schemaHash) !== schemaHash) {
-    throw new RangeError(`envelope schema hash out of range: ${String(schemaHash)}`);
+    throw new RangeError(msg(222, String(schemaHash)));
   }
   if (payload.length > U32_MAX) {
     throw new WireError({ code: "length_too_large", len: payload.length, at: HEADER_LEN - 4 });

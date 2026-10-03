@@ -22,7 +22,7 @@ import {
   encodePortReply,
 } from "../src/wire/index.js";
 import { STUB, compileStub } from "./support/stub-core.js";
-import { captureLog, track } from "./support/harness.js";
+import { captureLog, track, waitFor } from "./support/harness.js";
 import { channelWorker } from "./support/worker.js";
 import { u32 } from "./support/store.js";
 
@@ -65,7 +65,7 @@ async function driven(stub: Parameters<typeof compileStub>[0] = {}, init: { prot
   };
   const stop = runWorker(scope);
   deliver({ t: "init", wasm: { kind: "module", module }, expectedSchemaHash: SCHEMA, platform: "test", devtools: false, logLevel: 2, ...init });
-  for (let i = 0; i < 200 && !messages.some((m) => m.t === "ready" || m.t === "failed"); i++) await new Promise((resolve) => setTimeout(resolve, 1));
+  await waitFor("the worker to be ready or to fail", () => messages.some((m) => m.t === "ready" || m.t === "failed"));
   const failed = messages.find((m) => m.t === "failed") as { failure?: { message?: string } } | undefined;
   expect(failed?.failure?.message).toBeUndefined();
   expect(messages.some((m) => m.t === "ready")).toBe(true);
@@ -228,8 +228,11 @@ describe("protocol 3: the worker answers a port where it is implemented (ADR-049
     const w = await driven({}, { protocol: 3, asyncPorts: [], portsModule: portsModule("async") });
     w.deliver({ t: "envelope", data: portCall() });
     expect((await w.envelopes()).map((p) => p.kind), "the core waits").toEqual([]);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    const posted = await w.envelopes();
+    const posted: Posted[] = [];
+    await waitFor("the port's answer", async () => {
+      posted.push(...(await w.envelopes()));
+      return posted.some((p) => p.kind === Kind.Reply);
+    });
     expect(stubReply(posted).port).toEqual({ status: PortStatus.Ok, body: [3, 0, 0, 0, ...u32(5)] });
     w.stop();
   });
@@ -266,7 +269,7 @@ describe("protocol 3: the worker answers a port where it is implemented (ADR-049
     for (const fn of listeners) {
       fn({ data: { t: "init", wasm: { kind: "module", module }, expectedSchemaHash: SCHEMA, platform: "test", devtools: false, logLevel: 2, protocol: 3, asyncPorts: [], portsModule: url } } as MessageEvent);
     }
-    for (let i = 0; i < 200 && !posted.some((m) => m.t === "failed"); i++) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor("the start to fail", () => posted.some((m) => m.t === "failed"));
     const failed = posted.find((m) => m.t === "failed");
     expect(failed?.failure).toMatchObject({ kind: "transport", reason: "handshake" });
     expect(failed?.failure?.message).toMatch(message);
@@ -294,7 +297,7 @@ describe("what the core says while it initialises", () => {
     for (const fn of listeners) {
       fn({ data: { t: "init", wasm: { kind: "module", module }, expectedSchemaHash: SCHEMA, platform: "test", devtools: false, logLevel: 2, protocol: 2 } } as MessageEvent);
     }
-    for (let i = 0; i < 100 && !messages.some((m) => m.t === "ready"); i++) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor("the worker to be ready", () => messages.some((m) => m.t === "ready"));
     const ready = messages.findIndex((m) => m.t === "ready");
     expect(ready).toBeGreaterThan(0);
     const before = messages.slice(0, ready).flatMap((m) => (m.t === "envelopes" ? (m.data as ArrayBuffer[]) : m.t === "envelope" ? [m.data as ArrayBuffer] : []));

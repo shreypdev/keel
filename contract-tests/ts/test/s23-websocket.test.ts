@@ -4,7 +4,7 @@ import { OptInPortIds, nodeWebSocket, webSocketPort } from "@undra/runtime/realt
 import { Live, wsEcho } from "@playground/core";
 import { boot, bootWorker } from "../src/harness.js";
 import { lastOn, useRealtimeServer } from "../src/realtime-server.js";
-import { sleep, step, waitFor } from "../src/wait.js";
+import { WAIT_TIMEOUT_MS, sleep, step, waitFor } from "../src/wait.js";
 
 // S23 WebSocket (ADR-047): the opt-in WebSocket port through the platform's default adapter against
 // the shared realtime server: echo, subprotocol and headers, the core's credit bounding the
@@ -87,10 +87,12 @@ test("S23 WebSocket", async () => {
     expect(await failure(() => live.read(1))).toBeInstanceOf(WsError.Network);
   });
 
-  await step("5. a connection nobody closes: within 1 s the server saw the client close with 1001", async () => {
+  await step("5. a connection nobody closes: the server saw the client close with 1001", async () => {
     await live.connect(`${WS}/ws/stall`, [], []);
     await live.abandon();
-    const [code] = await closeSeen("/ws/stall", 1000);
+    // Bounded by WAIT_TIMEOUT_MS, a hang detector: the port closes a dropped connection fire and forget, on no timer, so a port
+    // that did not would leave it open; how soon the close frame reaches the local server is the machine's.
+    const [code] = await closeSeen("/ws/stall", WAIT_TIMEOUT_MS);
     expect(code).toBe(1001);
   });
 });

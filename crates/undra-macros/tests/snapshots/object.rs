@@ -519,6 +519,7 @@ const _: () = {
                 is_async: false,
                 takes_ctx: true,
                 coalesce: false,
+                generic: ::core::option::Option::None,
                 docs: "Creates one.",
             },
             ::undra::meta::MethodMeta {
@@ -537,6 +538,7 @@ const _: () = {
                 is_async: false,
                 takes_ctx: false,
                 coalesce: false,
+                generic: ::core::option::Option::None,
                 docs: "",
             },
         ],
@@ -558,6 +560,7 @@ const _: () = {
                 is_async: false,
                 takes_ctx: false,
                 coalesce: false,
+                generic: ::core::option::Option::None,
                 docs: "Adds.",
             },
             ::undra::meta::MethodMeta {
@@ -580,6 +583,7 @@ const _: () = {
                 is_async: false,
                 takes_ctx: false,
                 coalesce: false,
+                generic: ::core::option::Option::None,
                 docs: "",
             },
             ::undra::meta::MethodMeta {
@@ -595,6 +599,7 @@ const _: () = {
                 is_async: true,
                 takes_ctx: false,
                 coalesce: false,
+                generic: ::core::option::Option::None,
                 docs: "",
             },
             ::undra::meta::MethodMeta {
@@ -617,6 +622,7 @@ const _: () = {
                 is_async: true,
                 takes_ctx: false,
                 coalesce: false,
+                generic: ::core::option::Option::None,
                 docs: "",
             },
             ::undra::meta::MethodMeta {
@@ -634,6 +640,7 @@ const _: () = {
                 is_async: false,
                 takes_ctx: false,
                 coalesce: false,
+                generic: ::core::option::Option::None,
                 docs: "",
             },
         ],

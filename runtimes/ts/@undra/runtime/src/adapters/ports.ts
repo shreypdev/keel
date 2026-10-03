@@ -18,6 +18,7 @@ import {
   type TimerAdapter,
   type UndraPanicReport,
 } from "./types.js";
+import { msg } from "../messages.js";
 
 /*
  * `PortImpl` builders for the standard ports (SPEC 8): each wraps a typed
@@ -201,7 +202,7 @@ export function rngPort(rng: RngAdapter): PortImpl {
     methods: {
       [PortIds.Rng.fill]: (args) => {
         const len = readArgs(args, (r) => r.readU32());
-        if (len > MAX_RNG_BYTES) throw new RangeError(`Rng.fill: ${len} bytes requested, the limit is ${MAX_RNG_BYTES}`);
+        if (len > MAX_RNG_BYTES) throw new RangeError(msg(19, len, MAX_RNG_BYTES));
         const out = new Uint8Array(len);
         rng.fill(out);
         return encodeValue(codecs.bytes, out);
@@ -250,7 +251,7 @@ export function diagnosticsPort(onPanic: ((report: UndraPanicReport) => void) | 
         const report = readArgs(args, readPanicReport);
         try {
           if (onPanic !== undefined) onPanic(report);
-          else host.log?.log(4, "undra::panic", `${report.operation === "" ? "panic" : report.operation}: ${report.message} (${report.location})`);
+          else host.log?.log(4, "undra::panic", msg(20, report.operation === "" ? "panic" : report.operation, report.message, report.location));
         } catch (thrown) {
           if (host.fail === undefined) throw thrown;
           host.fail(thrown);

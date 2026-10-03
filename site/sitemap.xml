@@ -5,9 +5,9 @@
   <url><loc>https://shreypdev.github.io/undra/docs/api-kotlin.html</loc><lastmod>2026-10-01</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/api-swift.html</loc><lastmod>2026-10-01</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/api-typescript.html</loc><lastmod>2026-10-01</lastmod></url>
-  <url><loc>https://shreypdev.github.io/undra/docs/architecture.html</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/undra/docs/architecture.html</loc><lastmod>2026-10-02</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/callbacks.html</loc><lastmod>2026-10-02</lastmod></url>
-  <url><loc>https://shreypdev.github.io/undra/docs/cli.html</loc><lastmod>2026-10-01</lastmod></url>
+  <url><loc>https://shreypdev.github.io/undra/docs/cli.html</loc><lastmod>2026-10-02</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/concepts.html</loc><lastmod>2026-09-30</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/cookbook/auth.html</loc><lastmod>2026-10-01</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/cookbook/forms.html</loc><lastmod>2026-10-01</lastmod></url>
@@ -21,6 +21,7 @@
   <url><loc>https://shreypdev.github.io/undra/docs/cookbook/upload.html</loc><lastmod>2026-10-01</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/db.html</loc><lastmod>2026-10-01</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/errors.html</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/undra/docs/generics.html</loc><lastmod>2026-10-02</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/getting-started.html</loc><lastmod>2026-10-02</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/objects.html</loc><lastmod>2026-10-02</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/paging.html</loc><lastmod>2026-10-02</lastmod></url>
@@ -29,12 +30,13 @@
   <url><loc>https://shreypdev.github.io/undra/docs/production.html</loc><lastmod>2026-10-01</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/queries.html</loc><lastmod>2026-09-30</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/realtime.html</loc><lastmod>2026-10-01</lastmod></url>
+  <url><loc>https://shreypdev.github.io/undra/docs/reviewing-generated-code.html</loc><lastmod>2026-10-02</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/sample.html</loc><lastmod>2026-10-01</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/several-cores.html</loc><lastmod>2026-10-01</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/testing.html</loc><lastmod>2026-10-01</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/types.html</loc><lastmod>2026-10-02</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/updates.html</loc><lastmod>2026-10-01</lastmod></url>
-  <url><loc>https://shreypdev.github.io/undra/docs/web.html</loc><lastmod>2026-10-01</lastmod></url>
+  <url><loc>https://shreypdev.github.io/undra/docs/web.html</loc><lastmod>2026-10-02</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/blog/</loc><lastmod>2026-10-02</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/blog/reads-never-cross-the-boundary/</loc><lastmod>2026-10-02</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/blog/undra-vs-kotlin-multiplatform/</loc><lastmod>2026-10-02</lastmod></url>

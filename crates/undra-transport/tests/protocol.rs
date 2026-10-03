@@ -77,6 +77,9 @@ fn clients_that_did_not_ask_for_dev_mode_do_not_receive_devtools_records() {
 fn the_cores_log_records_reach_the_client_and_the_sink() {
     let f = start();
     let mut client = f.client();
+    // The server sends its Hello before it claims the slot (`Session::on_hello`), so the client can read it before the bridge
+    // forwards anything to it: a record logged in between reaches the sink only, and the loop below would wait for silence.
+    f.eventually("the bridge sees the client", |f| f.bridge.is_connected());
     f.rt.log(log::WARN, "app::sync", "careful");
     let frame = loop {
         let frame = client.recv_kind(Kind::Log);

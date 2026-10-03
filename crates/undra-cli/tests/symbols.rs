@@ -16,7 +16,7 @@
 //! | macOS host | the harness against `build/host/lib<ns>.dylib` | natively | `atos`, with the dSYM next to the library |
 //!
 //! A size test builds the same core with `--no-symbols` (the profile of before ADR-046) and checks the
-//! shipped artefacts did not grow. Tests skip with a message when a toolchain is absent, and fail
+//! shipped artefacts did not grow: on Android, section by section (`not_the_plain_library`). Tests skip with a message when a toolchain is absent, and fail
 //! when `UNDRA_REQUIRE_TOOLCHAINS=1`.
 
 mod common;
@@ -585,7 +585,101 @@ struct Device {
     readelf: PathBuf,
 }
 
+/// One section of an ELF file, as `llvm-readelf -S -W` lists it.
+#[derive(Debug)]
+struct ElfSection {
+    name: String,
+    /// `PROGBITS`, `NOBITS`, `STRTAB`, ...
+    kind: String,
+    size: u64,
+}
+
+/// The sections of the code: what `debug = "line-tables-only"` lets LLVM lay out differently.
+const CODE_SECTIONS: [&str; 4] = [".text", ".eh_frame", ".eh_frame_hdr", ".gcc_except_table"];
+
+/// Why the Android library `with` (built with symbols, ADR-046, then stripped by `undra build`)
+/// is not the library `plain` (built with `--no-symbols`: `debug = false`, `strip = "symbols"`,
+/// what shipped before) without its symbols; `None` when it is. What keeping the symbols must not
+/// do to what ships, and what each comparison is:
+///
+/// * add a section: the same sections, in the same order, of the same kinds (a `.debug_*`,
+///   `.symtab` or `.strtab` left behind would be one), compared exactly;
+/// * change the data: every section that holds bytes in the file and is not code (`.rodata`,
+///   `.data`, the relocations, the dynamic symbols, the notes) has the same size, exactly;
+///   `.shstrtab`, which `llvm-strip` writes anew, is not larger;
+/// * change the code: the code and its unwind tables differ by at most a thousandth. Line tables
+///   do not change what is compiled, but LLVM's output with them is not byte-identical (a
+///   function's alignment here and there: measured 0 or 16 bytes over 2.1 MB of `.text`, either
+///   way, on this branch and before ADR-058). A thousandth is two orders above that and two below
+///   what a change in what is compiled costs (a dependency, an opt-level, an inlining policy).
+///
+/// The file sizes are not compared: they move with that noise, and an exact `<=` on them failed
+/// on code that kept the symbols correctly.
+fn not_the_plain_library(plain: &[ElfSection], with: &[ElfSection]) -> Option<String> {
+    let layout = |sections: &[ElfSection]| -> Vec<(String, String)> {
+        sections
+            .iter()
+            .map(|s| (s.name.clone(), s.kind.clone()))
+            .collect()
+    };
+    if layout(plain) != layout(with) {
+        return Some(format!(
+            "has other sections than the --no-symbols build: {:?} against {:?}",
+            layout(with),
+            layout(plain)
+        ));
+    }
+    let (mut code_plain, mut code_with) = (0_u64, 0_u64);
+    for (p, w) in plain.iter().zip(with) {
+        if CODE_SECTIONS.contains(&p.name.as_str()) {
+            code_plain += p.size;
+            code_with += w.size;
+        } else if p.name == ".shstrtab" {
+            if w.size > p.size {
+                return Some(format!(
+                    "has a larger section name table: {} bytes against {}",
+                    w.size, p.size
+                ));
+            }
+        } else if p.kind != "NOBITS" && p.size != w.size {
+            return Some(format!(
+                "has `{}` of {} bytes, and the --no-symbols build {}",
+                p.name, w.size, p.size
+            ));
+        }
+    }
+    if code_with.abs_diff(code_plain) > code_plain / 1000 {
+        return Some(format!(
+            "has {code_with} bytes of code and unwind tables, and the --no-symbols build {code_plain}"
+        ));
+    }
+    None
+}
+
 impl Device {
+    /// The sections of an ELF file, in order, without the null section.
+    fn section_table(&self, library: &Path) -> Vec<ElfSection> {
+        let text = run_capture(Command::new(&self.readelf).args(["-S", "-W"]).arg(library));
+        text.lines()
+            .filter_map(|l| {
+                l.trim_start()
+                    .strip_prefix('[')
+                    .and_then(|l| l.split_once(']'))
+            })
+            .filter_map(|(_, rest)| {
+                // Name Type Address Off Size ES [Flg] Lk Inf Al
+                let fields: Vec<&str> = rest.split_whitespace().collect();
+                let (name, kind, size) = (fields.first()?, fields.get(1)?, fields.get(4)?);
+                (*name != "NULL" && *name != "Name").then(|| ElfSection {
+                    name: (*name).to_owned(),
+                    kind: (*kind).to_owned(),
+                    size: u64::from_str_radix(size, 16)
+                        .unwrap_or_else(|e| panic!("{}: size {size}: {e}", library.display())),
+                })
+            })
+            .collect()
+    }
+
     /// The names of the sections of an ELF file.
     fn sections(&self, library: &Path) -> Vec<String> {
         let text = run_capture(Command::new(&self.readelf).arg("-S").arg(library));
@@ -1126,18 +1220,28 @@ fn shipped_artefacts_do_not_grow_and_no_symbols_writes_none() {
     {
         build("android", false);
         build("android", true);
+        let device = android_device().expect("checked above");
         for abi in ["arm64-v8a", "x86_64"] {
             let rel = format!("build/android/jniLibs/{abi}/libplayground_core.so");
-            // A build with debug info compiles to a few bytes of other code, so the two stripped
-            // libraries differ by some tens of bytes in either direction (main at `a309e9f`: x86_64 32
-            // and arm64 16 bytes smaller with symbols; after wt/cold-restore-regression: x86_64 16 bytes
-            // larger, arm64 equal). The difference is in `.text` (`llvm-readelf -S`; `.shstrtab` differs
-            // by 5 bytes too). 256 bytes is the tolerance; the smallest debug section is 1.5 KB and a
-            // symbol table hundreds of kilobytes.
-            before_after(
-                &format!("android {abi}"),
-                size(&plain.root.join(&rel)) + 256,
-                size(&with.root.join(&rel)),
+            let (before, after) = (plain.root.join(&rel), with.root.join(&rel));
+            // Informational: the files differ by the code generation of line tables (below).
+            eprintln!(
+                "SIZE android {abi}: before={} after={}",
+                size(&before),
+                size(&after)
+            );
+            let plain_sections = device.section_table(&before);
+            if let Some(why) = not_the_plain_library(&plain_sections, &device.section_table(&after))
+            {
+                panic!("android {abi}: the library that ships {why}");
+            }
+            // The check can tell: the unstripped twin, which keeps the symbols, is not it.
+            let twin = with
+                .root
+                .join(format!("build/symbols/android/{abi}/libplayground_core.so"));
+            assert!(
+                not_the_plain_library(&plain_sections, &device.section_table(&twin)).is_some(),
+                "android {abi}: the unstripped twin passes for the stripped library"
             );
         }
         assert!(!plain.root.join("build/symbols/android").exists());

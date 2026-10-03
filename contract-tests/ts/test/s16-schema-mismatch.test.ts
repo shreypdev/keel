@@ -33,6 +33,12 @@ interface ExportedSchema {
 /** `add_later` -> `addLater`: how the bindings spell what the schema spells in snake case. */
 const camel = (name: string): string => name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 
+/** The name the bindings give a function's id: an instantiation of a generic function (`newest<Todo>`, ADR-058) is its function's name and its type's (`newestTodo`). */
+const idName = (name: string): string => {
+  const instance = /^([^<]+)<(.+)>$/.exec(name);
+  return instance === null ? camel(name) : `${camel(instance[1] as string)}${instance[2] as string}`;
+};
+
 test("S16 schema mismatch rejection", async () => {
   const generated = UndraIds.schemaHash;
   const kv = new MemoryKv();
@@ -89,13 +95,13 @@ test("S16 schema mismatch rejection", async () => {
     }
     const queryIds = UndraIds.Queries as Readonly<Record<string, number>>;
     const handles = Object.entries(UndraIds.Objects).filter(([name]) => isHandle(name));
-    expect(handles.map(([name]) => name).sort(), "the query handles of the bindings").toEqual(["FeedQueryHandle", "RemoteTodosQueryHandle", "TickerQueryHandle"]);
+    expect(handles.map(([name]) => name).sort(), "the query handles of the bindings").toEqual(["FeedQueryHandle", "RemoteTodosQueryHandle", "RosterQueryHandle", "TickerQueryHandle"]);
     for (const [name, ids] of handles) {
       const query = name.slice(0, -"QueryHandle".length);
       expect(ids.typeId, `type id of ${name}`).toBe(queryIds[`${query.charAt(0).toLowerCase()}${query.slice(1)}`]);
     }
     for (const [name, id] of Object.entries(UndraIds.Functions)) {
-      expect(schema.functions.find((f) => camel(f.name) === name)?.method_id, `method id of ${name}`).toBe(id);
+      expect(schema.functions.find((f) => idName(f.name) === name)?.method_id, `method id of ${name}`).toBe(id);
     }
     for (const [name, id] of Object.entries(UndraIds.Queries)) {
       expect(schema.queries.find((q) => camel(q.name) === name)?.query_id, `query id of ${name}`).toBe(id);

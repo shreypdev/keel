@@ -1,4 +1,5 @@
 import { UndraError } from "../base-error.js";
+import { msg, wireText } from "../messages.js";
 
 /**
  * Typed errors of the wire layer (docs/SPEC.md section 3.9).
@@ -53,33 +54,6 @@ export type WireErrorDetail =
 /** Discriminant of {@link WireErrorDetail}. */
 export type WireErrorCode = WireErrorDetail["code"];
 
-function describe(d: WireErrorDetail): string {
-  switch (d.code) {
-    case "unexpected_eof":
-      return `unexpected end of input at offset ${d.at}: needed ${d.needed} more byte${d.needed === 1 ? "" : "s"}`;
-    case "invalid_utf8":
-      return `invalid UTF-8 in string at offset ${d.at}`;
-    case "invalid_tag":
-      return `invalid ${d.ty} tag ${d.tag} at offset ${d.at}`;
-    case "length_too_large":
-      return `length ${d.len} at offset ${d.at} exceeds the available input`;
-    case "trailing_bytes":
-      return `${d.count} trailing byte${d.count === 1 ? "" : "s"} after the end of the message`;
-    case "bad_magic":
-      return "bad magic: envelope does not start with 554e4452";
-    case "unsupported_version":
-      return `unsupported wire version ${d.version}`;
-    case "schema_mismatch":
-      return `schema mismatch: expected 0x${d.expected.toString(16).padStart(16, "0")}, got 0x${d.got.toString(16).padStart(16, "0")}`;
-    case "duplicate_key":
-      return `duplicate map key at offset ${d.at}`;
-    case "negative_duration":
-      return `negative duration (${d.nanos} ns)`;
-    case "unsafe_integer":
-      return `integer ${d.value} at offset ${d.at} is outside the JS safe integer range`;
-  }
-}
-
 /**
  * Error thrown by every wire decoder for malformed input. It is an `UndraError`
  * (`kind: "wire"`), so everything the runtime throws on purpose has one root; a
@@ -105,7 +79,7 @@ export class WireError extends UndraError {
 
   /** @param detail What went wrong; the message is derived from it. */
   constructor(detail: WireErrorDetail) {
-    super("wire", `wire: ${describe(detail)}`);
+    super("wire", wireText(detail));
     this.code = detail.code;
     this.detail = detail;
   }
@@ -131,9 +105,7 @@ export class PatchError extends Error {
 
   /** @param opIndex Position of the failing operation. @param op Its name. @param index The offending index. @param length The list length at that point. */
   constructor(opIndex: number, op: string, index: number, length: number) {
-    super(
-      `keyed patch operation #${opIndex} (${op}) index ${index} is out of bounds for a list of length ${length}`,
-    );
+    super(msg(244, opIndex, op, index, length));
     this.opIndex = opIndex;
     this.op = op;
     this.index = index;

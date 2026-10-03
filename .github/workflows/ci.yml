@@ -5,12 +5,22 @@ on:
     branches: [main]
   pull_request:
 
+# A piece's branch `wt/<slug>` is built on every push: a piece lands on main only when CI, Bench, Two cores (and Site, when the
+# branch touches its paths) are green on that branch's exact head (docs/AGENT_WORKFLOW.md, `scripts/wt.sh merge`). A newer push
+# to a wt/** branch cancels the run it supersedes. A run on main is never cancelled: each commit has a group of its own (a pending
+# run in a group shared by main's commits is replaced by the next one, which drops a result that matters;
+# .10x/reviews/2026-10-01-bench-followups-review.md, H2).
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # The Rust version is pinned, not "stable": the compile-fail goldens (trybuild) quote rustc's
 # wording and the bench budgets are baselined on one compiler, so a new stable release must land
 # as a deliberate commit that bumps every `rust-toolchain@` line here, in bench.yml, release.yml,
-# rn-devices.yml and site.yml together, regenerates the goldens (TRYBUILD=overwrite) and re-baselines the
-# budgets. 1.99.0 (2026-10-01) is the first one waiting: it renames `fetch_update`
-# (already replaced by `cas_update`) and rewords const-eval panics.
+# rn-devices.yml, site.yml and two-cores.yml together, regenerates the goldens (TRYBUILD=overwrite)
+# and re-baselines the budgets and the web size. 1.99.0 (2026-10-01) is what is pinned: the commit that
+# bumped to it replaced `fetch_update` (by `cas_update`) and regenerated the goldens, whose const-eval
+# panics it rewords. The next stable waits for its own such commit.
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
@@ -21,14 +31,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: TS runtime dev dependencies (the bindgen fixtures compile it with tsc)
         working-directory: runtimes/ts/@undra/runtime
         run: npm ci
@@ -38,6 +48,12 @@ jobs:
         run: bash runtimes/swift/scripts/sync-vectors.sh --check
       - name: Device bench report (RESULTS.md's device tables are what the result files say; the blueprint targets match)
         run: node --test scripts/bench-device-report.test.mjs
+      - name: Generated-code measurement (scripts/generated-weight.mjs classifies the lines of a tree, ADR-062)
+        run: node --test scripts/generated-weight.test.mjs
+      - name: wt.sh merge's CI check (its parsing of `gh run list`, against fixtures)
+        run: bash scripts/wt-ci-check.test.sh
+      - name: wt.sh merge and clean (the push, the verification and the deletions, against scratch repositories)
+        run: bash scripts/wt-cleanup.test.sh
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
@@ -93,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown, aarch64-apple-ios, aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
@@ -121,16 +137,28 @@ jobs:
   ts:
     name: TypeScript runtime
     runs-on: ubuntu-latest
+    env:
+      # The runtime's call-path guard (test/call-path.test.ts, the `[web."node/..."]` budgets of bench/budgets.toml; read by
+      # scripts/web-budgets.mjs) is the one test of this workflow that holds an absolute time to a budget. Runner classes
+      # measured 3.5x-6.2x slower than the M5 host in Oct 2026, against the 5x the budgets were set with; the same
+      # 2x of headroom bench.yml carries keeps the guard honest about a real regression and stops it failing on the slowest
+      # runner (callSync measured 952 ns against 800 ns). It scales ceilings only. No other job runs the test.
+      UNDRA_BENCH_SCALE: "2"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Test
         working-directory: runtimes/ts/@undra/runtime
         run: |
           npm ci
           npm test
+      # ADR-057: the package publishes a production build whose private properties are renamed. The same suite, run against it (the
+      # sources' own tests of the build: `scripts/mangle.mjs`, the flavours).
+      - name: Test against the production build (renamed private properties)
+        working-directory: runtimes/ts/@undra/runtime
+        run: npm run test:dist
       # The testing kit (docs/TESTING.md): its tests, and its build config, which compiles against the runtime's emitted declarations.
       - name: Testing kit (@undra/testkit)
         run: |
@@ -138,6 +166,7 @@ jobs:
           cd runtimes/ts/@undra/testkit
           npm ci
           npm test
+          UNDRA_TS_DIST="$GITHUB_WORKSPACE/runtimes/ts/@undra/runtime/dist/index.js" npm test
           npm run typecheck
       # The devtools page of `undra dev` (ADR-054): its tests, and the committed assets must be what its
       # sources build to (the CLI embeds them, so `cargo build` needs no Node).
@@ -147,6 +176,7 @@ jobs:
           npm ci
           npm run typecheck
           npm test
+          UNDRA_TS_DIST="$GITHUB_WORKSPACE/runtimes/ts/@undra/runtime/dist/index.js" npm test
           bash build.sh --check
 
   kotlin:
@@ -158,6 +188,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: Install kotlinc
         run: |
           curl -sSfL -o kotlinc.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
@@ -173,7 +206,7 @@ jobs:
           curl -sSfLo "$HOME/lib/sqlite-jdbc-3.53.4.0.jar" \
             https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.53.4.0/sqlite-jdbc-3.53.4.0.jar
           echo "47e21dd53efe1524fe0df6965cb65003ffe17172  $HOME/lib/sqlite-jdbc-3.53.4.0.jar" | sha1sum -c -
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
       - uses: Swatinem/rust-cache@v2
       - name: Build the JNI library (the fixture core, namespace undra_fixture)
         run: cargo build --manifest-path crates/undra-ffi/tests/fixture/Cargo.toml
@@ -189,13 +222,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Install the TypeScript runtime's dependencies
         working-directory: runtimes/ts/@undra/runtime
         run: npm ci
@@ -203,14 +236,22 @@ jobs:
       # not skip) when it cannot, so this leg can neither be stale nor silently absent.
       - name: wasm acceptance (raw host + TS runtime)
         run: bash crates/undra-ffi/tests/wasm/run.sh
+      # The same acceptance against the package's production build (ADR-057: private properties renamed, messages as codes).
+      - name: wasm acceptance against the production build
+        run: |
+          (cd runtimes/ts/@undra/runtime && npm run build)
+          UNDRA_TS_DIST="$GITHUB_WORKSPACE/runtimes/ts/@undra/runtime/dist/index.js" bash crates/undra-ffi/tests/wasm/run.sh
 
   macos:
     name: Swift runtime + C ABI (macOS)
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: Swift tests
         working-directory: runtimes/swift/UndraRuntime
         run: swift test
@@ -256,8 +297,11 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: iOS targets of the core, and the undra CLI
         run: |
           rustup target add aarch64-apple-ios aarch64-apple-ios-sim
@@ -278,7 +322,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: aarch64-linux-android, x86_64-linux-android
       - uses: Swatinem/rust-cache@v2
@@ -356,13 +400,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -390,6 +434,11 @@ jobs:
           # it from the kotlinc location the way test-local.sh does).
           UNDRA_KOTLIN_STDLIB: /home/runner/kotlin/kotlinc/lib/kotlin-stdlib.jar
         run: bash contract-tests/run-all.sh ts kotlin
+      # The TypeScript column again, against the runtime's production build (ADR-057: private properties renamed).
+      - name: TypeScript contract scenarios against the production build
+        run: |
+          (cd runtimes/ts/@undra/runtime && npm ci --no-audit --no-fund && npm run build)
+          UNDRA_TS_DIST="$GITHUB_WORKSPACE/runtimes/ts/@undra/runtime/dist/index.js" bash contract-tests/ts/run.sh
       - name: Cookbook Kotlin lines compile (kotlinc -Werror, over the generated bindings)
         env:
           UNDRA_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
@@ -400,8 +449,11 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: Run the Swift scenario runner
         run: bash contract-tests/run-all.sh swift
 
@@ -412,13 +464,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: The undra CLI, then the playground core for the web
         run: |
           cargo build -p undra-cli
@@ -441,13 +493,13 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             runtimes/rn/@undra/react-native/package-lock.json
@@ -463,13 +515,15 @@ jobs:
           # The runner's kernel randomises mmap with more bits than ASan's shadow layout accepted until
           # recently; 28 is what LLVM's own CI sets (runner-images issue 9491).
           sudo sysctl -w vm.mmap_rnd_bits=28
-      - name: The undra CLI, then the playground core for this machine (the C++ test) and for the web (the contract column)
+      - name: The undra CLI, then the playground core for this machine (the C++ test) and the wasm cores of the contract column
         run: |
           cargo build -p undra-cli
           target/debug/undra build -C examples/playground --platform host
           # the C++ test's second core: the same crate under the namespace playground_a (ADR-044)
           target/debug/undra build -C examples/two-cores/a --platform host
-          target/debug/undra build -C examples/playground --platform web
+          # the contract column's cores, none of them committed: build A and build B of the playground (S14, S15) and the
+          # two-cores pair (S27), the same script the TypeScript column's run.sh starts with
+          bash contract-tests/ts/build-cores.sh
       - name: The derived-list recording S19 replays (the contract column)
         run: bash contract-tests/derived-vectors.sh
       # The package's build config (tsconfig.build.json) compiles against @undra/runtime's emitted declarations,
@@ -510,3 +564,27 @@ jobs:
       - name: Contract scenarios through NativeTransport (18 pass, S17 is app-tested)
         working-directory: runtimes/rn/@undra/react-native
         run: npm run test:contract
+      # ADR-057: the unit tests and the scenarios again, against the runtime's production build (renamed private properties).
+      - name: Unit tests and contract scenarios against the production build
+        working-directory: runtimes/rn/@undra/react-native
+        run: |
+          export UNDRA_TS_DIST="$GITHUB_WORKSPACE/runtimes/ts/@undra/runtime/dist/index.js"
+          npm test
+          npm run test:contract
+
+  # The one check branch protection requires: green only when every job above succeeded (a failed, cancelled or
+  # skipped job fails it). `if: always()` so it reports after failures too; without it a failed job leaves the
+  # check "expected" forever and a pull request can never merge. Name and job id are the same in every workflow.
+  all-green:
+    name: All green
+    if: always()
+    needs: [rust, leaf-features, ts, kotlin, wasm-ffi, macos, ios-floor, android, ffi-miri, ffi-asan, contracts, contracts-swift, playground-web, react-native]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' >/dev/null

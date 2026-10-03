@@ -26,9 +26,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,7 +44,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.undra.playground.core.Filter
 import dev.undra.playground.core.Todo
 import dev.undra.playground.core.TodoError
+import dev.undra.playground.core.TodoSelection
 import dev.undra.playground.core.Todos
+import dev.undra.playground.core.draft as draftRow
+import dev.undra.playground.core.newest
 import dev.undra.runtime.UndraCallError
 import kotlinx.coroutines.launch
 
@@ -50,10 +55,14 @@ import kotlinx.coroutines.launch
  * Owns the `Todos` store and what the screen types into it. The store is the core's object, not a copy of
  * its state: it lives as long as this ViewModel (across tab switches and rotation) and closing it releases
  * its handle in the core.
+ *
+ * It owns a `TodoSelection` too: the ticked to-dos, one instantiation of the core's generic `Selection<T>` (ADR-058).
  */
 class TodosViewModel(
     /** The to-do list in the core. A preview passes a store over a recorded core (`ScreenPreviews.kt`). */
     val store: Todos = Todos.create(),
+    /** The ticked to-dos. */
+    val selection: TodoSelection = TodoSelection.create(),
 ) : ViewModel() {
     /** The text field. */
     var draft by mutableStateOf("")
@@ -82,7 +91,20 @@ class TodosViewModel(
         }
     }
 
+    /** Ticks a to-do the core made with `draft` and did not store: the draft is selected, not added to the list. */
+    fun newDraft() {
+        val title = draft.trim().ifEmpty { "Untitled" }
+        runCatching { draftRow(Todo::class, title) }.onSuccess { selection.toggle(it) }
+    }
+
+    /** Removes the ticked to-dos from the list and unticks them. */
+    fun removeSelected() {
+        for (todo in selection.rows.value) store.remove(todo.id)
+        selection.clear()
+    }
+
     override fun onCleared() {
+        selection.close()
         store.close()
     }
 }
@@ -95,6 +117,11 @@ fun TodosScreen(vm: TodosViewModel = viewModel()) {
     val all by store.todos.collectAsState()
     val filter by store.filter.collectAsState()
     val remaining by store.remaining.collectAsState()
+    val picked by vm.selection.rows.collectAsState()
+    val pickedCount by vm.selection.count.collectAsState()
+    // The newest to-do is the core's to say: one call of the function `newest`.
+    var latest by remember { mutableStateOf<Todo?>(null) }
+    LaunchedEffect(all) { latest = runCatching { newest(all) }.getOrNull() }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).imePadding()) {
         ScreenHeader("Todos", "$remaining left", "remaining")
@@ -127,6 +154,17 @@ fun TodosScreen(vm: TodosViewModel = viewModel()) {
             }
         }
         HorizontalDivider()
+        SelectionStrip(
+            kind = "todo",
+            count = pickedCount,
+            latest = latest?.title,
+            picked = picked.map { it.title },
+            onSelectAll = { vm.selection.selectAll(visible) },
+            onClear = vm.selection::clear,
+            onNewDraft = vm::newDraft,
+            removeSelected = vm::removeSelected,
+        )
+        HorizontalDivider()
         if (visible.isEmpty()) {
             Text(
                 if (all.isEmpty()) "Nothing to do yet." else "Nothing in this filter.",
@@ -138,14 +176,20 @@ fun TodosScreen(vm: TodosViewModel = viewModel()) {
         LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
             // The list is keyed by id in the core, so Compose moves and animates rows instead of redrawing them.
             items(visible, key = { it.id }) { todo ->
-                TodoRow(todo, onToggle = { store.toggle(todo.id) }, onRemove = { store.remove(todo.id) })
+                TodoRow(
+                    todo,
+                    selected = picked.any { it.id == todo.id },
+                    onToggle = { store.toggle(todo.id) },
+                    onSelect = { vm.selection.toggle(todo) },
+                    onRemove = { store.remove(todo.id) },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun TodoRow(todo: Todo, onToggle: () -> Unit, onRemove: () -> Unit) {
+private fun TodoRow(todo: Todo, selected: Boolean, onToggle: () -> Unit, onSelect: () -> Unit, onRemove: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onToggle).testTag("todo-row"),
         verticalAlignment = Alignment.CenterVertically,
@@ -158,6 +202,7 @@ private fun TodoRow(todo: Todo, onToggle: () -> Unit, onRemove: () -> Unit) {
             color = if (todo.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
         )
+        Checkbox(checked = selected, onCheckedChange = { onSelect() }, modifier = Modifier.testTag("todo-select"))
         IconButton(onClick = onRemove, modifier = Modifier.testTag("todo-remove")) {
             Icon(Icons.Filled.Close, contentDescription = "Remove ${todo.title}")
         }

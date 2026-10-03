@@ -1,0 +1,34 @@
+error[E0277]: error[undra::E0001]: `Mailbox` cannot cross the boundary by value
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Mailbox` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0072_generic_function_lists_object.rs:17:32
+   |
+17 | pub fn list_an_object<T>(rows: Vec<T>) -> u32 {
+   |                                ^^^^^^ not a type that can cross the boundary
+   |
+help: the trait `undra::undra_wire::Decode` is not implemented for `Mailbox`
+  --> tests/ui/e0072_generic_function_lists_object.rs:7:1
+   |
+ 7 | pub struct Mailbox;
+   | ^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `undra::undra_wire::Decode`:
+             ()
+             (A,)
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             AppState
+             BTreeMap<K, V>
+             BackgroundReport
+           and $N others
+   = note: required for `std::vec::Vec<Mailbox>` to implement `undra::undra_wire::Decode`
+
+error[E0080]: evaluation panicked: error[undra::E0072]: `Mailbox` is an object and cannot be listed for `T` on `list_an_object`
+                = note: each instantiation is presented under the name of its type (`list_an_object(Mailbox.self)` in Swift, `list_an_object(Mailbox::class)` in Kotlin, `list_an_object("Mailbox")` in TypeScript), so a listed type is a value type declared with `#[undra::api]`: a record, an enum, a newtype or a named instantiation; an object crosses by handle and has no such name
+                = help: list the record the platform needs, or name the object in the signature (`Arc<Mailbox>`) instead of making it a type parameter
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0072
+  --> tests/ui/e0072_generic_function_lists_object.rs:16:23
+   |
+16 | #[k::api(generic(T = [Mailbox]))]
+   |                       ^^^^^^^ evaluation of `_::_` failed here

@@ -35,27 +35,32 @@ ADR-019 amendment; Lows L2–L5/L8 open), docs-reference (H3), tooling (D2–D5)
 with their context when told to):
 Landed: devtools, persistence, testkit, docs-v1x, ports (all reviewed) (ADR-037/049 Accepted; opus review `.10x/reviews/2026-10-02-persistence-review.md`: 3 High fixed — a wrong-typed migration hook spliced bytes, RN storage not on ADR-049, a dead web core after a trap during restart; hello wasm 116.8 KB, JS 25,984/26,000; Rust 2,891 · Swift 553 · Kotlin 652 · TS 1,264 · contracts 65/65; hash `0xfa536b9ac6f06149`). Still to land: testkit (review) then ports (review; it must cross persistence: `check.sh`, `run-all.sh`, `scenarios.md`, SPEC §8).
 
-**Launch wave (2026-10-02, evening).** Founder's rules now binding: (1) no piece lands on `main` unless CI is
-green on its pushed head (`scripts/wt.sh merge` enforces it once `ci-green` lands; agents push their own
-`wt/<name>` branch and iterate until CI, Bench, Two cores and Site are green); (2) Fable designs where the
-difficulty is in deciding, a cheaper model implements, then an adversarial review. In flight:
-- `ci-green` — every red CI job at its root cause, Rust 1.99.0 pins, Node 24, the merge gate. Pushed at
-  `b5ded91`: Bench and Two cores green; CI had three red jobs left (Rust on Linux, the macOS Swift tests, React
-  Native); the agent pushes and watches its own fixes. Merge it first; `main` is red until then.
-- `diagram-rn` — React Native as the fourth frame of the landing diagram (`fbf8d7a`, fable-reviewed from
-  screenshots); merge main into it once `ci-green` lands, push, Site green, fast-forward.
-- `reload-handles` — ADR-059 (Fable design, prototyped): query handles survive every restore path through an
-  in-band snapshot record and build-on-first-use; sonnet implementing; removes the TS replay; S35.
-- `generics-fn-obj` — ADR-058 (Fable design, prototyped): generic functions monomorphised from a declared list,
-  generic objects/stores through an alias; sonnet implementing; S34; E0072/E0074.
-- `ts-runtime-16k` — ADR-057 (Fable design, 15 measured levers: 22,100 → 15,958 B, 15,384 with Vite's preload
-  helper apart); sonnet implementing; gates: runtime 16,000, first-load 16,600, all-features 42,400.
-- Owed, starts when `ci-green` lands: an Android emulator CI job for `android-adapters`, `android-work` and
-  `undra-compose`. Each implemented piece still gets its adversarial review before the merge.
-- A separate session is bisecting a cold-start restore slowdown (two rows 1.7–1.8x the machine baseline).
+**Launch wave (2026-10-02) — closed with `main` green and three branches open.** Rules now binding: (1) no
+piece lands unless CI is green on its pushed head (`scripts/wt.sh merge` enforces it; it also demands a Site run on
+the exact head when site paths changed — `gh workflow run site.yml --ref wt/<name>` when the filter skipped it);
+(2) Fable designs where the difficulty is in deciding, a cheaper model implements, an adversarial review follows;
+(3) **`main` is protected: every change, state commits included, lands through a pull request** whose four required
+checks — `CI / All green`, `Bench / All green`, `Two cores / All green`, `Site / All green` (the roll-up job of each
+workflow, `pr-gate`) — are green on its head. `scripts/wt.sh merge <slug>` opens the pull request, waits for the
+checks, merges with a merge commit and cleans up; `scripts/wt.sh pr <slug>` opens a draft early. `--ff` is only
+for repositories without protection and the script tests. The `wt/**` push triggers are gone: CI runs on pull
+requests and on `main`. Section 4 of `docs/AGENT_WORKFLOW.md` is the reference. Landed today, in order: `ci-green` (`fc326d6`), `diagram-rn`
+(`b7efd61`), `generics-fn-obj` (`aa04821`), `generics-followups` (`3c279a6`). Main is `3c279a6` plus state commits.
 
-**Also owed:** the Rust 1.99.0 bump (ci.yml header says how; do it when no worktree is mid-build);
-  a custom port in the playground for the reference's Ports section; `undra bindgen --declarations`.
+Landed after that: `test-pacing` (`14a4689`), `reload-handles` (`7e5d238`), `ts-runtime-16k` (`784c361`) —
+status checkpoints 32 and 33. **Nothing of the wave is open.** `main` is `784c361` plus the checkpoint-33 state
+commit; its own CI runs on those heads are the proof to look at first in a new session.
+- **On hold by the founder:** the Android emulator CI job for `android-adapters`, `android-work` and
+  `undra-compose`. Not started. Ask him before starting it. (The "Android emulator (API 34, x86_64)" job in
+  `two-cores.yml` is older and unrelated.)
+- A separate session is bisecting a cold-start restore slowdown (two rows 1.7–1.8x the machine baseline).
+- Lessons that cost a CI cycle each today, for every brief: no absolute time bound in a test (measure against a
+  reference armed beside the thing, or count events); wait for what is in flight to land before changing a fake;
+  commit by path; never push while a run is in flight on the branch; stress loops must not leave `yes` burners
+  (56 orphans once put the load average at 91); never `taskpolicy -b` under load; signal only your own PIDs
+  (a `pgrep -f ci-local` kill took out two other agents' runs).
+
+**Also owed:** a custom port in the playground for the reference's Ports section; `undra bindgen --declarations`.
 
 **Next:** wave 0 of `.10x/specs/2026-10-01-boundary-surface-plan.md` (`abi-table` ADR-044 — after
 Track A and RN merge, it rewrites the FFI they touch; `ios-floor` ADR-045 — after parity;

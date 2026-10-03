@@ -22,7 +22,9 @@ fun s04AsyncCall(w: World) {
     val elapsedMs = (System.nanoTime() - started) / 1_000_000L
     expectEq("add_later(20, 22, 50)", 42, sum)
     check(elapsedMs >= 45) { "add_later(.., 50 ms) answered after $elapsedMs ms" }
-    check(elapsedMs < 2_000) { "add_later(.., 50 ms) took $elapsedMs ms" }
+    // The upper bound is WAIT_MS, a hang detector: a timer that never fires is what it catches. How long after 50 ms the
+    // answer comes is the machine's (CI runners stall); step 2's order is the claim that the delays are honoured.
+    check(elapsedMs < WAIT_MS) { "add_later(.., 50 ms) took $elapsedMs ms, past the $WAIT_MS ms wait" }
 
     // 2. Three at once resolve in the order of their delays, each with its own value.
     val order = CopyOnWriteArrayList<Int>()

@@ -4,7 +4,7 @@ import { OptInPortIds, fetchSse, ssePort } from "@undra/runtime/realtime";
 import { sseFollow } from "@playground/core";
 import { boot, bootWorker } from "../src/harness.js";
 import { lastOn, useRealtimeServer } from "../src/realtime-server.js";
-import { step, waitFor } from "../src/wait.js";
+import { WAIT_TIMEOUT_MS, step, waitFor } from "../src/wait.js";
 
 // S24 server-sent events (ADR-047): the opt-in Sse port through the platform's default adapter
 // (`fetchSse()`: `fetch` with a body stream) against the shared realtime server: the feed parsed as
@@ -46,7 +46,9 @@ test("S24 server-sent events", async () => {
   await step("3. a reader that stops: two events and not ended; a hang read for none, and the server saw the client leave", async () => {
     expect(await sseFollow(`${HTTP}/sse/feed`, null, 2, core)).toEqual({ events: FEED.slice(0, 2), ended: false });
     expect(await sseFollow(`${HTTP}/sse/hang`, null, 0, core)).toEqual({ events: [], ended: false });
-    await waitFor("the server to see the client leave /sse/hang", () => lastOn(server(), "/sse/hang")?.clientClosed, { timeoutMs: 1000 });
+    // Bounded by WAIT_TIMEOUT_MS, a hang detector: the server never ends /sse/hang, and the port leaves it when the core closes
+    // the subscription, on no timer, so a port that did not would stay; how soon the server sees it is the machine's.
+    await waitFor("the server to see the client leave /sse/hang", () => lastOn(server(), "/sse/hang")?.clientClosed, { timeoutMs: WAIT_TIMEOUT_MS });
   });
 
   await step("4. typed failures: 204 and 500 are Refused with their status, text/html is Protocol", async () => {

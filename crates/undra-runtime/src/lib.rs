@@ -79,6 +79,7 @@ mod object;
 pub mod object_table;
 pub mod persist;
 mod ports;
+mod recreation;
 mod runtime;
 mod stats;
 mod sync_out;
@@ -87,7 +88,8 @@ mod timer;
 
 pub use callbacks::{CallbackCall, CallbackHandle, CallbackInterface};
 pub use config::{
-    DroppedStore, InitError, MODE_DEV, MODE_INPROC, RestoreError, RestoreReport, RuntimeConfig,
+    DroppedStore, InitError, MODE_DEV, MODE_INPROC, RefusedHandle, RestoreError, RestoreReport,
+    RuntimeConfig,
 };
 pub use ctx::{Closed, Ctx, CtxScope, Gone, WeakCtx, WeakSleep};
 pub use diagnostics::{
@@ -99,8 +101,8 @@ pub use host::{Host, PortCallOutcome};
 pub use issue::{IssueError, IssueScope};
 pub use lazy::{LazyList, LazyListInner, MAX_PAGE_ITEMS, serve_lazy_lists};
 pub use object::{
-    AnyObject, CellFn, RestoreFn, StoreObject, StoreRestorer, UndraObject, UndraObjectDyn, plain,
-    store,
+    AnyObject, CellFn, RestoreFn, Reviver, StoreObject, StoreRestorer, UndraObject, UndraObjectDyn,
+    plain, store,
 };
 pub use ports::{
     EventHandler, Events, MAX_ABANDONED, Port, PortDispatch, PortDispatcher, PortError, PortFuture,

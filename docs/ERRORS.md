@@ -30,6 +30,16 @@ A generated method that can fail does exactly this, on every platform:
 
 All three read well as text: Swift `error.localizedDescription`, Kotlin `error.message`, TypeScript `error.message`.
 
+In a **production build of a TypeScript app**, `error.message` of what the runtime itself words (every `UndraCallError` and
+`UndraTransportError`, the wire errors, the misuse errors) is a code, the values and a link, not a sentence:
+`T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017`, and `wire: code=unexpected_eof at=12 needed=3 — …`
+for a decoding failure. The sentence is on the errors page ("Runtime messages") and is what the development build says (Vite's dev
+server, Vitest, React Native: the `development` and `react-native` export conditions). Nothing a program branches on changes: the
+class, `kind`, `reason`, `status` and every field are the same, and the core's own text (a panic message, a refusal reason) travels as
+a value inside the message. Branch on those, never on the text. What the runtime hands the core as data is not a message and says its
+sentence in both builds: the field of a port's typed error (`WsError.Closed(1008, "the core did not keep up")`, `DbError.Sql(..)`, ..),
+as the Swift and Kotlin adapters send theirs.
+
 Argument validation is not an outcome of the call. A value the wire cannot represent (a negative `Duration`, a map with
 two keys that encode alike, a TypeScript `number` outside a `u8`) is a programming error: it propagates unchanged
 (`precondition` in the Swift codec, `WireException` / `IllegalArgumentException` in Kotlin, `RangeError` / `TypeError` in
@@ -222,6 +232,10 @@ nothing from the text of a message.
 * A failed **port** implementation (an untyped throw) and a malformed change-set reach `onError` on Kotlin and TypeScript; on
   Swift they are logged at ERROR (a failed port answers the core `unavailable`, ADR-032 row k). A typed storage failure
   (`StorageError`) is the port's answer, not a failure of the adapter, on all three.
+* A `WebSocket` the core closes with a code (`close(conn, code, reason)`, SPEC 8.1) reaches the peer with that code on every
+  platform but Swift before macOS 26 / iOS 26: there `URLSessionWebSocketTask.cancel(with:reason:)` may end the connection
+  without writing the close frame, the peer sees an abnormal close (no frame), and the adapter, which cannot be told,
+  guarantees only that the connection ends. The core's own view is unchanged (its `close` succeeds and its stream ends).
 * TypeScript has an abort path the others spell differently (`AbortSignal` versus task or coroutine cancellation), and
   its methods are all `Promise`s: a command's promise resolves rather than being `void`.
 * A wasm core cannot contain a panic (SPEC 7: `panic=abort`): the call fails as `unavailable` (reason `trap`) and the
@@ -231,7 +245,9 @@ nothing from the text of a message.
   `restarted` (they may or may not have run, and nothing retries them); `onPanic` gets the panic report first, then
   `onCoreRestarted` and `onError` get one `UndraCoreRestarted` (an `UndraUnhandledError` whose `error` is `panicked`)
   saying how old the snapshot was, how many calls were rejected and how many objects went stale. A call on an object
-  that is not a store (a query handle excepted, which is re-created) is then `refused`. One trap more than
+  that is not a store and not a query handle is then `refused`, and so is one on a query handle created after the last
+  snapshot; every other query handle keeps its handle and its wrapper (the core re-issues it from the snapshot and builds
+  it again when the recovery observes it, ADR-059), and a call on it works. One trap more than
   `maxRestarts` within `perMs` and the core stays closed, as without recovery.
 * In `wasm-worker` mode a synchronous port must run in the worker (`worker: { ports }`, SPEC 17.1): registering one on
   the main thread fails `load` with `UndraError("options")` (and a later `registerPort` throws it), naming the port,

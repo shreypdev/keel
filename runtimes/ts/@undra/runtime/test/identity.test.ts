@@ -7,6 +7,7 @@ import { UndraObject } from "../src/object.js";
 import { ALL_SIGNALS, codecs, encodeValue } from "../src/wire/index.js";
 import { FakeCoreTransport, SCHEMA } from "./support/fake-core.js";
 import { macrotask, track } from "./support/harness.js";
+import { internal } from "./support/internals.js";
 import { CounterStore, str, u32, vecU32 } from "./support/store.js";
 
 // ADR-040 decision 7: one wrapper per handle. `adopt` returns the live wrapper of a handle and gives the reply's extra
@@ -211,7 +212,7 @@ describe("adopt", () => {
     for (let i = 1; i <= rounds; i++) adopt(core, BigInt(i), Thing);
     const hit = ((performance.now() - started) * 1e6) / rounds;
     // The lookup alone: the give-back's Release is the transport's cost, not the identity map's.
-    (core as unknown as { _giveBack(handle: bigint): void })._giveBack = () => {};
+    (core as unknown as Record<string, unknown>)[internal("_giveBack")] = () => {};
     started = performance.now();
     for (let i = 1; i <= rounds; i++) adopt(core, BigInt(i), Thing);
     const lookup = ((performance.now() - started) * 1e6) / rounds;

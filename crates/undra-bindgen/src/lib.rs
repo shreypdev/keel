@@ -4,6 +4,7 @@
 
 pub mod emit;
 pub mod naming;
+pub mod provenance;
 pub mod stdlib;
 
 mod kotlin;

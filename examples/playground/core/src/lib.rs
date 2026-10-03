@@ -29,6 +29,7 @@
 //! | [`updates`](mod@updates) | shipping an update (ADR-037): stores and queued mutations a second build changes, the persistence status, and an app sync port (ADR-049) |
 //! | [`live`](mod@live) | real-time through the opt-in `WebSocket` and `Sse` ports: an echo, a connection read on demand (the core's credit), an event-stream reader that resumes |
 //! | [`notes`](mod@notes) | a keyed list kept in SQLite through the opt-in `Db` port: migrations, bound statements, transactions, typed errors |
+//! | [`selection`](mod@selection) | generic functions, a generic store and a generic object, each instantiated for the to-do and note rows: ADR-058 |
 //!
 //! The core reads no clock and no random source and starts no thread (R12): identities come from
 //! counters, time from the `Clock` port, delays from `Ctx::sleep` and the network from the
@@ -47,6 +48,7 @@ pub mod notes;
 pub mod paging;
 pub mod platform;
 pub mod remote;
+pub mod selection;
 pub mod stress;
 pub mod todos;
 pub mod updates;
@@ -74,6 +76,9 @@ pub use paging::{
 pub use remote::{
     RemoteConfig, RemoteError, RemoteTodo, configure_remote, create_remote_todo, patch_remote_todo,
     post_remote_todo, remote_todos, set_remote_done,
+};
+pub use selection::{
+    NoteSelection, Recent, RecentTodos, Row, Selection, TodoSelection, draft, newest, recent_todos,
 };
 pub use stress::{MAX_RATE, Stress, StressError, StressMode};
 pub use todos::{Filter, Todo, TodoError, Todos};

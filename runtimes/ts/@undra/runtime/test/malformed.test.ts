@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { codecs, decodeValue, encodeValue } from "../src/wire/codec.js";
 import { Kind, decodeEnvelope, encodeEnvelope } from "../src/wire/envelope.js";
 import { WireError, type WireErrorCode } from "../src/wire/errors.js";
-import { decodeCall, decodeChangeSet, decodeReply, decodeSnapshot, decodeStreamFailure, decodeStreamItem } from "../src/wire/payloads.js";
+import { decodeCall, decodeChangeSet, decodeReply, decodeSnapshot, decodeStreamFailure, decodeStreamItem } from "../src/wire/index.js";
 import { UndraReader } from "../src/wire/reader.js";
 import { durationFromNanos } from "../src/wire/types.js";
 import { UndraWriter } from "../src/wire/writer.js";

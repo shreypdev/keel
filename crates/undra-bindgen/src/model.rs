@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 
 use undra_meta::{
-    EnumDef, FunctionDef, MethodDef, ObjectDef, ParamDef, PortDef, QueryDef, QueryKind, RecordDef,
-    Schema, SignalDef, StoreDef, TypeRef, VariantDef, ids,
+    EnumDef, FunctionDef, GenericOf, MethodDef, ObjectDef, ParamDef, PortDef, QueryDef, QueryKind,
+    RecordDef, Schema, SignalDef, StoreDef, TypeRef, VariantDef, ids,
 };
 
 use crate::naming;
@@ -518,6 +518,23 @@ impl Model {
             .chain(&self.query_handles)
     }
 
+    /// Whether any method or function of the schema returns a stream (`Stream<T>` or `Result<Stream<T>, E>`). The TypeScript entry
+    /// of such a schema passes `features: [streams]` to the runtime, so the stream support is up front instead of fetched at the
+    /// first stream (ADR-057).
+    #[must_use]
+    pub fn has_streams(&self) -> bool {
+        let is_stream =
+            |returns: &TypeRef| Ret::classify(returns).is_some_and(|ret| ret.is_stream());
+        self.all_objects()
+            .flat_map(|object| &object.methods)
+            .any(|method| is_stream(&method.returns))
+            || self
+                .functions
+                .iter()
+                .chain(&self.mutations)
+                .any(|function| is_stream(&function.returns))
+    }
+
     /// The doc comment of a store signal, when there is one to write.
     #[must_use]
     pub fn signal_doc(&self, object: &ObjectDef, signal: &SignalDef) -> Option<&'static str> {
@@ -730,6 +747,7 @@ fn query_handle(query: &QueryDef) -> ObjectDef {
         takes_ctx: false,
         coalesce: false,
         docs: docs.to_owned(),
+        generic: None,
     };
     // An infinite query's `data` is the list of every row loaded, keyed by the item's key so that
     // the next page arrives as a patch of appended rows (ADR-043); any other query's is the
@@ -801,6 +819,7 @@ fn query_handle(query: &QueryDef) -> ObjectDef {
             takes_ctx: false,
             coalesce: false,
             docs: String::new(),
+            generic: None,
         }],
         methods,
         store: Some(StoreDef { signals }),
@@ -817,6 +836,7 @@ fn mutation_function(query: &QueryDef) -> FunctionDef {
         is_async: true,
         takes_ctx: false,
         docs: format!("Runs the `{}` mutation.", query.name),
+        generic: None,
     }
 }
 
@@ -891,6 +911,129 @@ fn field_index(variant: &VariantDef, name: &str) -> Option<usize> {
     } else {
         variant.fields.iter().position(|f| f.name == name)
     }
+}
+
+/// How the generators name one function or method (ADR-058).
+///
+/// A generic function that crosses the boundary is one definition per listed type, named
+/// `newest<Todo>`, with a label that says which function it is an instantiation of. Each language
+/// presents the closed set of instantiations the way its own libraries present one, under the
+/// function's own name, so the native name derives from the label's `of`, while every instantiation
+/// keeps an id constant of its own (`newest_Todo`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Names<'a> {
+    /// What the native name of the callable derives from: the generic function's own name for an
+    /// instantiation, the definition's name otherwise.
+    pub native: &'a str,
+    /// What the id constant is named after: `newest_Todo` for `newest<Todo>`, the definition's name
+    /// otherwise. Converted to the language's case by the generator.
+    pub id: String,
+    /// The name of the type a leading type token carries (`draft(Todo.self)`): present for an
+    /// instantiation whose type parameter the arguments of a call do not fix (`inferred` is false).
+    pub token: Option<&'a str>,
+    /// The label of an instantiation.
+    pub generic: Option<&'a GenericOf>,
+}
+
+/// The names of the definition called `name` with the label `generic`: `add_todo` is its own native
+/// name and id name; `draft<Todo>` (an instantiation of `draft`, whose parameter no argument fixes)
+/// is `draft` with the id name `draft_Todo` and the token `Todo`.
+#[must_use]
+pub fn names<'a>(name: &'a str, generic: Option<&'a GenericOf>) -> Names<'a> {
+    let Some(label) = generic else {
+        return Names {
+            native: name,
+            id: name.to_owned(),
+            token: None,
+            generic: None,
+        };
+    };
+    let arg = label.args.first();
+    let shown = |arg: &'a undra_meta::GenericArg| match &arg.ty {
+        TypeRef::Named(type_name) => type_name.as_str(),
+        _ => "",
+    };
+    Names {
+        native: &label.of,
+        id: match arg {
+            Some(arg) => format!("{}_{}", label.of, shown(arg)),
+            None => label.of.clone(),
+        },
+        token: arg.filter(|arg| !arg.inferred).map(shown),
+        generic: Some(label),
+    }
+}
+
+/// A function or method as the generators see its name: a plain one, or an instantiation of a
+/// generic function (ADR-058).
+pub trait Callee {
+    /// The schema name of the definition.
+    fn schema_name(&self) -> &str;
+    /// The generic label, for an instantiation of a generic function.
+    fn label(&self) -> Option<&GenericOf>;
+    /// How the generators name it.
+    fn names(&self) -> Names<'_> {
+        names(self.schema_name(), self.label())
+    }
+}
+
+impl Callee for MethodDef {
+    fn schema_name(&self) -> &str {
+        &self.name
+    }
+    fn label(&self) -> Option<&GenericOf> {
+        self.generic.as_ref()
+    }
+}
+
+impl Callee for FunctionDef {
+    fn schema_name(&self) -> &str {
+        &self.name
+    }
+    fn label(&self) -> Option<&GenericOf> {
+        self.generic.as_ref()
+    }
+}
+
+/// One entry of a list of functions or methods as a language presents it: a definition on its own,
+/// or the instantiations of one generic function, which a language that overloads by parameter
+/// type presents together (ADR-058).
+#[derive(Clone, Debug)]
+pub enum Entry<'a, T> {
+    /// A definition that is not an instantiation.
+    Single(&'a T),
+    /// The instantiations of one generic function, in the order the list holds them.
+    Family(Vec<&'a T>),
+}
+
+/// Groups `items` into [`Entry`]s: each family stands where its first instantiation stands, so
+/// the order of the list is the order of the output.
+#[must_use]
+pub fn entries<T: Callee>(items: &[T]) -> Vec<Entry<'_, T>> {
+    let mut out: Vec<Entry<'_, T>> = Vec::new();
+    for item in items {
+        match item.label() {
+            None => out.push(Entry::Single(item)),
+            Some(label) => {
+                let family = out.iter_mut().find_map(|entry| match entry {
+                    Entry::Family(members)
+                        if members
+                            .first()
+                            .and_then(|m| m.label())
+                            .is_some_and(|first| first.of == label.of) =>
+                    {
+                        Some(members)
+                    }
+                    _ => None,
+                });
+                match family {
+                    Some(members) => members.push(item),
+                    None => out.push(Entry::Family(vec![item])),
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The lines of a doc comment with the indentation common to all of them and

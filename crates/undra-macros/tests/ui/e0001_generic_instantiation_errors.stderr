@@ -1,0 +1,17 @@
+error: error[undra::E0001]: `&str` cannot cross the boundary
+         = note: references have no wire representation; every value crosses by copy
+         = help: use an owned `String`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0001_generic_instantiation_errors.rs:33:34
+   |
+33 | pub fn borrows<T: 'static>(name: &str, rows: Vec<T>) -> u32 {
+   |                                  ^^^^
+
+error[E0080]: evaluation panicked: error[undra::E0001]: `Todo` is used as the error type of a `Result`, but it is not a `#[undra::error]` enum (in `fails_with<Todo>`)
+                = note: the platforms throw the error type by name, and only `#[undra::error]` enums carry the messages they show
+                = help: declare it with `#[undra::error]`, for example `#[undra::error] enum Todo { #[error("failed")] Failed }`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0001_generic_instantiation_errors.rs:25:23
+   |
+25 | #[k::api(generic(T = [Todo, Failure]))]
+   |                       ^^^^ evaluation of `_::_` failed here

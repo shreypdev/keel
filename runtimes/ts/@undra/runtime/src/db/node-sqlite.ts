@@ -7,8 +7,9 @@ import { isTrivia, scanParameters } from "./sql.js";
 
 /*
  * `nodeSqliteDb()`: the Db adapter of Node, over the built-in `node:sqlite` (`DatabaseSync`, Node
- * 22.5+). Node's modules are reached on first use through `process.getBuiltinModule`, which no
- * bundler sees, and the parts used are declared here, so the runtime compiles without Node's types.
+ * 22.5+, and a Node whose `node:sqlite` keeps text that holds U+0000: see `requireTextWithNul`). Node's
+ * modules are reached on first use through `process.getBuiltinModule`, which no bundler sees, and the
+ * parts used are declared here, so the runtime compiles without Node's types.
  */
 
 /** A value `node:sqlite` binds or reads. */
@@ -65,6 +66,31 @@ function fromNode(value: unknown): DbValue {
   if (typeof value === "string") return { kind: "text", value };
   if (value instanceof Uint8Array) return { kind: "blob", value };
   throw new DbError.Sql(`node:sqlite returned a value of an unknown kind (${typeof value})`);
+}
+
+/** The text {@link requireTextWithNul} sends through `node:sqlite`: U+0000 in the middle of it. */
+const PROBE = "a\u0000b";
+
+/**
+ * Throws `Unavailable` unless this Node's `node:sqlite` keeps a text value that holds U+0000, both
+ * ways: bound as a parameter (SQLite must see all three characters) and read back (JavaScript must
+ * get all three). The Db port carries every storage class exactly, and Node's `node:sqlite` has read
+ * text up to its first U+0000 (Node 22.23.3: `"a\0b"` comes back `"a"`); an adapter that cut such
+ * a value silently would corrupt it, so it refuses to open instead (Node 24 keeps it).
+ */
+function requireTextWithNul(db: NodeDatabase): void {
+  let row: NodeSqlValue[] | undefined;
+  try {
+    const statement = db.prepare("SELECT ?, length(CAST(? AS BLOB))");
+    statement.setReadBigInts(true);
+    statement.setReturnArrays(true);
+    row = statement.all(PROBE, PROBE)[0];
+  } catch (error) {
+    throw translate(error);
+  }
+  if (row?.[0] !== PROBE || row[1] !== 3n) {
+    throw new DbError.Unavailable("this Node's node:sqlite does not keep text that holds U+0000 (it cuts it at the first one): the Db port carries text exactly, so it needs a newer Node (24 does)");
+  }
 }
 
 /** One open database of {@link nodeSqliteDb}. */
@@ -154,7 +180,8 @@ export interface NodeSqliteDbOptions {
 }
 
 /**
- * The Db adapter of Node (ADR-048): the built-in `node:sqlite` (`DatabaseSync`, Node 22.5+), one
+ * The Db adapter of Node (ADR-048): the built-in `node:sqlite` (`DatabaseSync`, Node 22.5+; opening is
+ * `Unavailable` on a Node whose `node:sqlite` cuts text at U+0000, as Node 22.23's does: Node 24 keeps it), one
  * connection per database, in `<directory>/<name>.sqlite` (`":memory:"` in memory). Integers cross
  * as `bigint` (`setReadBigInts`), every cell keeps its storage class, errors map by SQLite's result
  * code. `DatabaseSync` is synchronous: each statement runs on Node's thread, one at a time per
@@ -170,6 +197,8 @@ export interface NodeSqliteDbOptions {
 export function nodeSqliteDb(options: NodeSqliteDbOptions): DbAdapter {
   const directory = options.directory.replace(/[\\/]+$/, "");
   let made: Promise<unknown> | null = null;
+  // Whether this Node's `node:sqlite` passed `requireTextWithNul`: it is a property of the Node, checked once per adapter.
+  let textKeepsNul = false;
   return {
     async open(name) {
       let sqlite: NodeSqliteModule;
@@ -190,7 +219,17 @@ export function nodeSqliteDb(options: NodeSqliteDbOptions): DbAdapter {
         path = `${directory}/${name}.sqlite`;
       }
       try {
-        return new NodeSqliteConnection(new sqlite.DatabaseSync(path));
+        const db = new sqlite.DatabaseSync(path);
+        if (!textKeepsNul) {
+          try {
+            requireTextWithNul(db);
+            textKeepsNul = true;
+          } catch (error) {
+            db.close();
+            throw error;
+          }
+        }
+        return new NodeSqliteConnection(db);
       } catch (error) {
         const failure = translate(error);
         throw failure instanceof DbError.Sql ? new DbError.Unavailable(failure.message_) : failure;

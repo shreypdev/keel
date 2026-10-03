@@ -38,6 +38,11 @@ function refuseStaleDist(dist, src) {
   }
 }
 const K = await import(pathToFileURL(dist).href);
+// The package's production build (ADR-057) words an error as its code, its values and a link: `words` asserts the sentence of the readable
+// build, or the code of the production one, so the same acceptance runs against either (`UNDRA_TS_DIST=<runtime>/dist/index.js`).
+const production = /^T\d{4}\b/.test(new K.UndraSessionLostError().message);
+const words = (message, sentence, code) =>
+  production ? assert.match(message, new RegExp(`^${code}\\b.* — https://\\S+/errors\\.html#${code}$`), message) : assert.match(message, sentence, message);
 const {
   ALL_SIGNALS,
   CallTarget,
@@ -397,7 +402,7 @@ test("UndraCore.load refuses both wasm modes without WebCrypto, before anything 
       }).catch((e) => e);
       assert.ok(failure instanceof UndraTransportError, `${mode}: ${String(failure)}`);
       assert.equal(failure.reason, "unsupported");
-      assert.match(failure.message, /^WebCrypto is required/);
+      words(failure.message, /^WebCrypto is required/, "T0024");
       assert.equal(spawned, false);
     }
   } finally {
@@ -488,7 +493,8 @@ test("wasm-worker: an explicit Clock or Rng adapter does not cross to the worker
   const now = Number(decodeValue(codecs.i64, await call(core, calc, "clock_now")));
   assert.ok(Math.abs(now - Date.now()) < 5_000, `the worker's own clock: ${now}`);
   assert.notDeepEqual([...decodeValue(codecs.bytes, await call(core, calc, "random_bytes", u32(8)))], new Array(8).fill(0xab));
-  assert.equal(log.filter((l) => l.target === "undra::worker" && l.level === 3 && /worker\.ports/.test(l.message)).length, 1, JSON.stringify(log));
+  const said = production ? /^T0173\b/ : /worker\.ports/;
+  assert.equal(log.filter((l) => l.target === "undra::worker" && l.level === 3 && said.test(l.message)).length, 1, JSON.stringify(log));
 });
 
 test("wasm-worker: a sync port registered on the main thread is a load-time error that names it and the fix (ADR-049)", async () => {
@@ -497,7 +503,7 @@ test("wasm-worker: a sync port registered on the main thread is a load-time erro
     const failure = await bootWorker({ ports: { [portId]: impl } }).then(() => undefined, (e) => e);
     assert.ok(failure instanceof UndraError, String(failure));
     assert.equal(failure.kind, "options");
-    assert.match(failure.message, /LoadOptions\.worker\.ports/);
+    words(failure.message, /LoadOptions\.worker\.ports/, "T0215");
     assert.ok(failure.message.includes(`0x${(portId >>> 0).toString(16)}`), failure.message);
   }
 });

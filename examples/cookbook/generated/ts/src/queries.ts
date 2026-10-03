@@ -47,14 +47,8 @@ export class NotesQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.NotesQueryHandle.typeId,
-        methodId: UndraIds.Objects.NotesQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
@@ -65,18 +59,17 @@ export class NotesQueryHandle extends UndraStore {
   ): Promise<NotesQueryHandle> {
     const w = new UndraWriter();
     w.writeStr(list);
-    const args = w.finish();
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.NotesQueryHandle.typeId,
         UndraIds.Objects.NotesQueryHandle.new,
-        args,
+        w.finish(),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new NotesQueryHandle(core, handle, args);
+    const store = new NotesQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }
@@ -186,14 +179,8 @@ export class ProfileQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.ProfileQueryHandle.typeId,
-        methodId: UndraIds.Objects.ProfileQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
@@ -204,18 +191,17 @@ export class ProfileQueryHandle extends UndraStore {
   ): Promise<ProfileQueryHandle> {
     const w = new UndraWriter();
     w.writeStr(user);
-    const args = w.finish();
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.ProfileQueryHandle.typeId,
         UndraIds.Objects.ProfileQueryHandle.new,
-        args,
+        w.finish(),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new ProfileQueryHandle(core, handle, args);
+    const store = new ProfileQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }

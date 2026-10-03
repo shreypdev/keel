@@ -1,6 +1,7 @@
 import { UndraWriter } from "../wire/index.js";
-import { PortIds } from "./ids.js";
+import { CONNECTIVITY_CHANGED, CONNECTIVITY_PORT, LIFECYCLE_CHANGED, LIFECYCLE_PORT } from "./port-literals.js";
 import type { Adapters } from "./types.js";
+import { msg } from "../messages.js";
 
 /*
  * Host events: what the Connectivity and Lifecycle sources tell the core. Separate from `ports.ts` (the
@@ -21,7 +22,7 @@ export type AppState = (typeof APP_STATES)[number];
 /** Writes `v` as its `u16` index in `variants` (the encoding half of a unit enum's codec). */
 export function writeIndex<T extends string>(w: UndraWriter, name: string, variants: readonly T[], v: T): void {
   const index = variants.indexOf(v);
-  if (index < 0) throw new RangeError(`unknown ${name} variant: ${String(v)}`);
+  if (index < 0) throw new RangeError(msg(1, name, String(v)));
   w.writeU16(index);
 }
 
@@ -45,14 +46,14 @@ export function emitConnectivity(core: EventSink, online: boolean, kind: NetKind
   const w = new UndraWriter(4);
   w.writeBool(online);
   writeNetKind(w, kind);
-  core.event(PortIds.Connectivity.portId, PortIds.Connectivity.changed, w.finish());
+  core.event(CONNECTIVITY_PORT, CONNECTIVITY_CHANGED, w.finish());
 }
 
 /** Sends `Lifecycle.changed(state)` to the core. */
 export function emitLifecycle(core: EventSink, state: AppState): void {
   const w = new UndraWriter(2);
   writeAppState(w, state);
-  core.event(PortIds.Lifecycle.portId, PortIds.Lifecycle.changed, w.finish());
+  core.event(LIFECYCLE_PORT, LIFECYCLE_CHANGED, w.finish());
 }
 
 /**

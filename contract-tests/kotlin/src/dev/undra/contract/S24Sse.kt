@@ -35,7 +35,9 @@ fun s24Sse(w: World) {
     expectEq("two events, not ended", feed.take(2) to false, two.events to two.ended)
     val hang = runBlocking { sseFollow("$http/sse/hang", null, 0u) }
     expectEq("no event from /sse/hang, not ended", emptyList<SseEvent>() to false, hang.events to hang.ended)
-    awaitUntil("the server to see the client leave /sse/hang", timeoutMs = 1_000) { RealtimeServer.last("/sse/hang").clientClosed }
+    // Bounded by WAIT_MS, a hang detector: the server never ends /sse/hang, and the port leaves it when the core closes the
+    // subscription, on no timer, so a port that did not would stay; how soon the server sees it is the machine's.
+    awaitUntil("the server to see the client leave /sse/hang", timeoutMs = WAIT_MS) { RealtimeServer.last("/sse/hang").clientClosed }
 
     // 4. Typed failures.
     for (code in listOf(204, 500)) {

@@ -410,3 +410,29 @@ the ABI, the schema, the generated code or `undra-runtime`.
   reload (two swaps, the state carried twice, the second time from a core whose client had not come back), the generation
   floor across the process boundary, an inherited session whose grace passes, a client back after the notice window, two
   clients, and 16 MiB of state through real pipes both ways.
+
+## Amendment (2026-10-02, ADR-059): query handles are carried
+
+[ADR-059](ADR-059-transient-handles-across-restore.md) changes what a reload does to query handles. As far as query handles
+go, the text above is superseded in four places (it is left as written):
+
+* **The "What is carried" table's row** "Objects that are not stores, and transient stores (query handles)" now holds for
+  objects that are not stores and are not re-creatable (plain objects, objects a method returned). A query handle is carried:
+  the snapshot keeps one small record of what it is made of (its encoded parameters and its observer's polling interval, in
+  the record shape layout 2 already has: no layout, wire, ABI or schema change), the new core re-issues the handle on its
+  value, and builds it when the client's reconnect observes it again (section 5, items 3 and 4). `refetch`, pull-to-refresh
+  and polling work with no app code; a query without `persist` shows its loading state once, because the query cache is not
+  carried (the row of the same table for "The query cache" stands), and one with `persist` shows its stored data.
+* **Section 5, item 4** ("The handle of a plain object or a query handle is stale") now says it of a plain object only; a
+  query handle survives like a store, `restore` re-issuing the same `(index, generation)`.
+* **The integrator's decision 2** ("Resume anyway and show `(N objects not carried over)`. The stale handles keep today's
+  status 5 path", with `docs/DEV_LOOP.md` telling an app to run the query again) stands for plain objects. The count
+  `(N objects not carried over)` no longer includes query handles (it counts plain objects, objects a method returned and
+  records the rebuild refused, such as a query whose parameter types the edit changed); the terminal line counts them
+  apart (`state kept (2 stores, 1 query handle, ...)`); the "run the query again" advice and its troubleshooting row are
+  gone from `docs/DEV_LOOP.md`.
+* **Known limit (c)** ("Query handles and plain objects need re-creating by the app") now reads: plain objects need
+  re-creating by the app; query handles do not. The observation under "As built" that a `refetch` on the stale query handle
+  was refused records what was true when it was written.
+
+Not changed: what ADR-053 decides about the pipes, the hand-over, the 16 MiB bound, determinism (R12) and the failure matrix.

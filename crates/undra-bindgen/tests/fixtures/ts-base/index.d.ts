@@ -28,7 +28,17 @@ export interface LoadOptions {
   readonly expectedSchemaHash: bigint;
   /** ADR-044 amendment A: the core's namespace, which the generated entry fills in (`UndraIds.namespace`). */
   readonly namespace?: string;
+  /** Addition (ADR-057): the runtime features the generated entry of a schema with a stream passes (`[streams]`). */
+  readonly features?: readonly UndraFeature[];
 }
+
+/** Addition (ADR-057): a part of the runtime a core loads up front; `streams` is the one a schema with a stream needs. */
+export interface UndraFeature {
+  readonly name: string;
+}
+
+/** Addition (ADR-057): the stream support, which the generated entry of a schema with a stream passes in `features`. */
+export declare const streams: UndraFeature;
 
 /** Addition (ADR-044): what `UndraCore.attach` and a generated entry's `attach` take. */
 export interface AttachOptions {
@@ -37,6 +47,8 @@ export interface AttachOptions {
   readonly shared?: boolean;
   /** ADR-044 amendment A: the core's namespace, which the generated entry fills in (`UndraIds.namespace`). */
   readonly namespace?: string;
+  /** Addition (ADR-057): the runtime features the generated entry of a schema with a stream passes (`[streams]`). */
+  readonly features?: readonly UndraFeature[];
 }
 
 /** Addition (ADR-044): a transport a host provides (React Native's `NativeTransport`, a test double). */
@@ -76,8 +88,6 @@ export interface Mirror {
 /** Addition (ADR-031): what a generated store tells its base class (its `no_coalesce` signals). */
 export interface StoreOptions {
   readonly noCoalesce?: readonly number[];
-  /** Addition (ADR-049): the recorded constructor call of a query handle, which the runtime re-creates after a restart. */
-  readonly recreate?: { readonly typeId: number; readonly methodId: number; readonly args: Uint8Array };
 }
 
 export declare class UndraCore {

@@ -1,0 +1,38 @@
+[
+ {
+  "workflow": "CI",
+  "name": "Rust (Linux)",
+  "bucket": "pass",
+  "state": "SUCCESS"
+ },
+ {
+  "workflow": "CI",
+  "name": "All green",
+  "bucket": "pass",
+  "state": "SUCCESS"
+ },
+ {
+  "workflow": "Bench",
+  "name": "All green",
+  "bucket": "pass",
+  "state": "SUCCESS"
+ },
+ {
+  "workflow": "Two cores",
+  "name": "All green",
+  "bucket": "pass",
+  "state": "SUCCESS"
+ },
+ {
+  "workflow": "Site",
+  "name": "All green",
+  "bucket": "pass",
+  "state": "SUCCESS"
+ },
+ {
+  "workflow": "Site",
+  "name": "Build and check",
+  "bucket": "pass",
+  "state": "SUCCESS"
+ }
+]

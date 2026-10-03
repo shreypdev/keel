@@ -82,8 +82,11 @@ list its rows). A thin bar at the top shows what the connection is doing, green 
 and for four seconds what the dev server says about a reload: "Reloaded, state kept". A dropped connection (the laptop
 slept, adb restarted) resumes the same objects with their state too; `.proof/dev-loop/` has screenshots of the Android
 app doing both. When the state cannot be carried (a schema change, a snapshot over 16 MiB, `--no-keep-state`) the apps
-load the new core and start over, and the bar says why. The Remote tab's query handle is not a store, so it is not
-carried: its screen keeps the last values it had and refetching needs the query run again (docs/DEV_LOOP.md).
+load the new core and start over, and the bar says why. The Remote tab's query handle comes back too (ADR-059): the
+snapshot keeps what it is made of and the tab observes it again after the reconnect, with no code in the app, and
+pull-to-refresh works. `remote_todos` is `persist`ed, so the tab shows the data its last fetch stored and refetches by its
+30 s window; a query without `persist` (the ticker, the feed) shows its loading state once and then the data the rebuilt
+code fetched (docs/DEV_LOOP.md).
 
 ## The stress screen
 

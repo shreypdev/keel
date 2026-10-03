@@ -49,6 +49,7 @@ pub(crate) fn method(
         takes_ctx: false,
         coalesce: false,
         docs: String::new(),
+        generic: None,
     }
 }
 
@@ -362,6 +363,7 @@ pub(crate) fn representative_schema() -> Schema {
         is_async: false,
         takes_ctx: false,
         docs: String::new(),
+        generic: None,
     });
     s.functions.push(FunctionDef {
         name: "ping".into(),
@@ -371,6 +373,7 @@ pub(crate) fn representative_schema() -> Schema {
         is_async: true,
         takes_ctx: true,
         docs: String::new(),
+        generic: None,
     });
 
     // One port of each kind.

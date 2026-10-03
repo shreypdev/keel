@@ -137,7 +137,9 @@ test("S28 host callbacks", async () => {
     await waitFor("confirm to wait", () => rep.waiting);
     controller.abort();
     await expect(running).rejects.toBe(controller.signal.reason);
-    await waitFor("the host's confirm to see its signal abort", () => rep.aborted, { timeoutMs: 1_000 });
+    // The default wait (WAIT_TIMEOUT_MS), a hang detector: `confirm` waits for its signal and nothing else, on no timer, so a
+    // cancellation that did not reach it would leave it waiting; how soon it is seen is the machine's.
+    await waitFor("the host's confirm to see its signal abort", () => rep.aborted);
     await sleep(50); // the late answer goes out, and is discarded
     expect(reported(), "nothing leaks").toEqual([]);
     expect(registry.liveCount, "the watch still holds the instance").toBe(live);
@@ -163,7 +165,9 @@ test("S28 host callbacks", async () => {
     expect(await w5.watching(), "two subscriptions, one proxy").toBe(2);
     watch1.close();
     watch2.close();
-    await waitFor("the registry to let go of the reporter", () => registry.count(rep5) === 0, { timeoutMs: 1_000 });
+    // The default wait (WAIT_TIMEOUT_MS), a hang detector: a proxy the core did not drop holds its reference for good, on no
+    // timer; how soon the release reaches the registry is the machine's.
+    await waitFor("the registry to let go of the reporter", () => registry.count(rep5) === 0);
     expect(registry.liveCount).toBe(live);
   });
 
@@ -232,7 +236,8 @@ test("S28 host callbacks", async () => {
     expect(walked).toEqual([1, 2, 3]);
     await waitFor("the notes of walk(3)", () => rep10.lines.length === 3);
     expect(rep10.lines).toEqual(["walk 1 of 3", "walk 2 of 3", "walk 3 of 3"]);
-    await waitFor("the registry to let go of the walk's reporter", () => registry.count(rep10) === 0, { timeoutMs: 1_000 });
+    // The default wait (WAIT_TIMEOUT_MS), as Kotlin's step 10: a hang detector, for the same reason as step 5's.
+    await waitFor("the registry to let go of the walk's reporter", () => registry.count(rep10) === 0);
     const closed = await Workshop.create(core);
     closed.close();
     const rep10b = new Recorder();

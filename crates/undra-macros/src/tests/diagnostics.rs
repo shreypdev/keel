@@ -1095,3 +1095,238 @@ fn e0070_an_alias_outside_the_crate_of_its_template() {
         "  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0070"
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Generic functions, methods, objects and stores (ADR-058)
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn e0072_a_function_that_cannot_be_listed_keeps_its_item() {
+    expect(
+        "E0072",
+        impl_::expand_api(
+            quote!(generic(T = [Vec<Todo>])),
+            quote!(
+                pub fn first<T>(rows: Vec<T>) -> Option<T> {
+                    None
+                }
+            ),
+        ),
+        "pub fn first < T >",
+    );
+}
+
+#[test]
+fn e0002_a_generic_function_without_a_list_keeps_its_item() {
+    expect(
+        "E0002",
+        impl_::expand_api(
+            quote!(),
+            quote!(
+                pub fn first<T>(rows: Vec<T>) -> u8 {
+                    0
+                }
+            ),
+        ),
+        "pub fn first < T >",
+    );
+}
+
+#[test]
+fn e0074_a_generic_block_with_the_wrong_header_keeps_its_block_and_leaves_a_stub_template() {
+    let out = impl_::expand_api(
+        quote!(generic),
+        quote!(
+            impl<T> Cache<Vec<T>> {
+                pub fn len(&self) -> u32 {
+                    0
+                }
+            }
+        ),
+    );
+    expect("E0074", out.clone(), "impl < T > Cache < Vec < T > >");
+    // The aliases written for the template do not add "cannot find macro" to the one error.
+    assert!(
+        crate::tests::has(&out.to_string(), "macro_rules! __undra_template_Cache"),
+        "{out}"
+    );
+}
+
+#[test]
+fn e0074_a_method_with_its_own_parameters_in_a_generic_block() {
+    expect(
+        "E0074",
+        impl_::expand_api(
+            quote!(generic),
+            quote!(
+                impl<T: Row> Cache<T> {
+                    pub fn map<U: Default>(&self) -> U {
+                        U::default()
+                    }
+                }
+            ),
+        ),
+        "pub fn map < U : Default >",
+    );
+}
+
+#[test]
+fn e0008_generic_on_a_store_without_type_parameters() {
+    expect(
+        "E0008",
+        impl_::expand_store(
+            quote!(generic),
+            quote!(
+                pub struct Counter {
+                    count: Signal<u32>,
+                }
+            ),
+        ),
+        "pub struct Counter",
+    );
+}
+
+#[test]
+fn a_failed_generic_store_still_defines_what_its_block_and_its_aliases_call() {
+    let out = impl_::expand_store(
+        quote!(generic),
+        quote!(
+            pub struct Selection<T> {
+                rows: Signal<&str>,
+                marker: Option<T>,
+            }
+        ),
+    );
+    expect("E0001", out.clone(), "pub struct Selection < T >");
+    let shown = out.to_string();
+    assert!(
+        crate::tests::has(
+            &shown,
+            "macro_rules! _undra_error_E0011_Selection_is_not_a_generic_store"
+        ),
+        "{shown}"
+    );
+    assert!(
+        crate::tests::has(&shown, "macro_rules! __undra_template_Selection"),
+        "{shown}"
+    );
+}
+
+#[test]
+fn e0070_an_alias_of_a_generic_object_in_another_crate() {
+    let item = |kind: &str| -> TokenStream {
+        let impl_docs = "";
+        quote! {
+            #[undra_instance(kind = #kind, template = "Cache", crate_name = "model_crate", root = "::undra", docs = "", impl_docs = #impl_docs, restore = "", alias_docs = "")]
+            impl TodoCache {
+                pub fn new() -> Self { }
+            }
+            type __UndraInstanceArgs = (Todo,);
+        }
+    };
+    let items: Vec<syn::Item> = syn::parse2::<syn::File>(item("object")).unwrap().items;
+    let error = impl_::generic::instantiate_object_in_for_tests(items, "app_crate")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.starts_with(
+            "error[undra::E0070]: `TodoCache` instantiates `Cache`, which is declared in the crate `model_crate`, not in `app_crate`"
+        ),
+        "{error}"
+    );
+    // The other way out is an object of this crate's own, not a record.
+    assert!(
+        error.contains(
+            "or write the object out in this crate, with an `#[undra::api]` impl block of its own"
+        ),
+        "{error}"
+    );
+    assert!(!error.contains("struct or enum"), "{error}");
+}
+
+/// The module-level E0070 constant of an instantiation of `Cache` with the type arguments `args`.
+fn e0070_rule_of(args: TokenStream) -> String {
+    let object = impl_::expand_instantiate(quote! {
+        #[undra_instance(kind = "object", template = "Cache", crate_name = "", root = "::undra", docs = "", impl_docs = "", restore = "", alias_docs = "")]
+        impl SomeCache {
+            pub fn new() -> Self { }
+        }
+        type __UndraInstanceArgs = #args;
+    })
+    .to_string();
+    let start = object
+        .find("_undra_error_E0070_this_instantiation_of_Cache_")
+        .unwrap_or_else(|| panic!("no rule constant: {object}"));
+    object[start..]
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .next()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn the_rule_of_e0070_names_each_instantiation_unambiguously() {
+    // Two different instantiations in one module must not define one constant: that would be a
+    // false "declared twice". Dropping punctuation made these pairs meet.
+    for (a, b) in [
+        (quote!((A_B, C,)), quote!((A, B_C,))),
+        (quote!((Vec<Todo>,)), quote!((VecTodo,))),
+        (quote!((crate::model::Todo,)), quote!((cratemodelTodo,))),
+        (quote!((A, BC,)), quote!((AB, C,))),
+        (quote!((A_B,)), quote!((A, B,))),
+    ] {
+        let (left, right) = (e0070_rule_of(a.clone()), e0070_rule_of(b.clone()));
+        assert_ne!(left, right, "{a} and {b}");
+    }
+    // The same instantiation spelled the same way is one constant, and a plain name reads as itself.
+    assert_eq!(
+        e0070_rule_of(quote!((Todo,))),
+        e0070_rule_of(quote!((Todo,)))
+    );
+    assert_eq!(
+        e0070_rule_of(quote!((Todo,))),
+        "_undra_error_E0070_this_instantiation_of_Cache_Todo_is_declared_twice_keep_one_alias_per_instantiation"
+    );
+}
+
+#[test]
+fn an_instantiation_carries_the_rule_of_e0070_in_one_place_per_part() {
+    let object = impl_::expand_instantiate(quote! {
+        #[undra_instance(kind = "object", template = "Cache", crate_name = "", root = "::undra", docs = "", impl_docs = "", restore = "", alias_docs = "")]
+        impl TodoCache {
+            pub fn new() -> Self { }
+        }
+        type __UndraInstanceArgs = (crate::model::Todo,);
+    })
+    .to_string();
+    // The module-level constant names the type arguments, so two aliases in one module collide.
+    assert!(
+        object.contains("_undra_error_E0070_this_instantiation_of_Cache_crate_C_Cmodel_C_CTodo_is_declared_twice_keep_one_alias_per_instantiation"),
+        "{object}"
+    );
+    // A plain object's alias also carries the inherent constant and the generic-store check.
+    assert!(
+        object.matches("pub const _undra_error_E0070_this_instantiation_of_Cache_is_declared_twice_keep_one_alias_per_instantiation").count() == 1,
+        "{object}"
+    );
+    assert!(object.contains("__UNDRA_IS_GENERIC_STORE"), "{object}");
+    let store = impl_::expand_instantiate(quote! {
+        #[undra_instance(kind = "store", template = "Selection", crate_name = "", root = "::undra", docs = "", impl_docs = "", restore = "", alias_docs = "")]
+        pub struct TodoSelection { rows: Signal<Vec<Todo>> }
+        impl TodoSelection {
+            pub fn new(ctx: Ctx) -> Self { }
+        }
+        type __UndraInstanceArgs = (Todo,);
+    })
+    .to_string();
+    // A store carries the inherent constant once (in the store's own part), and no check that it
+    // is not a store.
+    assert_eq!(
+        store
+            .matches("pub const _undra_error_E0070_this_instantiation_of_Selection_is_declared_twice_keep_one_alias_per_instantiation")
+            .count(),
+        1,
+        "{store}"
+    );
+    assert!(!store.contains("__UNDRA_IS_GENERIC_STORE"), "{store}");
+}

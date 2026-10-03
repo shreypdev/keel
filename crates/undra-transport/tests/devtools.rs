@@ -931,7 +931,14 @@ fn a_page_cannot_reach_the_core_through_its_socket_whatever_it_sends() {
     let _ = page.ws.send(Message::Binary(vec![1; 200 * 1024]));
     assert!(closed_within(&mut page, Duration::from_secs(5)));
 
-    // The core and the app client did not notice: nothing was called, nothing was restored.
+    // The core and the app client did not notice: nothing was called, nothing was restored. A page's leaving
+    // is not nothing: the last one out gives the app's observations back to the runtime, which answers each with
+    // the signal's value (`Hub::release_observation`). The hub has let go when it says it is idle, those values
+    // are queued for the app by then, and the round trip below, behind them, takes them out of the way: how long
+    // the server takes to notice the last close is the machine's business, not this test's.
+    fx.eventually("the hub to let go of the last page", |fx| {
+        !fx.bridge.devtools_attached()
+    });
     assert_eq!(value(&mut app), 10, "the Call envelope was not executed");
     assert_eq!(
         stat(&fx.rt, "calls") - calls_before,
@@ -1249,9 +1256,22 @@ fn restarted(
 
 /// Pipelines `n` `add(1)` calls on `counter` (a commit each) and waits for every reply.
 fn storm(app: &mut TestClient, counter: u64, n: usize) {
+    storm_paced(app, counter, n, 500, |_| {});
+}
+
+/// Pipelines `n` `add(1)` calls on `counter` (a commit each), `batch` in flight at a time, and waits for every reply;
+/// `after_batch` is told how many commits the batch made once its replies are in (a test that has a page reading
+/// holds the next batch back until the page has what this one made).
+fn storm_paced(
+    app: &mut TestClient,
+    counter: u64,
+    n: usize,
+    batch: usize,
+    mut after_batch: impl FnMut(usize),
+) {
     let mut sent = 0;
     while sent < n {
-        let batch = 500.min(n - sent);
+        let batch = batch.min(n - sent);
         let ids: Vec<u32> = (0..batch)
             .map(|_| {
                 let id = app.next_call_id();
@@ -1269,8 +1289,39 @@ fn storm(app: &mut TestClient, counter: u64, n: usize) {
         for id in ids {
             assert_eq!(app.await_reply(id).0, undra::wire::payload::ReplyStatus::Ok);
         }
+        after_batch(batch);
         sent += batch;
     }
+}
+
+/// Sets the label of `counter` `n` times, each to a different text of `size` bytes (a number and
+/// padding), `BATCH` calls in flight at a time; returns the last text.
+fn storm_labels(app: &mut TestClient, counter: u64, n: usize, size: usize) -> String {
+    const BATCH: usize = 50;
+    let text = |i: usize| format!("{i:06}{}", "x".repeat(size - 6));
+    let mut sent = 0;
+    while sent < n {
+        let batch = BATCH.min(n - sent);
+        let ids: Vec<u32> = (sent..sent + batch)
+            .map(|i| {
+                let id = app.next_call_id();
+                app.send_call(
+                    undra::wire::payload::CallTarget::Method {
+                        handle: undra::wire::Handle(counter),
+                        method_id: SET_LABEL,
+                    },
+                    id,
+                    &enc(&text(i)),
+                );
+                id
+            })
+            .collect();
+        for id in ids {
+            assert_eq!(app.await_reply(id).0, undra::wire::payload::ReplyStatus::Ok);
+        }
+        sent += batch;
+    }
+    text(n - 1)
 }
 
 /// Reads the page until it has been quiet for `quiet`.
@@ -1291,11 +1342,69 @@ fn a_commit_storm_costs_steps_by_time_not_by_commit_and_the_ring_stays_bounded()
     page.step();
     drain_page(&mut page, Duration::from_millis(200));
 
+    // The storm is paced by the page's own reads: `BATCH` commits, then the page reads until it has all of them,
+    // then the next batch. A page that reads at its own speed (a 4-core runner, a laptop under load) therefore
+    // misses nothing, whatever that speed is: the queue the server keeps per page holds one batch and never
+    // overflows, so "a page that reads misses nothing" is a property of the server and not of how fast this
+    // machine drains a socket. How long the storm takes is then the machine's business, and the step bound below
+    // is stated against the elapsed time, which is what the claim is about (a step per window, not per commit).
     const N: usize = 20_000;
+    const BATCH: usize = 256;
+    const DEADLINE: Duration = Duration::from_secs(600);
     let started = Instant::now();
-    storm(&mut app, counter, N);
+    let mut got: Vec<ServerMsg> = Vec::new();
+    let mut received = 0;
+    storm_paced(&mut app, counter, N, BATCH, |made| {
+        let want = received + made;
+        while received < want {
+            let left = DEADLINE.saturating_sub(started.elapsed());
+            let msg = page
+                .next_within(left.max(Duration::from_millis(1)))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "the page received {received} of {want} commit change-sets after {:?} (it was dropped, \
+                         or {DEADLINE:?} is not enough on this machine)",
+                        started.elapsed()
+                    )
+                });
+            if matches!(
+                msg,
+                ServerMsg::ChangeSet {
+                    delivery: Delivery::Commit,
+                    ..
+                }
+            ) {
+                received += 1;
+            }
+            got.push(msg);
+        }
+    });
     let storm_took = started.elapsed();
-    let got = drain_page(&mut page, Duration::from_millis(700));
+    // The final state's step arrives one coalescing window after the last commit (the snapshot is taken by
+    // time): wait for it, then for a quiet 700 ms, so the statistics that follow are in `got` too.
+    let last_seq = got
+        .iter()
+        .filter_map(|m| match m {
+            ServerMsg::ChangeSet { seq, .. } => Some(*seq),
+            _ => None,
+        })
+        .max()
+        .unwrap();
+    let covered = |got: &[ServerMsg]| {
+        got.iter()
+            .any(|m| matches!(m, ServerMsg::Step(s) if s.through_seq == last_seq))
+    };
+    while !covered(&got) {
+        let left = DEADLINE.saturating_sub(started.elapsed());
+        match page.next_within(left.max(Duration::from_millis(1))) {
+            Some(msg) => got.push(msg),
+            None => panic!(
+                "no step covering the last commit (seq {last_seq}) after {:?}",
+                started.elapsed()
+            ),
+        }
+    }
+    got.extend(drain_page(&mut page, Duration::from_millis(700)));
     let elapsed = started.elapsed();
 
     let commits = got
@@ -1338,14 +1447,6 @@ fn a_commit_storm_costs_steps_by_time_not_by_commit_and_the_ring_stays_bounded()
         steps.len()
     );
     // The page is not left behind: the last step covers the last commit.
-    let last_seq = got
-        .iter()
-        .filter_map(|m| match m {
-            ServerMsg::ChangeSet { seq, .. } => Some(*seq),
-            _ => None,
-        })
-        .max()
-        .unwrap();
     assert_eq!(
         steps.last().unwrap().through_seq,
         last_seq,
@@ -1395,9 +1496,13 @@ fn a_page_that_stops_reading_is_dropped_and_the_core_and_the_app_do_not_wait_for
     app.recv_kind(Kind::ChangeSet);
     let mut page = Page::connect(&fx);
     page.step();
-    // The page does not read from here on.
+    // The page does not read from here on. What a socket holds before the writer blocks is the machine's:
+    // a few hundred KiB on macOS, several MiB on Linux, whose loopback buffers grow with the traffic. So the
+    // commits are big (16 KiB each, 48 MiB in all, every one different: the same value is not a change) and
+    // what is sent is far more than any socket holds, as the app-side test of a slow client sends far
+    // more than the queue holds (`a_client_that_stops_reading_is_dropped_and_never_blocks_the_core`).
     let started = Instant::now();
-    storm(&mut app, b, 40_000);
+    let last = storm_labels(&mut app, b, 3_000, 16 * 1024);
     let took = started.elapsed();
     assert!(
         took < Duration::from_secs(60),
@@ -1407,7 +1512,10 @@ fn a_page_that_stops_reading_is_dropped_and_the_core_and_the_app_do_not_wait_for
         !fx.bridge.devtools_attached()
     });
     // The app converged and is sent only its own signal; nothing of B reached it.
-    assert_eq!(i32_of(&app.method(b, GET, &[]).1), 40_000);
+    assert_eq!(
+        String::decode_exact(&app.method(b, GET_LABEL, &[]).1).unwrap(),
+        last
+    );
     app.method(a, ADD, &enc(&1_i32));
     drain(&mut app);
     assert_eq!(
@@ -1448,4 +1556,181 @@ fn nothing_is_recorded_or_counted_while_no_page_is_attached() {
     });
     assert_eq!(stats["server"]["ring_steps"], 1, "{stats}");
     assert_eq!(stats["server"]["commits"], 0, "{stats}");
+}
+
+// ----- query handles and the hub (ADR-059) -----------------------------------------------------------
+
+/// A query a test opens a handle of: it answers 7 at once, without a port.
+#[undra::query(key = "devtools-q", stale = "1m", retry = 0)]
+pub async fn devtools_q(_ctx: &undra::runtime::Ctx) -> Result<u32, CounterError> {
+    Ok(7)
+}
+
+const DEVTOOLS_Q: u32 = <DevtoolsQQuery as undra::query::QueryDef>::ID;
+const REFETCH: u32 = undra::query::REFETCH_METHOD_ID;
+const DATA_SIGNAL: u32 = 0;
+
+/// `new DevtoolsQQueryHandle()` and its observation of every signal.
+fn open_query(app: &mut TestClient) -> u64 {
+    let (status, body) = app.call(
+        undra::wire::payload::CallTarget::Constructor {
+            type_id: DEVTOOLS_Q,
+            method_id: DEVTOOLS_Q,
+        },
+        &[],
+    );
+    assert_eq!(status, undra::wire::payload::ReplyStatus::Ok);
+    let handle = dec::<u64>(&body);
+    app.observe(handle, u32::MAX, true);
+    handle
+}
+
+/// Reads the app's frames until the query handle's `data` is `Some(7)`.
+fn wait_for_the_answer(app: &mut TestClient, query: u64) {
+    let answer = Some(7_u32).encode_to_vec();
+    let answered = |app: &TestClient| {
+        change_sets(app).iter().any(|set| {
+            set.entries
+                .iter()
+                .any(|e| e.handle.0 == query && e.signal_id == DATA_SIGNAL && e.value == answer)
+        })
+    };
+    for _ in 0..50 {
+        if answered(app) {
+            return;
+        }
+        app.recv_kind(Kind::ChangeSet);
+    }
+    panic!("the query handle never showed its data");
+}
+
+use undra::wire::Encode as _;
+
+/// What a page is told is a store is a store: a query handle is not listed, and a time travel
+/// leaves it alone (no change-set, no refetch), also when the step is older than the handle.
+#[test]
+fn a_time_travel_leaves_a_live_query_handle_alone_and_the_page_never_lists_it() {
+    let fx = start_devtools();
+    let mut app = fx.client();
+    let counter = app.new_counter(5);
+    app.observe(counter, COUNT_SIGNAL, true);
+    app.recv_kind(Kind::ChangeSet);
+    let mut page = Page::connect(&fx);
+    assert_eq!(page.step().0, 1, "the state before the query screen");
+
+    // The app opens a query screen, and a store changes after it.
+    let query = open_query(&mut app);
+    wait_for_the_answer(&mut app, query);
+    app.method(counter, ADD, &enc(&3_i32));
+    let newest = page.last_step;
+    while page.last_step <= newest {
+        page.step();
+    }
+
+    let mark = change_sets(&app).len();
+    page.send(ClientMsg::Restore {
+        request_id: 9,
+        step: 1,
+    });
+    let traveled = page.until("the answer", |m| match m {
+        ServerMsg::Traveled(t) => Some(t.clone()),
+        _ => None,
+    });
+    assert!(
+        (traveled.ok, traveled.dropped) == (true, 0),
+        "no store was built since, and the handle is not one: {traveled:?}"
+    );
+    // The store went back to the step's value; the handle was not touched: the restore sent the
+    // app nothing for it, then or later.
+    let restored = change_set(&app.recv_kind(Kind::ChangeSet));
+    assert_eq!(i32_of(&restored.entries[0].value), 5);
+    drain(&mut app);
+    let since: Vec<_> = change_sets(&app).split_off(mark);
+    assert!(!since.is_empty());
+    assert!(
+        since
+            .iter()
+            .all(|set| set.entries.iter().all(|e| e.handle.0 == counter)),
+        "{since:?}"
+    );
+    // It still works: `refetch` is accepted, and the page never listed it.
+    assert_eq!(
+        app.method(query, REFETCH, &[]).0,
+        undra::wire::payload::ReplyStatus::Ok
+    );
+    let mut listed = page.seen.clone();
+    listed.append(&mut page.pending);
+    for msg in &listed {
+        if let ServerMsg::Stores(stores) = msg {
+            assert!(
+                stores.iter().all(|s| s.handle != query),
+                "a query handle is not a store: {stores:?}"
+            );
+        }
+    }
+    // The dev bar says which step, and no store is gone: wait for the notice, however long the machine takes to send it.
+    let dev_notices = |app: &TestClient| -> Vec<String> {
+        app.frames_of(Kind::Log)
+            .iter()
+            .filter_map(|f| Log::decode(&mut Reader::new(&f.payload)).ok())
+            .filter(|log| log.target == "undra::dev")
+            .map(|log| log.message.to_owned())
+            .collect()
+    };
+    while dev_notices(&app).is_empty() {
+        app.recv_kind(Kind::Log);
+    }
+    assert_eq!(dev_notices(&app), ["time travel: step 1"]);
+}
+
+/// A reload with a page attached: the new core re-issues the query handle dormant, and the hub of
+/// the new core neither lists nor observes it (observing would build it, for a page nobody opened).
+/// The app's own observe builds it.
+#[test]
+fn the_hub_of_a_reloaded_core_does_not_build_the_re_issued_query_handles() {
+    let fx = start_with(resuming_config(), "dev");
+    let addr = fx.server.addr();
+    let mut app = fx.session_client("tok-reload-q", false);
+    let counter = app.new_counter(1);
+    let query = open_query(&mut app);
+    wait_for_the_answer(&mut app, query);
+    let suspended = fx.server.suspend(Duration::from_secs(5));
+    assert!(suspended.settled);
+    let session = suspended.session.expect("the app's session is handed over");
+    let mut handles = session.handles.clone();
+    handles.sort_unstable();
+    assert_eq!(
+        handles,
+        [counter, query],
+        "the query handle is in the session"
+    );
+    let snapshot = fx.rt.snapshot();
+    drop(app);
+    drop(fx);
+
+    let second = restarted(addr, &snapshot, session);
+    assert_eq!(stat(&second.rt, "dormant_handles"), 1);
+    let mut page = Page::connect(&second);
+    page.step();
+    let stores = page.until("the stores", |m| match m {
+        ServerMsg::Stores(s) if !s.is_empty() => Some(s.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        stores.iter().map(|s| s.handle).collect::<Vec<_>>(),
+        [counter],
+        "the page lists the store and not the handle"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        stat(&second.rt, "dormant_handles"),
+        1,
+        "the hub observed the stores it lists, not the records"
+    );
+
+    // The app is back and observes what it observed: the handle is built, on its own value.
+    let mut back = second.session_client("tok-reload-q", true);
+    back.observe(query, u32::MAX, true);
+    wait_for_the_answer(&mut back, query);
+    assert_eq!(stat(&second.rt, "dormant_handles"), 0);
 }

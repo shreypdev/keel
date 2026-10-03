@@ -218,6 +218,13 @@ measured_ns = 31.8
 budget_ns = 250
 measured_ns = 36.0
 
+# ADR-058: `add_one_for<Record5>`, an instantiation of a generic function, is `add_one`'s body through
+# the same path. Its absolute budget is the floor; `generic_fn_vs_function` below is the gate: an
+# instantiation dispatches like a hand-written function, as a test.
+[bench."dispatch/call_sync/generic_fn"]
+budget_ns = 250
+measured_ns = 36.0
+
 [bench."dispatch/call_sync/echo_record1k"]
 budget_ns = 720
 measured_ns = 142.1
@@ -451,6 +458,24 @@ budget_ns = 1000000
 measured_ns = 76625.0
 blueprint_ns = 3000000
 blueprint = "Core cold start with 100 KB snapshot restore: <= 3 ms iOS (A15), <= 5 ms Android, <= 8 ms web (includes starting the undra-core thread)"
+
+# ADR-059: the recreation records of 100 query handles (no store in the runtime: the cost of the
+# handles alone). A snapshot asks each handle for its record (its parameters and its observer's
+# polling interval); a restore into a runtime that does not hold them (a dev reload, a web crash
+# restart) checks each record and places it as a dormant handle; a restore into the runtime that
+# holds them (a time travel) finds them live and leaves them alone. Best of three on the reference
+# host while two other builds ran.
+[bench."snapshot/encode_100_handles"]
+budget_ns = 78000
+measured_ns = 15594.6
+
+[bench."snapshot/restore_100_handles"]
+budget_ns = 98000
+measured_ns = 19583.0
+
+[bench."snapshot/restore_100_handles_live"]
+budget_ns = 200000
+measured_ns = 38349.4
 
 # ---------------------------------------------------------------------------------------------
 # Harsh conditions, layer A: the unit of work of each stress scenario, gated like every row above
@@ -703,6 +728,17 @@ den = "stress/firehose/call_set"
 max = 1.1
 measured = 0.85
 
+# An instantiation of a generic function dispatches like the function written by hand (ADR-058): the
+# same body, the same path, so the ratio is 1 up to noise: 0.89-1.04 over six runs on the reference host
+# (the ADR asked for 1.1; the rule above, 1.15x the largest healthy sample rounded up to 0.1, gives 1.2,
+# and a tighter bound would fail on the noise of two ~40 ns rows). A second dispatch hop, a table lookup
+# per call or a copy of the arguments for generic code would each be 1.3x or more.
+[ratio."generic_fn_vs_function"]
+num = "dispatch/call_sync/generic_fn"
+den = "dispatch/call_sync/function"
+max = 1.2
+measured = 1.0
+
 # An object parameter costs a table lookup on top of a bare call: `Calculator.dock_slots(&Dock)` through
 # `call_sync` against `Calculator.add`. Healthy 0.99-1.14 on the reference host (quiet and loaded). No
 # runner samples exist yet, so the maximum is the bound of what it guards (an object resolved by a
@@ -824,7 +860,7 @@ measured = 1.34
 # background run's task table and poll loop are linked only when a task is registered (by use, ADR-052).
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 116690
+measured_gzip_bytes = 118409
 tolerance = 0.05
 
 # What a hello-world app loads up front of the JavaScript runtime: `@undra/runtime` as the template's
@@ -845,9 +881,43 @@ tolerance = 0.05
 # background window with its `pagehide` and `freeze` listeners and the stats fields; `runInBackground`, the report builder
 # and the Diagnostics port with its registration and codecs are lazy chunks. The item-by-item verdict, with both pieces'
 # bytes, is ADR-052's prod-ops review note.
+# ts-runtime-16k (ADR-057) restates it at 16,000 (15,680 recorded, from 22,100: -6,420) without removing behaviour:
+# what a `wasm-main` hello page cannot run, or does not run until asked, loads with the thing that needs it (the
+# stream support, the waiters behind `observe`, what only a core outside this thread needs, `stats`/`snapshot`/
+# `restore`/`runInBackground`, the per-mode `load()` mapping, two rarely thrown error classes, the codecs a schema
+# does not name); the typed channel to the in-process host replaces the framed one; and the package publishes two
+# builds. What is measured is the one an app gets from the registry: `default` resolves the production build, whose
+# messages are `T<code>` with their values and a link (the sentences are the development build's and the errors page's)
+# and whose private properties are renamed (`_pending` -> `_c`). Vite's preload helper, which the build adds to whichever
+# chunk has an `import()`, is its own chunk and is reported as `bundler_gzipped` (691): not the runtime's code. The record
+# lists the runtime modules that hold code in the chunk (`modules`), and a run whose list differs from it fails and names
+# the module. `web/hello-runtime-js-with-helper` is the same page with the helper left in the chunk (the other reading of
+# the number: 16,191), gated at 16,600 so the target holds either way. `web/all-features-runtime-js` is the page that
+# uses everything (the playground's bindings with recovery, a panic handler, stats, snapshot, restore and a background
+# run): its first chunk plus every chunk of the runtime it loads on demand, 40,100 (27,355 + 12,745) from 42,385; its
+# budget is the old figure, 42,400: the first chunk may shed bytes to chunks a page loads on demand, a page that uses
+# everything may not load more.
+# The review of ts-runtime-16k put three things back up front or into both builds (ADR-057, "Review"): `snapshot` and
+# `restore` run at the call (their order with the calls around them is their meaning), the page's background window
+# calls `run_background` itself (a page being left, or offline, cannot fetch a chunk), and a port error's field and a
+# close frame's reason are sentences in both builds. Recorded after it: 15,811 (190 under the budget), with the helper
+# 16,333, all features 40,221 (27,455 + 12,766). After L3 (the framed channel) and the merge of reload-handles (ADR-059:
+# no query-handle re-creation in recovery): 15,774 (226 under), with the helper 16,285, all features 39,922 (27,064 +
+# 12,858). The next change that grows the chunk by 226 bytes is over the budget: make room (ADR-057's levers not taken:
+# host events by use first, about 530) or restate it in an ADR.
 [size."web/hello-runtime-js"]
-budget_gzip_bytes = 22100
-measured_gzip_bytes = 22100
+budget_gzip_bytes = 16000
+measured_gzip_bytes = 15774
+tolerance = 0.05
+
+[size."web/hello-runtime-js-with-helper"]
+budget_gzip_bytes = 16600
+measured_gzip_bytes = 16285
+tolerance = 0.05
+
+[size."web/all-features-runtime-js"]
+budget_gzip_bytes = 42400
+measured_gzip_bytes = 39922
 tolerance = 0.05
 
 # ---------------------------------------------------------------------------------------------

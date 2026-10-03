@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Generic functions, objects and stores · Undra docs</title>
+<meta name="description" content="One piece of Rust over several row types: generic functions become overloads, generic objects and stores one ordinary class per alias.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/generics.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Generic functions, objects and stores · Undra docs">
+<meta property="og:description" content="One piece of Rust over several row types: generic functions become overloads, generic objects and stores one ordinary class per alias.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/generics.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Generic functions, objects and stores · Undra docs">
+<meta name="twitter:description" content="One piece of Rust over several row types: generic functions become overloads, generic objects and stores one ordinary class per alias.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/generics.html#article","headline":"Generic functions, objects and stores · Undra docs","description":"One piece of Rust over several row types: generic functions become overloads, generic objects and stores one ordinary class per alias.","url":"https://shreypdev.github.io/undra/docs/generics.html","inLanguage":"en","dateModified":"2026-10-02","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Generic functions, objects and stores","item":"https://shreypdev.github.io/undra/docs/generics.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Core</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html">Objects and identity</a></li><li><a href="callbacks.html">Host callbacks</a></li><li><a href="types.html">Newtypes, generics and decimals</a></li><li><a href="generics.html" aria-current="page">Generic functions, objects and stores</a></li></ul></div><div class="side-group"><p class="side-title">Data and live data</p><ul><li><a href="paging.html">Paging and lazy lists</a></li><li><a href="polling.html">Polling</a></li><li><a href="realtime.html">WebSocket &amp; server-sent events</a></li><li><a href="db.html">Local database</a></li></ul></div><div class="side-group"><p class="side-title">Test, ship, operate</p><ul><li><a href="testing.html">Testing your app</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="reviewing-generated-code.html">Reviewing generated code</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="production.html">Operating in production</a></li><li><a href="several-cores.html">One core or several</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li></ul></div><div class="side-group"><p class="side-title">Adopting Undra</p><ul><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Core</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html">Objects and identity</a></li><li><a href="callbacks.html">Host callbacks</a></li><li><a href="types.html">Newtypes, generics and decimals</a></li><li><a href="generics.html" aria-current="page">Generic functions, objects and stores</a></li></ul></div><div class="side-group"><p class="side-title">Data and live data</p><ul><li><a href="paging.html">Paging and lazy lists</a></li><li><a href="polling.html">Polling</a></li><li><a href="realtime.html">WebSocket &amp; server-sent events</a></li><li><a href="db.html">Local database</a></li></ul></div><div class="side-group"><p class="side-title">Test, ship, operate</p><ul><li><a href="testing.html">Testing your app</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="reviewing-generated-code.html">Reviewing generated code</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="production.html">Operating in production</a></li><li><a href="several-cores.html">One core or several</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li></ul></div><div class="side-group"><p class="side-title">Adopting Undra</p><ul><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1>Generic functions, objects and stores</h1>
+    <p class="lede">Write the code once over a type parameter, and say which types the platforms get. A generic function becomes a set of overloads; a generic object or store becomes one ordinary class for each alias you declare.</p>
+
+<p>Undra's callers are Swift, Kotlin and TypeScript, which cannot call a Rust generic: there is no <code>T</code> at run time to dispatch on. So the core lists the types it is generic over where it declares the code, the macro expands the ordinary function, method, object or store once for each, and the platforms see what you would have written by hand. Nothing is generic on the wire, in the schema or in the runtimes; the <a href="../playground/">playground</a>'s <a href="https://github.com/shreypdev/undra/blob/main/examples/playground/core/src/selection.rs" rel="noopener">selection module</a> is the example this page follows, and the contract scenario S34 checks it on Swift, Kotlin and TypeScript.</p>
+
+<h2 id="functions">Functions and methods<a class="anchor" href="#functions" aria-label="Link to this section">#</a></h2>
+
+<p>List the types after <code>generic(T = [..])</code>. The function stays a plain generic Rust function, so the core's own code and tests call it as usual; each listed type is one more function across the boundary, named <code>newest&lt;Todo&gt;</code> in the schema, with an id of its own.</p>
+<details class="reveal-code" open><summary>Show the Rust code and what each platform calls</summary>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">/// What the generic code needs of a row: plain Rust, never seen by the schema.
+pub trait Row: SignalValue {
+    fn drafted(serial: u64, title: String) -&gt; Self;
+    fn serial(&amp;self) -&gt; u64;
+}
+
+/// The newest of `rows`, or nothing for an empty list.
+#[undra::api(generic(T = [Todo, Note]))]
+pub fn newest&lt;T: Row&gt;(rows: Vec&lt;T&gt;) -&gt; Option&lt;T&gt; {
+    rows.into_iter().max_by_key(Row::serial)
+}
+
+/// A new row of the type the caller names.
+#[undra::api(generic(T = [Todo, Note]))]
+pub fn draft&lt;T: Row&gt;(title: String) -&gt; T { .. }</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">let latest = try newest(rows: todos)                  // Todo?
+let other  = try newest(rows: notes)                  // Note?
+let fresh  = try draft(Todo.self, title: "Untitled")  // the type is named: no argument says it</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">val latest = newest(todos)                      // Todo?
+val other  = newest(notes)                      // Note?
+val fresh  = draft(Todo::class, "Untitled")</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">const latest = await newest("Todo", todos);   // Todo | null
+const other  = await newest("Note", notes);   // Note | null
+const fresh  = await draft("Todo", "Untitled");</code></pre></div>
+</details>
+<p>Each language gets the shape its own engineers write. Swift and Kotlin overload on the parameter's type, and take the type itself (<code>Todo.self</code>, <code>Todo::class</code>) when no parameter says which one is meant, as <code>draft</code>. TypeScript has no overloading on types, so every generic function takes the type's name as a leading string literal and is one overload set whose signatures the compiler checks; the literal is always there, so every generic function is called the same way. A type that is not listed is the compiler's error in all three, with the candidates beside it.</p>
+<p>A method of an object or store takes the same list on the method, <code>#[undra(generic(T = [Todo, Note]))]</code>; each listed type is one method, overloaded in the generated class the same way. The documentation, <code>async</code>, streams, typed errors and <code>ctx</code> work as they do for any function, because each instantiation is one.</p>
+<p>The list holds named value types: records, enums, newtypes. A scalar, a <code>String</code>, a container or an object in a list is <a href="errors.html#E0072">E0072</a>, because the platforms would have to invent a name for it. A function has one type parameter; two is <a href="errors.html#E0072">E0072</a> too. A type that has no list at all is <a href="errors.html#E0002">E0002</a>: the callers are on the platforms, and the core must contain what they can call.</p>
+
+<h2 id="objects">Objects and stores<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
+
+<p>An object or a store over a type parameter is a <em>template</em>: it registers nothing, and each alias that names it is an ordinary object or store of that name. This is the shape of <a href="types.html#generic-data-types">generic data types</a>, extended to impl blocks and to a store's struct.</p>
+<details class="reveal-code" open><summary>Show the Rust code and the stores it makes</summary>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">/// The rows the user has ticked.
+#[undra::store(generic, restore = "Self::assemble")]
+pub struct Selection&lt;T&gt; {
+    #[undra(key = "id")]
+    rows: Signal&lt;Vec&lt;T&gt;&gt;,
+    count: Computed&lt;u32&gt;,
+}
+
+#[undra::api(store, generic)]
+impl&lt;T: Row&gt; Selection&lt;T&gt; {
+    pub fn new(ctx: Ctx) -&gt; Self { .. }
+    fn assemble(_ctx: Ctx, rows: Signal&lt;Vec&lt;T&gt;&gt;) -&gt; Self { .. }
+    /// Ticks `row`, or unticks it if it is ticked.
+    pub fn toggle(&amp;self, row: T) { .. }
+}
+
+/// The ticked to-dos.
+#[undra::api] pub type TodoSelection = Selection&lt;Todo&gt;;
+/// The ticked notes.
+#[undra::api] pub type NoteSelection = Selection&lt;Note&gt;;</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">let todos = try TodoSelection()
+todos.toggle(todo)                 // todos.rows == [todo], todos.count == 1
+let notes = try NoteSelection()    // a store of its own: notes.rows is still empty</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">val todos = TodoSelection.create()
+todos.toggle(todo)                 // todos.rows.value == listOf(todo)
+val notes = NoteSelection.create()</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">const todos = await TodoSelection.create();
+await todos.toggle(todo);          // todos.rows.peek() equals [todo]
+const notes = await NoteSelection.create();</code></pre></div>
+</details>
+<p><code>TodoSelection</code> and <code>NoteSelection</code> are two stores in every sense: two type ids, two handles, two sets of signals, two entries in a snapshot, and each ticks and restores on its own. Toggling a to-do is one keyed insert into the to-do selection's <code>rows</code> and nothing for the notes. A generic object that is not a store has no attribute on its struct, only <code>#[undra::api(generic)]</code> on its impl block and an alias.</p>
+<p>The alias is where the rules are checked, as if you had written the store out: a type argument the position cannot hold is the error you would get there (a <code>HashMap</code> key that is not a valid key is <a href="errors.html#E0006">E0006</a>), and a keyed list over a row type without the key field is <a href="errors.html#E0008">E0008</a> at the alias. A type parameter that stands in a signal needs the bound the signal needs, <code>SignalValue</code> (in the prelude), which the example's <code>Row</code> has as a supertrait.</p>
+
+<h3 id="layout">Where to put what</h3>
+<ul>
+<li><strong>Declare the alias next to the template.</strong> A hidden macro carries the template's signatures and expands where the alias stands, so the types they name must be in scope there. Next to the template this is invisible; in another module, a missing <code>use</code> is <code>rustc</code>'s "cannot find type in this scope", at the signature and in the alias's expansion. A store's instantiation also reads the store's fields and calls its <code>restore</code> hook, so in another module those must be visible there too: with private ones, <code>rustc</code> says "field <code>rows</code> of struct <code>Selection</code> is private" and "associated function <code>assemble</code> is private", in the alias's expansion. In the template's module both questions go away.</li>
+<li><strong>The alias lives in the crate of its template, once per instantiation.</strong> A second alias for the same instantiation, or one in another crate, is <a href="errors.html#E0070">E0070</a>: the instantiation implements the boundary traits for the template's type, which only that crate may do.</li>
+<li><strong>A store's struct comes first.</strong> The impl block must be below its struct in the same module; the macro says so in a name, <code>_undra_error_E0011_&hellip;</code>, when it is not.</li>
+<li><strong>One block per type, for the type applied to its own parameters.</strong> <code>impl&lt;T&gt; Cache&lt;Vec&lt;T&gt;&gt;</code> and a method with a list inside a generic block are <a href="errors.html#E0074">E0074</a>: an instantiation is one class, and a second list would multiply it.</li>
+<li><strong>Name an instantiation when a signature mentions one.</strong> A function that returns <code>Arc&lt;Selection&lt;T&gt;&gt;</code> or <code>Page&lt;T&gt;</code> reaches the platforms as the alias's class or record, found by the compiler; spelling <code>Selection&lt;Todo&gt;</code> in a hand-written, non-generic signature is still <a href="errors.html#E0002">E0002</a>, and says which alias to declare.</li>
+</ul>
+
+<h2 id="behaviour">What an instantiation is<a class="anchor" href="#behaviour" aria-label="Link to this section">#</a></h2>
+
+<p>It is exactly a hand-written definition under another name, so everything that works for those works for it, and nothing was added to the wire, the runtimes or the generated classes of an object.</p>
+<ul>
+<li><strong>Ids.</strong> A function's id comes from its schema name, <code>fnv1a32("fn.newest&lt;Todo&gt;")</code>; an alias's from its own name. A raw call with an id that names no instantiation (<code>newest&lt;Draft&gt;</code>) is refused as a bad request and the core carries on, <code>UndraCallError.refused</code> on the platforms.</li>
+<li><strong>The schema.</strong> One definition per instantiation; a function's carries a label (<code>newest</code>, <code>T = Todo</code>) that the generators read to make overloads, and that is part of the schema's hash only where it is set, so every schema without generics keeps its hash. <code>undra bindgen --check</code> and <code>schema.json</code> see it like any other change.</li>
+<li><strong>Persistence and the testing kit.</strong> One restorer and one fingerprint per instantiated store, computed from its concrete signals; a recording is of one schema, so adding an instantiation records again, as any schema change does. Renaming an alias is removing a store type and adding one.</li>
+<li><strong>Devtools</strong> list a call as <code>newest&lt;Todo&gt;</code> and a store under its alias.</li>
+<li><strong>Two cores</strong> each hold the instantiations of the crates they link; nothing is shared at run time.</li>
+</ul>
+
+<h2 id="mistakes">When it goes wrong<a class="anchor" href="#mistakes" aria-label="Link to this section">#</a></h2>
+
+<p>The macro's errors are the usual four-part ones: <a href="errors.html#E0072">E0072</a> for a list that is wrong (a parameter the function does not have, an empty list, a type listed twice, a type that is not a named value type, two parameters), <a href="errors.html#E0074">E0074</a> for a generic block of the wrong shape, <a href="errors.html#E0002">E0002</a> for a generic with no list, a generic constructor or a signature that spells an instantiation, and <a href="errors.html#E0070">E0070</a> for a second or foreign alias. An error inside one instantiation says which one: "in <code>newest&lt;Todo&gt;</code>".</p>
+<p>A call with a type that is not listed is the platform compiler's error, naming the overloads that exist: Swift's "no exact matches in call to global function", Kotlin's "none of the following candidates is applicable", TypeScript's "no overload matches this call". One caveat, from Swift 6.3: for an <em>array literal</em> of an unlisted type (<code>newest(rows: [Draft(..)])</code>) the compiler prints "failed to produce diagnostic for expression" instead of the message it prints for a variable. It is the compiler's wording, only in that case; the call is rejected either way.</p>
+<p>An argument that does not say its type picks no overload, as with any overload set: <code>newest(rows: [])</code> and a <code>nil</code> are Swift's "ambiguous use of", and <code>newest(emptyList())</code> is Kotlin's "cannot infer type". Write the type where the value is made, <code>newest(rows: [Todo]())</code> or <code>newest(emptyList&lt;Todo&gt;())</code> (in Swift, a declared result type, <code>let latest: Todo? = try newest(rows: [])</code>, also picks it). TypeScript's leading literal always picks the overload, so <code>newest("Todo", [])</code> needs nothing.</p>
+<p>In TypeScript the exported function is one overload set whose body switches on the literal, so a bundle that calls <code>newest("Todo", ..)</code> also carries the code and codecs of <code>newest("Note", ..)</code>: tree-shaking keeps or drops a generic function whole, with every type it is listed for.</p>
+
+<h2 id="limits">What is not there<a class="anchor" href="#limits" aria-label="Link to this section">#</a></h2>
+
+<p>The table is <a href="types.html#generics-limits">on the types page</a>, with what would lift each limit. In short: no open-ended <code>T</code> (every instantiation is listed), one type parameter per function, no generic queries, ports, callbacks or error enums, and no native generics, because the schema and the platforms' dispatch have no type parameters. A generic <code>Page&lt;T&gt;</code> that a function returns is still the named record of <a href="types.html#generic-data-types">the data types</a>.</p>
+
+
+
+</main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#functions">Functions and methods</a></li><li><a href="#objects">Objects and stores</a></li><li><a href="#behaviour">What an instantiation is</a></li><li><a href="#mistakes">When it goes wrong</a></li><li><a href="#limits">What is not there</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose, React and React Native.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

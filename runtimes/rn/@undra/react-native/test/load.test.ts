@@ -152,7 +152,8 @@ describe("loadNative", () => {
     );
     // An inbox record of a kind nobody sends: the transport cannot hand it to a caller.
     native.queue(99 as (typeof RecordKind)[keyof typeof RecordKind], new Uint8Array(0), "core");
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Until the report arrives, under a deadline that only detects a hang (a fixed 10 ms was a bet on how soon the inbox is read).
+    for (const deadline = Date.now() + 4000; reported.length === 0 && Date.now() < deadline; ) await new Promise((resolve) => setTimeout(resolve, 1));
     expect(reported).toHaveLength(1);
     expect(reported[0]).toBeInstanceOf(UndraUnhandledError);
     expect(reported[0]?.operation).toBe("the native module");

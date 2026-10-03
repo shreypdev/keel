@@ -6,12 +6,11 @@ import {
   UndraModeError,
   UndraPortError,
   UndraReplyError,
-  UndraRestoreError,
   UndraSchemaMismatchError,
-  UndraSessionLostError,
   UndraTransportError,
   type TransportFailure,
 } from "../src/errors.js";
+import { UndraRestoreError, UndraSessionLostError } from "../src/errors-rare.js";
 import { UndraStore } from "../src/object.js";
 import { Signal } from "../src/signal.js";
 import {

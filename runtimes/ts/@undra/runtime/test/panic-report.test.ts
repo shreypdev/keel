@@ -205,7 +205,7 @@ describe("the reporter of a core (what UndraCore starts when the app wants repor
     const bytes = new TextEncoder().encode("abc");
     const quiet = panicSupport.start({ mode: "wasm-main", report: () => {} }, { ...options, wasm: bytes });
     const loud = panicSupport.start({ mode: "wasm-main", report: () => {} }, { ...options, wasm: bytes, onPanic: () => {} });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await Promise.all([quiet.ready, loud.ready]); // the hash is done when `ready` settles: waited for, not for a time
     expect(quiet.trapped(null, trapError(V8_STACK)).imageId).toBe("");
     expect(loud.trapped(null, trapError(V8_STACK)).imageId).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   });

@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { UndraCore } from "../src/core.js";
-import { UndraError, UndraModeError, UndraReplyError, UndraRestoreError, UndraTransportError } from "../src/errors.js";
+import { UndraError, UndraModeError, UndraReplyError, UndraTransportError } from "../src/errors.js";
+import { UndraRestoreError } from "../src/errors-rare.js";
 import type { PortImpl } from "../src/port.js";
-import { WasmMainTransport } from "../src/transport/wasm-main.js";
+import { WasmMainTransport } from "../src/transport/wasm-main-transport.js";
 import { WasmWorkerTransport, type WorkerLike } from "../src/transport/wasm-worker.js";
 import type { Transport, TransportHandler } from "../src/transport/transport.js";
 import { ALL_SIGNALS, CallTarget, Kind, ReplyStatus, decodeReply, encodeCall } from "../src/wire/index.js";
 import { FakeCoreTransport } from "./support/fake-core.js";
-import { track } from "./support/harness.js";
+import { track, waitFor } from "./support/harness.js";
 import { STUB, compileStub, stubGlobals } from "./support/stub-core.js";
 import { u32 } from "./support/store.js";
 import { channelWorker } from "./support/worker.js";
@@ -223,10 +224,28 @@ describe.each(["wasm-main", "wasm-worker"] as const)("snapshot and restore in %s
     );
     b.core.close();
     const outcome = await settled;
-    // wasm-main answers inside `snapshot()` before `close()` can run; the worker's answer is still in flight.
-    if (outcome instanceof Uint8Array) expect(mode).toBe("wasm-main");
+    // wasm-main answers inside `snapshot()` before `close()` can run (the snapshot is taken at the call, not after a module
+    // loads: an app that snapshots and closes at teardown gets its bytes); the worker's answer is still in flight.
+    if (mode === "wasm-main") expect(outcome).toBeInstanceOf(Uint8Array);
     else expect((outcome as UndraTransportError).reason).toBe("closed");
     b.close();
+  });
+
+  it("restore runs at the call: a call made after restore() was called is not one the restore cancels", async () => {
+    const b = await boot(mode);
+    const restored = b.core.restore(snapshotOf(3));
+    // Made after the restore was asked for: the core must see it after the restore, so it is not in flight across it.
+    const after = b.core.call(FREE, STUB.PORT, u32(1)); // the port never answers: the call waits in the core
+    const outcome = after.then(
+      () => "answered",
+      (e: unknown) => e,
+    );
+    await restored;
+    // Every reply the restore produced was delivered before it resolved (a cancellation included): the call is still waiting.
+    const stats = await b.core.stats();
+    expect(stats.pendingCalls, "the call made after restore() still waits in the core").toBe(1);
+    b.close();
+    expect(await outcome).toBeInstanceOf(UndraTransportError);
   });
 });
 
@@ -480,7 +499,7 @@ describe("the envelope kinds", () => {
       closed: () => {},
     });
     transport.send(Kind.Restore, snapshotOf(6));
-    for (let i = 0; i < 100 && events.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor("the restore's change-set", () => events.length > 0);
     expect(events).toEqual(["changeSet"]);
     transport.close();
     worker.close();

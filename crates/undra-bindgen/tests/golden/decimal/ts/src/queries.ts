@@ -36,14 +36,8 @@ export class PriceOfQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.PriceOfQueryHandle.typeId,
-        methodId: UndraIds.Objects.PriceOfQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
@@ -54,18 +48,17 @@ export class PriceOfQueryHandle extends UndraStore {
   ): Promise<PriceOfQueryHandle> {
     const w = new UndraWriter();
     w.writeStr(sku);
-    const args = w.finish();
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.PriceOfQueryHandle.typeId,
         UndraIds.Objects.PriceOfQueryHandle.new,
-        args,
+        w.finish(),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new PriceOfQueryHandle(core, handle, args);
+    const store = new PriceOfQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }

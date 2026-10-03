@@ -1,5 +1,5 @@
 error: error[undra::E0008]: unknown option `defualt` in `#[undra(..)]`
-         = note: the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields), and `coalesce` (fire-and-forget methods of a callback interface)
+         = note: the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields), `coalesce` (fire-and-forget methods of a callback interface) and `generic(T = [..])` (methods with a type parameter)
          = help: did you mean `default`? Otherwise remove `defualt`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
  --> tests/ui/e0008_unknown_attribute.rs:7:13
@@ -17,7 +17,7 @@ error: error[undra::E0008]: `#[undra(key)]` is not valid on a record or variant 
   |             ^^^
 
 error: error[undra::E0008]: unknown argument `colour` for `#[undra::api]`
-         = note: `#[undra::api]` accepts: `crate = "path"`, `store` on an impl block of a `#[undra::store]` struct, and `generic` on a struct or an enum with type parameters
+         = note: `#[undra::api]` accepts: `crate = "path"`, `store` on an impl block of a `#[undra::store]` struct, `generic` on a struct, an enum or an impl block with type parameters, and `generic(T = [Todo, Note])` on a function with a type parameter
          = help: remove `colour`, or use one of: `crate`, `store`, `generic`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
   --> tests/ui/e0008_unknown_attribute.rs:13:10

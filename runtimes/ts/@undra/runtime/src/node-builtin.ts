@@ -1,3 +1,4 @@
+import { msg } from "./messages.js";
 /*
  * Node's built-in modules for the Node-only adapters (`nodeWebSocket`, `nodeSqliteDb`), reached
  * through `process.getBuiltinModule` (Node 20.16+, 22.3+) instead of an `import()`: no bundler
@@ -21,10 +22,10 @@ export function nodeBuiltin<T>(id: string): T {
   if (typeof process?.getBuiltinModule !== "function") {
     const node = process?.versions?.node;
     throw new Error(
-      node === undefined ? `${id} needs Node; this is not Node` : `${id} needs Node 20.16 or 22.3 or later (process.getBuiltinModule); this is Node ${node}`,
+      node === undefined ? msg(109, id) : msg(110, id, node),
     );
   }
   const module = process.getBuiltinModule(id);
-  if (module === undefined || module === null) throw new Error(`this Node has no ${id}`);
+  if (module === undefined || module === null) throw new Error(msg(111, id));
   return module as T;
 }

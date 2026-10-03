@@ -178,14 +178,11 @@ final class SseBindingTests: XCTestCase {
             try await binding.next(stream: finished, max: 16)
         }
         let open = try await binding.open(url: "https://feed.test", headers: [], lastEventId: nil)
-        let waiting = Task { try await binding.next(stream: open, max: 16) }
-        try await Task.sleep(nanoseconds: 20_000_000)
-        await expectThrows(SseError.protocol("a next is already pending on stream \(open)")) { () async throws(SseError) -> [SseEvent] in
-            try await binding.next(stream: open, max: 16)
-        }
+        let (refused, waiting) = await firstOfTwo { await capture { () async throws(SseError) -> [SseEvent] in try await binding.next(stream: open, max: 16) } }
+        XCTAssertEqual(refused, .failure(.protocol("a next is already pending on stream \(open)")), "the second next is refused at once")
         try await binding.close(stream: open)
-        let answered = try await waiting.value
-        XCTAssertEqual(answered, [])
+        let answered = try await waiting.value.get()
+        XCTAssertEqual(answered, [], "close answers the pending next with nothing")
         XCTAssertTrue(adapter.streams[1].isClosed)
         try await binding.close(stream: open)
         let after = try await binding.next(stream: open, max: 1)

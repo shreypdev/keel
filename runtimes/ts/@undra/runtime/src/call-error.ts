@@ -3,13 +3,12 @@ import {
   UndraModeError,
   UndraPortError,
   UndraReplyError,
-  UndraRestoreError,
   UndraSchemaMismatchError,
-  UndraSessionLostError,
   UndraTransportError,
 } from "./errors.js";
 import { errorMessage } from "./platform.js";
 import { type Codec, ReplyStatus, WireError, decodeValue } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 /*
  * What a generated call fails with besides its own error type and the abort of its caller (ADR-032,
@@ -67,7 +66,7 @@ export abstract class UndraCallError extends UndraError {
   static mapped<E>(error: unknown, domain: Codec<E>): unknown;
   static mapped(error: unknown, domain?: Codec<unknown>): unknown {
     if (domain !== undefined && error instanceof UndraReplyError && error.status === ReplyStatus.Error) {
-      return decodeTyped(error.body, domain) ?? new UndraCallError.Malformed(`a typed error that does not decode (${error.body.length} bytes)`, { cause: error });
+      return decodeTyped(error.body, domain) ?? new UndraCallError.Malformed(msg(25, error.body.length), { cause: error });
     }
     return classify(error);
   }
@@ -84,7 +83,7 @@ export abstract class UndraCallError extends UndraError {
   static mappedStream(error: unknown, domain?: Codec<unknown>): unknown {
     if (domain !== undefined) return UndraCallError.mapped(error, domain);
     if (error instanceof UndraReplyError && error.status === ReplyStatus.Error) {
-      return new UndraCallError.Malformed(`a stream without an error type ended with a typed error item (${error.body.length} bytes)`, {
+      return new UndraCallError.Malformed(msg(26, error.body.length), {
         cause: error,
       });
     }
@@ -96,7 +95,7 @@ export abstract class UndraCallError extends UndraError {
     const mapped = classify(error);
     if (mapped instanceof UndraCallError) return mapped;
     const text = errorMessage(error);
-    return new UndraCallError.Malformed(text, { cause: error }, `an unexpected failure: ${text}`);
+    return new UndraCallError.Malformed(text, { cause: error }, msg(27, text));
   }
 }
 
@@ -113,7 +112,7 @@ export namespace UndraCallError {
 
     /** @param options Standard `Error` options. */
     constructor(options?: ErrorOptions) {
-      super("cancelledByCore", "the Undra core cancelled the call (a restore replaced its object, or the core shut down)", options);
+      super("cancelledByCore", msg(28), options);
     }
   }
 
@@ -128,7 +127,7 @@ export namespace UndraCallError {
 
     /** @param panicMessage The panic message. @param backtrace The backtrace. @param options Standard `Error` options. */
     constructor(panicMessage: string, backtrace: string, options?: ErrorOptions) {
-      super("panicked", `the Undra core panicked: ${panicMessage}`, options);
+      super("panicked", msg(29, panicMessage), options);
       this.panicMessage = panicMessage;
       this.backtrace = backtrace;
     }
@@ -147,7 +146,7 @@ export namespace UndraCallError {
 
     /** @param reason The core's text. @param options Standard `Error` options. */
     constructor(reason: string, options?: ErrorOptions) {
-      super("refused", `the Undra core refused the call: ${reason}`, options);
+      super("refused", msg(30, reason), options);
       this.reason = reason;
     }
   }
@@ -168,7 +167,7 @@ export namespace UndraCallError {
 
     /** @param transport What happened. */
     constructor(transport: UndraTransportError) {
-      super("unavailable", `the Undra core is unavailable: ${transport.message}`, { cause: transport });
+      super("unavailable", msg(31, transport.message), { cause: transport });
       this.transport = transport;
     }
   }
@@ -186,7 +185,7 @@ export namespace UndraCallError {
      * @param message Replaces the default description (used for a failure that is not a reply at all).
      */
     constructor(detail: string, options?: ErrorOptions, message?: string) {
-      super("malformed", message ?? `the Undra core sent a reply the bindings cannot read: ${detail}`, options);
+      super("malformed", message ?? msg(32, detail), options);
       this.detail = detail;
     }
   }
@@ -214,7 +213,7 @@ export class UndraUnhandledError extends UndraError {
 
   /** @param operation What failed. @param error Why. @param cause The original failure, when it was not an Undra one. */
   constructor(operation: string, error: UndraCallError, cause?: unknown) {
-    super("unhandled", `${operation} failed: ${error.message}`, { cause: cause ?? error });
+    super("unhandled", msg(33, operation, error.message), { cause: cause ?? error });
     this.operation = operation;
     this.error = error;
   }
@@ -230,14 +229,15 @@ function classify(error: unknown): unknown {
     // "protocol" is the peer breaking the protocol, not the core being out of reach.
     return error.reason === "protocol" ? new UndraCallError.Malformed(error.message, { cause: error }) : new UndraCallError.Unavailable(error);
   }
-  if (error instanceof UndraSchemaMismatchError || error instanceof UndraSessionLostError) {
+  // (The two rare classes are told by `kind`, so this module does not import them: `errors-rare.ts`, ADR-057.)
+  if (error instanceof UndraSchemaMismatchError || (error instanceof UndraError && error.kind === "sessionLost")) {
     // A remote core that came back with another schema (`undra dev` rebuilt it) or without this core's objects: the
     // connection is closed for good and every call in flight fails with this.
     return new UndraCallError.Unavailable(new UndraTransportError("closed", error.message, { cause: error }));
   }
-  if (error instanceof WireError) return new UndraCallError.Malformed(`the reply does not decode: ${error.message}`, { cause: error });
-  if (error instanceof UndraModeError || error instanceof UndraRestoreError) return new UndraCallError.Refused(error.message, { cause: error });
-  if (error instanceof UndraPortError) return new UndraCallError.Malformed("a port implementation's typed failure reached a call", { cause: error });
+  if (error instanceof WireError) return new UndraCallError.Malformed(msg(34, error.message), { cause: error });
+  if (error instanceof UndraModeError || (error instanceof UndraError && error.kind === "restore")) return new UndraCallError.Refused(error.message, { cause: error });
+  if (error instanceof UndraPortError) return new UndraCallError.Malformed(msg(35), { cause: error });
   // What the runtime itself raised without a class of its own (`UndraError("state" | "options" | "observe")`) is a
   // misuse or a bug it cannot classify; a typed `E` (a subclass) and everything that is not Undra's pass through.
   if (error instanceof UndraError && error.constructor === UndraError) return new UndraCallError.Malformed(error.message, { cause: error });
@@ -254,11 +254,11 @@ function fromReply(error: UndraReplyError): UndraCallError {
     case ReplyStatus.BadRequest:
       return new UndraCallError.Refused(error.reason ?? "<undecodable reason>", { cause: error });
     case ReplyStatus.Error:
-      return new UndraCallError.Malformed(`the core answered with a typed error, but this method has none (${error.body.length} bytes)`, { cause: error });
+      return new UndraCallError.Malformed(msg(36, error.body.length), { cause: error });
     case ReplyStatus.StreamOpened:
-      return new UndraCallError.Malformed("the core opened a stream where a single reply was expected", { cause: error });
+      return new UndraCallError.Malformed(msg(37), { cause: error });
     default:
-      return new UndraCallError.Malformed(`the core answered with status ${String(error.status)} as a failure`, { cause: error });
+      return new UndraCallError.Malformed(msg(38, String(error.status)), { cause: error });
   }
 }
 

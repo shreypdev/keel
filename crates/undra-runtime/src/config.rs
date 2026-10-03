@@ -180,6 +180,31 @@ pub struct RestoreReport {
     pub dropped: Vec<DroppedStore>,
     /// Whether the snapshot was written by a core with another schema hash.
     pub schema_changed: bool,
+    /// How many handles of re-creatable objects (query handles, ADR-059) are valid after the
+    /// restore: the ones it re-issued from the snapshot's recreation records (each is built when
+    /// the host first uses it) and the live ones it left alone. Stores are not counted here, see
+    /// [`restored`](RestoreReport::restored).
+    pub reissued: usize,
+    /// The recreation records the restore could not honour: this build has no reviver for the
+    /// object's type, the types its record depends on changed, or the record does not decode.
+    /// Each handle is stale (status 5, as for any object a restore does not carry), a WARN says
+    /// why, and the restore itself went on.
+    pub refused: Vec<RefusedHandle>,
+    /// The handles of live re-creatable objects the restore removed because a store of the
+    /// snapshot needed their slot (the store was released and its slot reused since the snapshot
+    /// was taken): each is stale. A restore leaves every other live re-creatable object alone.
+    pub displaced: Vec<u64>,
+}
+
+/// A recreation record a restore left out ([`RestoreReport::refused`], ADR-059).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RefusedHandle {
+    /// The handle the record named; it answers `stale_handle`.
+    pub handle: u64,
+    /// The record's type id (for a query handle, the query's id).
+    pub type_id: u32,
+    /// Why it was left out.
+    pub reason: String,
 }
 
 /// A store type a restore left out because the current build no longer has it.

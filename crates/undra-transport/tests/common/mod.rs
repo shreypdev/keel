@@ -175,6 +175,16 @@ impl Counter {
         self.count.get()
     }
 
+    /// Sets the label to `text`: one change-set that carries all of it (the tests that fill a stalled
+    /// reader's socket send big ones).
+    pub fn set_label(&self, text: String) {
+        self.label.set(text);
+    }
+
+    pub fn get_label(&self) -> String {
+        self.label.get()
+    }
+
     /// Two writes in one transaction: one change-set.
     pub fn add_and_label(&self, n: i32) {
         self.ctx.txn(|| {
@@ -298,6 +308,8 @@ pub const NEW: u32 = ids::method_id("Counter", "new");
 pub const GET: u32 = ids::method_id("Counter", "get");
 pub const ADD: u32 = ids::method_id("Counter", "add");
 pub const ADD_AND_LABEL: u32 = ids::method_id("Counter", "add_and_label");
+pub const SET_LABEL: u32 = ids::method_id("Counter", "set_label");
+pub const GET_LABEL: u32 = ids::method_id("Counter", "get_label");
 pub const CHECK: u32 = ids::method_id("Counter", "check");
 pub const BOOM: u32 = ids::method_id("Counter", "boom");
 pub const SLOW_ADD: u32 = ids::method_id("Counter", "slow_add");

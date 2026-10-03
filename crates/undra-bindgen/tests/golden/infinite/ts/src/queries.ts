@@ -51,14 +51,8 @@ export class FeedQueryHandle extends UndraStore {
   /** Whether the fetch of the next page is in flight. */
   readonly fetchingNextPage: Signal<boolean> = new Signal<boolean>(false);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.FeedQueryHandle.typeId,
-        methodId: UndraIds.Objects.FeedQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [
       this.data,
       this.status,
@@ -77,18 +71,17 @@ export class FeedQueryHandle extends UndraStore {
   ): Promise<FeedQueryHandle> {
     const w = new UndraWriter();
     FilterCodec.encode(w, filter);
-    const args = w.finish();
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.FeedQueryHandle.typeId,
         UndraIds.Objects.FeedQueryHandle.new,
-        args,
+        w.finish(),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new FeedQueryHandle(core, handle, args);
+    const store = new FeedQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }
@@ -243,31 +236,24 @@ export class ProfileQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.ProfileQueryHandle.typeId,
-        methodId: UndraIds.Objects.ProfileQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
   static async create(core: UndraCore = UndraGoldenInfinite.core): Promise<ProfileQueryHandle> {
-    const args = new Uint8Array(0);
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.ProfileQueryHandle.typeId,
         UndraIds.Objects.ProfileQueryHandle.new,
-        args,
+        new Uint8Array(0),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new ProfileQueryHandle(core, handle, args);
+    const store = new ProfileQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }
@@ -382,14 +368,8 @@ export class SearchQueryHandle extends UndraStore {
   /** Whether the fetch of the next page is in flight. */
   readonly fetchingNextPage: Signal<boolean> = new Signal<boolean>(false);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.SearchQueryHandle.typeId,
-        methodId: UndraIds.Objects.SearchQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [
       this.data,
       this.status,
@@ -408,18 +388,17 @@ export class SearchQueryHandle extends UndraStore {
   ): Promise<SearchQueryHandle> {
     const w = new UndraWriter();
     w.writeStr(term);
-    const args = w.finish();
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.SearchQueryHandle.typeId,
         UndraIds.Objects.SearchQueryHandle.new,
-        args,
+        w.finish(),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new SearchQueryHandle(core, handle, args);
+    const store = new SearchQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }

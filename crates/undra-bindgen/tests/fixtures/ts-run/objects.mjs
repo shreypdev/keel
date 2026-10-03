@@ -90,8 +90,13 @@ rt.UndraCore.attach = async (transport, options) => {
 };
 const transport = { mode: "test" };
 assert.equal(await UndraGoldenObjects.attach(transport, { shared: false }), attached);
-// The entry fills in the schema hash and the core's namespace (ADR-044 amendment A: the default stores are per namespace).
-assert.deepEqual(seen, { transport, options: { shared: false, expectedSchemaHash: UndraIds.schemaHash, namespace: "golden_objects" } });
+// The entry fills in the schema hash and the core's namespace (ADR-044 amendment A: the default stores are per namespace), and,
+// because this schema has a stream (`Calculator.watch`), the runtime's stream support (ADR-057): the same object the runtime exports.
+assert.deepEqual(seen, {
+  transport,
+  options: { shared: false, expectedSchemaHash: UndraIds.schemaHash, namespace: "golden_objects", features: [rt.streams] },
+});
+assert.equal(seen.options.features[0], rt.streams);
 assert.equal(UndraGoldenObjects.core, attached);
 await assert.rejects(UndraGoldenObjects.attach(transport), (e) => e instanceof rt.UndraError && e.kind === "state");
 await objects.Calculator.create();

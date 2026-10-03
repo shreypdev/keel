@@ -1,5 +1,6 @@
 import { UndraError } from "./base-error.js";
 import { UndraReader, ReplyStatus } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 /*
  * Typed errors of the runtime (docs/SPEC.md section 17.1). Everything the
@@ -26,19 +27,19 @@ function readStrings(body: Uint8Array, count: number): string[] | undefined {
 function describeReply(status: ReplyStatus, body: Uint8Array): string {
   switch (status) {
     case ReplyStatus.Error:
-      return "the call failed with a typed error";
+      return msg(86);
     case ReplyStatus.Panic: {
       const [message] = readStrings(body, 2) ?? [];
-      return message === undefined ? "the core panicked" : `the core panicked: ${message}`;
+      return message === undefined ? msg(87) : msg(88, message);
     }
     case ReplyStatus.Cancelled:
-      return "the call was cancelled";
+      return msg(89);
     case ReplyStatus.BadRequest: {
       const [reason] = readStrings(body, 1) ?? [];
-      return reason === undefined ? "the core rejected the request" : `the core rejected the request: ${reason}`;
+      return reason === undefined ? msg(90) : msg(91, reason);
     }
     default:
-      return `unexpected reply status ${String(status)}`;
+      return msg(92, String(status));
   }
 }
 
@@ -91,7 +92,7 @@ export class UndraModeError extends UndraError {
 
   /** @param operation Name of the attempted operation. @param mode The mode of the core. */
   constructor(operation: string, mode: string) {
-    super("mode", `${operation} is not available in mode '${mode}'`);
+    super("mode", msg(93, operation, mode));
     this.operation = operation;
     this.mode = mode;
   }
@@ -113,25 +114,10 @@ export class UndraSchemaMismatchError extends UndraError {
   constructor(expected: bigint, got: bigint) {
     super(
       "schemaMismatch",
-      `schema mismatch: the bindings expect ${hex64(expected)} but the core reports ${hex64(got)}; regenerate the bindings or rebuild the core`,
+      msg(94, hex64(expected), hex64(got)),
     );
     this.expected = expected;
     this.got = got;
-  }
-}
-
-/**
- * The dev server no longer holds the objects of this core (ADR-051): it was restarted (`undra dev`
- * rebuilt the core) or the session's grace period passed while the client was away. The handles of
- * every store and object of this core are dead; load a new core and create them again. A core
- * reports this as `closed` with reason `"sessionLost"`; the page of a web app reloads.
- */
-export class UndraSessionLostError extends UndraError {
-  override readonly name: string = "UndraSessionLostError";
-
-  /** @param message The server's reason, when it gave one. */
-  constructor(message = "the dev server no longer has this core's objects (it was restarted, or the session expired); load a new core") {
-    super("sessionLost", message);
   }
 }
 
@@ -147,7 +133,7 @@ export class UndraPortError extends UndraError {
 
   /** @param body The encoded error value. */
   constructor(body: Uint8Array) {
-    super("port", "typed port failure");
+    super("port", msg(95));
     this.body = body;
   }
 }
@@ -183,41 +169,5 @@ export class UndraTransportError extends UndraError {
   constructor(reason: TransportFailure, message: string, options?: ErrorOptions) {
     super("transport", message, options);
     this.reason = reason;
-  }
-}
-
-/**
- * `UndraCore.restore` was refused: the core rejected the snapshot and is unchanged (SPEC 5.9, the
- * `undra_restore` code of SPEC 7). A refused restore changes nothing, so the core and every handle
- * keep working. The Swift runtime has the same error (`UndraRestoreError`).
- */
-export class UndraRestoreError extends UndraError {
-  override readonly name: string = "UndraRestoreError";
-  /** `undra_restore` code 2: a store's restore function panicked (contained). */
-  static readonly PANICKED = 2;
-  /** `undra_restore` code 5: the snapshot is malformed (also one in a layout before ADR-037), names an unknown store type, has a null or duplicate handle, or a store rejected its values. */
-  static readonly BAD_SNAPSHOT = 5;
-  /** `undra_restore` code 6: no running core, it is shut down, or the restore was made from inside a core callback. */
-  static readonly UNAVAILABLE = 6;
-  /**
-   * `undra_restore` code 7 (ADR-037): a store's persisted values cannot become this build's types; they neither
-   * migrate structurally nor through a `#[undra::migrate]` hook. The reason is in the ERROR record the core logged.
-   */
-  static readonly INCOMPATIBLE = 7;
-  /**
-   * The non-zero code `undra_restore` returned: {@link UndraRestoreError.PANICKED} (2) a store's restore panicked,
-   * {@link UndraRestoreError.BAD_SNAPSHOT} (5) the snapshot is malformed or names something the core does not have,
-   * {@link UndraRestoreError.UNAVAILABLE} (6) the core is shut down or was called from inside a callback,
-   * {@link UndraRestoreError.INCOMPATIBLE} (7) a store's persisted values cannot become this build's types (ADR-037).
-   */
-  readonly code: number;
-
-  /** @param code The non-zero code `undra_restore` returned. */
-  constructor(code: number) {
-    super(
-      "restore",
-      `the Undra core rejected the snapshot (code ${String(code)}); a rejected restore leaves the core unchanged`,
-    );
-    this.code = code;
   }
 }

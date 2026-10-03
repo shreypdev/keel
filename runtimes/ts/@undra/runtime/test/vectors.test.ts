@@ -38,7 +38,7 @@ import {
   encodeReply,
   encodeSnapshot,
   encodeStreamItem,
-} from "../src/wire/payloads.js";
+} from "../src/wire/index.js";
 import { UndraReader } from "../src/wire/reader.js";
 import { durationFromNanos, joinHandle, makeHandle, splitHandle, handleGeneration, handleIndex } from "../src/wire/types.js";
 import { UndraWriter } from "../src/wire/writer.js";

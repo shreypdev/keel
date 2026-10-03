@@ -376,7 +376,10 @@ extension ContractScenarios {
             case .failure(let error):
                 try checkEqual(error as? UndraCallError, .unavailable(.closed), "the error of fail_later across a shutdown")
             }
-            try check(ContinuousClock.now - shutdownAt < .seconds(1), "the call in flight took \(ContinuousClock.now - shutdownAt) to fail")
+            // Relative to the call's own 5 s delay, not to a second of wall clock: a shutdown that left the call to its timer
+            // would fail it 4.9 s later (or never), so under half the delay (2.5 s) tells the two apart on a machine that stalls.
+            let failTook = ContinuousClock.now - shutdownAt
+            try check(failTook < .milliseconds(2_500), "the call in flight took \(failTook) to fail, not under half of its own 5 s delay")
             try checkThrows({ try PlaygroundCore.add(a: 1, b: 2, ctx: core) }, UndraCallError.unavailable(.closed), "add(1, 2) on the shut-down core")
             store.increment()
             let reports = Array(Fixture.shared.unhandled.snapshot.dropFirst(reportsBefore))

@@ -145,3 +145,72 @@ fn a_platform_constructs_the_handle_through_the_layer_submitted_with_it() {
     t.run_pending();
     assert_eq!(listings(&fakes), 1, "{:?}", fakes.kv.ops());
 }
+
+/// Query handles across a restore (ADR-059): the reviver that builds them again is added with the
+/// client, so for a core whose only queries are hand-written it exists from the client's first use,
+/// not from start-up. A runtime that has none treats a recreation record as a store type it does
+/// not have (left out and reported in `dropped`, the handle stays stale, the restore goes on); one
+/// restored after the first use re-issues it. `QueryRegistration` documents the order.
+#[test]
+fn a_hand_written_query_handle_is_re_issued_only_once_the_client_has_been_used() {
+    let construct = |t: &TestRuntime| {
+        let reply = t.call_sync(
+            CallTarget::Constructor {
+                type_id: Count::ID,
+                method_id: Count::ID,
+            },
+            1,
+            &(7_u32,).encode_to_vec(),
+        );
+        assert_eq!(reply.status, ReplyStatus::Ok, "{reply:?}");
+        Handle::decode_exact(&reply.body).expect("a handle")
+    };
+    let refetch = |t: &TestRuntime, handle: Handle| {
+        t.call_sync(
+            CallTarget::Method {
+                handle,
+                method_id: undra_query::REFETCH_METHOD_ID,
+            },
+            2,
+            &[],
+        )
+        .status
+    };
+
+    let (old, _fakes) = started_with_a_persisted_entry();
+    let handle = construct(&old);
+    let snapshot = old.runtime().snapshot();
+    assert_eq!(
+        undra_wire::payload::Snapshot::decode(&mut undra_wire::Reader::new(&snapshot))
+            .unwrap()
+            .stores
+            .iter()
+            .filter(|s| s.recreation().is_some())
+            .count(),
+        1,
+        "a hand-written query's handle is re-creatable too"
+    );
+
+    // Before the client's first use there is no reviver: the record is a store type this runtime
+    // does not have.
+    let (early, _fakes) = started_with_a_persisted_entry();
+    let report = early.runtime().restore_with_report(&snapshot).unwrap();
+    assert_eq!(
+        (report.reissued, report.dropped.len()),
+        (0, 1),
+        "{report:?}"
+    );
+    assert_eq!(report.dropped[0].handles, [handle.0]);
+    assert_eq!(refetch(&early, handle), ReplyStatus::BadRequest);
+
+    // After it, the same snapshot is honoured.
+    let (late, _fakes) = started_with_a_persisted_entry();
+    let _client = late.ctx().query();
+    let report = late.runtime().restore_with_report(&snapshot).unwrap();
+    assert_eq!(
+        (report.reissued, report.refused.len()),
+        (1, 0),
+        "{report:?}"
+    );
+    assert_eq!(refetch(&late, handle), ReplyStatus::Ok);
+}

@@ -555,12 +555,15 @@ impl Hub {
         self.last_live.swap(live, Ordering::AcqRel) != live
     }
 
-    /// The stores in `snapshot`, in handle order.
+    /// The stores in `snapshot`, in handle order. A recreation record (ADR-059: a query handle's) is
+    /// not a store: it is not listed, and the hub must not observe it (observing a re-issued handle
+    /// builds it, for a page nobody opened).
     fn stores_of(bytes: &[u8]) -> Option<Vec<StoreRef>> {
         let snapshot = Snapshot::decode(&mut Reader::new(bytes)).ok()?;
         let mut stores: Vec<StoreRef> = snapshot
             .stores
             .iter()
+            .filter(|s| s.recreation().is_none())
             .map(|s| StoreRef {
                 handle: s.handle.0,
                 type_id: s.type_id,
@@ -615,6 +618,14 @@ impl Hub {
             let mut ring = self.ring.lock();
             if ring.unchanged(&bytes) {
                 self.counters.skipped_same.fetch_add(1, Ordering::Relaxed);
+                // Every change-set up to `through` was delivered before this snapshot was taken, so the
+                // step that holds this state covers them: a commit that landed between the last capture's
+                // read of the sequence number and its snapshot is in that step, and says so now.
+                let covered = ring.cover_newest(through, txn);
+                drop(ring);
+                if let Some(info) = covered {
+                    self.broadcast(&ServerMsg::Step(info));
+                }
                 return;
             }
             ring.push(
@@ -735,10 +746,12 @@ impl Hub {
         let dropped = now.iter().filter(|s| !target.contains(&s.handle)).count();
         let result = {
             let _restore = RouteGuard::set(Route::Commit(Cause::Restore(step)));
-            self.rt.restore(&bytes)
+            self.rt.restore_with_report(&bytes)
         };
         match result {
-            Ok(()) => Ok(u32::try_from(dropped).unwrap_or(u32::MAX)),
+            // A live query handle is left alone (ADR-059), except when a store of the step needs
+            // its slot: that handle is gone too, and counts with the stores built since.
+            Ok(report) => Ok(u32::try_from(dropped + report.displaced.len()).unwrap_or(u32::MAX)),
             Err(e) => Err(format!("the core refused the snapshot of step {step}: {e}")),
         }
     }

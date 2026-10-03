@@ -14,7 +14,9 @@ the integrator writes to it.
 ```text
   brief ──▶ implement in a worktree ──▶ adversarial review ──▶ fix ──▶ re-review
                                                                         │
-             clean up ◀── full matrix green on main ◀── merge ◀─────────┘
+  push the branch ──▶ pull request, four "All green" checks on its head ──▶ merge ◀┘
+                                                              │
+                              clean up ◀── full matrix green on main
 ```
 
 ### 1. Open a worktree
@@ -44,8 +46,13 @@ an issue). A good brief names, in this order:
    briefs.
 
 Inside the worktree: small `type(scope): summary` commits as you go; never leave
-`TODO`/`unimplemented!()`; end with `git status` clean. Do not merge, rebase onto, or
-push `main` from a worktree — the integrator merges. Do not edit `.10x/status.md` or
+`TODO`/`unimplemented!()`; end with `git status` clean. **Run `scripts/ci-local.sh` before pushing a branch**: every
+step of CI, Bench, Two cores and Site, in a clone of your commit, read from the workflow files (docs/ONBOARDING.md,
+"Before you push a branch"); and `scripts/ci-local.sh --slow` when the piece adds or touches a test that waits, times or
+races (it runs the timing-sensitive suites throttled, so the failures a slower runner would show are found here, once,
+not one push at a time). Do not merge, rebase onto, or
+push `main` from a worktree — the integrator merges. Pushing the piece's own `wt/<slug>` branch (which starts its CI
+run, section 4) is the integrator's too, unless the brief says the author does it. Do not edit `.10x/status.md` or
 `.10x/handoff.md` from a worktree (guaranteed conflicts); record your piece in
 `.10x/decisions/<role>/<slug>.md` instead and the integrator folds it in.
 
@@ -71,12 +78,33 @@ No piece merges on its author's word. A reviewer who did not write the code atta
 For small pieces the review can be a focused pass by the integrator; for core crates it
 is a full cycle. The four v1 cycles in `.10x/reviews/` are the reference for depth.
 
-### 4. Merge — integrator only
+### 4. Merge — integrator only, through a pull request
+
+**`main` is protected: nothing lands except through a pull request whose required checks are green on its exact
+head.** The required checks are the "All green" job of each gating workflow — `CI / All green`, `Bench / All
+green`, `Two cores / All green`, `Site / All green` — a roll-up that succeeds only when every job of its workflow
+succeeded (a failed, cancelled or skipped job fails it, and it always reports, so a red run never leaves a check
+"expected" forever). The workflows run on every push to a pull request's branch (and on `main`); a newer push
+cancels the run it supersedes. Site always builds and checks on a pull request (minutes); its deploy stays
+`main`-only. A piece is not done until those four are green on its head: an author whose run is red fixes the
+cause (not the test) and pushes again.
+
+The order is: the review is done, the branch contains `main` (`git merge main` in the worktree), the branch is
+pushed, and `scripts/wt.sh merge <slug>` from the primary checkout does the rest: opens the pull request if none is
+open (`scripts/wt.sh pr <slug>` opens a draft early, so CI runs from the first push), marks it ready, waits for the
+checks, requires the four "All green" on the head (`scripts/wt-ci-check.sh pr-verdict`), merges with a merge commit
+(the tree that lands is the tree CI tested), verifies that `origin/main` contains the head, and cleans up (section
+5). GitHub refuses a merge whose checks are not green or whose branch is behind `main` when "require branches to
+be up to date" is on: then merge `main` in, push, and run it again. State commits (`.10x/status.md`,
+`.10x/handoff.md`) ride in the piece's pull request, pushed before its last run, or in a small pull request of
+their own. `--ff` is the fast-forward path for a repository without branch protection and for the scratch
+repositories of the tests; `--no-ci` goes with it only.
 
 From the primary checkout, on `main`:
 
 ```bash
-scripts/wt.sh merge my-piece
+scripts/wt.sh pr my-piece       # optional, early: a draft pull request, so every push runs CI
+scripts/wt.sh merge my-piece    # the pull request, its four "All green" checks, the merge, verify, clean up (section 5)
 ```
 
 Then the integrator runs the **full matrix**, not just the touched crate:
@@ -104,22 +132,34 @@ Two rules of merge hygiene, both learned the hard way:
 After the matrix is green: update `.10x/status.md` (what landed, new totals, debts) and
 `.10x/handoff.md`, commit `state(<piece>): …`.
 
-### 5. Clean up — immediately after merge
+### 5. Clean up — `merge` does it, and nothing is left lying around
+
+`scripts/wt.sh merge <slug>` does not stop at the fast-forward. After the CI gate and the merge it
+
+1. **pushes `main`** (`--no-push` merges locally and deletes nothing) and **verifies**: `wt/<slug>` is an ancestor of
+   `main`, and, after `git fetch`, `origin/main` contains the head. If either fails it stops and deletes nothing;
+2. **deletes the piece**: the remote branch (`git push origin --delete wt/<slug>`), the local branch, the worktree *with its
+   build output* (`.work/<slug>`, `target/` and all), and the `scripts/ci-local.sh` clone of the branch;
+3. **deletes the piece's helper branches**, local and remote: `proto/<slug>`, every `wt/<slug>-*` sub-piece, and each branch
+   named with `--also <branch>`, **only when every commit of it is in `origin/main`**. Anything else is *kept*, and the
+   output says which and why (`NOT merged (3 commit(s) that origin/main lacks)`, `its worktree has uncommitted changes`,
+   `merged into the local main only`). A branch is never force-deleted on a guess;
+4. **prints the final state**: `git worktree list`, the remaining `wt/*` branches local and on `origin`.
 
 ```bash
-scripts/wt.sh rm my-piece     # removes the worktree; deletes wt/my-piece only if fully merged
+scripts/wt.sh merge my-piece                      # pull request, checks, merge, verify, clean up, list
+scripts/wt.sh merge my-piece --also spike/probe   # a helper branch with another name, swept if merged
 ```
 
-or, periodically, sweep everything merged:
+`scripts/wt.sh clean` is the same sweep for **every** `wt/*` branch, local or on `origin`, that is already merged into
+`origin/main`: its worktree and build output, its branches, its `ci-local` clone. It keeps, and names, a branch with commits
+`origin/main` lacks, a worktree with uncommitted changes, a worktree not on a `wt/*` branch, and a piece that was only just
+created and has no commits of its own. Run it after a `--no-push` merge (once `main` is pushed), and whenever worktrees pile up:
+stale ones hold gigabytes of `target/` each. `scripts/wt.sh rm <slug>` removes one worktree and its local branch when
+fully merged. `scripts/wt-cleanup.test.sh` (a CI step) runs all of this against scratch repositories.
 
-```bash
-scripts/wt.sh clean           # removes every merged+clean .work worktree, deletes its branch, prunes
-```
-
-`rm` and `clean` refuse to delete a branch with unmerged commits, so they are safe to
-run at any time. A worktree must never outlive its merge by more than the cleanup that
-follows the green matrix: stale worktrees hold gigabytes of `target/` and stale branches
-invite double-merges.
+A worktree must never outlive its merge: the full matrix of section 4 runs from the primary checkout, so the worktree is
+not needed for it.
 
 ## Parallelism rules
 

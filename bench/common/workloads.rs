@@ -304,6 +304,22 @@ pub fn dispatch() -> Vec<Workload> {
                 black_box(rt.call_sync(black_box(&payload)));
             })
         }),
+        // ADR-058: an instantiation of a generic function, `add_one_for<Record5>`: the same body as
+        // `function` above, through the same path. `generic_fn_vs_function` gates the pair.
+        Workload::new("dispatch/call_sync/generic_fn", || {
+            let (rt, _host) = runtime();
+            let payload = call_payload(
+                CallTarget::Function {
+                    method_id: ids::function_id("add_one_for<Record5>"),
+                },
+                2,
+                &enc(&41_u32),
+            );
+            call_ok(&rt, &payload);
+            plain(move || {
+                black_box(rt.call_sync(black_box(&payload)));
+            })
+        }),
         Workload::new("dispatch/call_sync/echo_record1k", || {
             let (rt, _host) = runtime();
             let calc = construct(&rt, "Calculator", &enc(&7_i64));
@@ -1278,7 +1294,7 @@ fn snapshot_fixture(stores: u32) -> (Arc<Core>, Arc<CountingHost>, Vec<u8>) {
 
 /// Snapshot, restore, and a whole cold start.
 pub fn snapshot() -> Vec<Workload> {
-    vec![
+    let mut v = vec![
         Workload::new("snapshot/encode_100kb", || {
             let (rt, _host, _snapshot) = snapshot_fixture(4);
             plain(move || {
@@ -1339,7 +1355,10 @@ pub fn snapshot() -> Vec<Workload> {
         Workload::new("snapshot/cold_start_restore_100kb_core_thread", || {
             cold_start(1)
         }),
-    ]
+    ];
+    // ADR-059: the records of 100 query handles.
+    v.extend(super::query_rows::snapshot_handles());
+    v
 }
 
 /// `snapshot` as a build whose `Item.id` was a `u32` would have written it: the rows re-encoded

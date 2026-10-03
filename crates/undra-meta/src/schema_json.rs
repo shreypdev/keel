@@ -37,8 +37,9 @@
 use crate::closure_json::{number, string, type_ref};
 use crate::sort::order_by;
 use crate::{
-    EnumDef, FieldDef, FunctionDef, InfiniteDef, MethodDef, ObjectDef, ParamDef, PortDef, PortKind,
-    QueryDef, QueryKind, RecordDef, Schema, SignalDef, StoreDef, TypeRef, VariantDef,
+    EnumDef, FieldDef, FunctionDef, GenericArg, GenericOf, InfiniteDef, MethodDef, ObjectDef,
+    ParamDef, PortDef, PortKind, QueryDef, QueryKind, RecordDef, Schema, SignalDef, StoreDef,
+    TypeRef, VariantDef,
 };
 
 /// The canonical JSON of `schema`: what [`Schema::canonical_json`] returns.
@@ -327,6 +328,32 @@ impl Writer {
         self.boolean(takes_ctx);
     }
 
+    /// `,"generic":{"of":"..","args":[{"param":"..","ty":T,"inferred":B}, ..]}` (ADR-058), only for an
+    /// instantiation of a generic function or method (`skip_serializing_if = "Option::is_none"`).
+    fn generic(&mut self, generic: Option<&GenericOf>) {
+        let Some(GenericOf { of, args }) = generic else {
+            return;
+        };
+        self.key(",\"generic\":{\"of\":");
+        self.string(of);
+        self.key(",\"args\":");
+        self.list(args, |w, arg| {
+            let GenericArg {
+                param,
+                ty,
+                inferred,
+            } = arg;
+            w.key("{\"param\":");
+            w.string(param);
+            w.key(",\"ty\":");
+            w.ty(ty);
+            w.key(",\"inferred\":");
+            w.boolean(*inferred);
+            w.out.push('}');
+        });
+        self.out.push('}');
+    }
+
     fn method(&mut self, m: &MethodDef) {
         let MethodDef {
             name,
@@ -336,12 +363,14 @@ impl Writer {
             is_async,
             takes_ctx,
             coalesce,
+            generic,
             docs,
         } = m;
         self.named(name, ",\"method_id\":", *method_id);
         self.signature(params, returns);
         self.call_flags(*is_async, *takes_ctx);
         self.flag(",\"coalesce\":true", *coalesce);
+        self.generic(generic.as_ref());
         self.end(docs);
     }
 
@@ -384,11 +413,13 @@ impl Writer {
             returns,
             is_async,
             takes_ctx,
+            generic,
             docs,
         } = f;
         self.named(name, ",\"method_id\":", *method_id);
         self.signature(params, returns);
         self.call_flags(*is_async, *takes_ctx);
+        self.generic(generic.as_ref());
         self.end(docs);
     }
 
@@ -555,6 +586,22 @@ mod tests {
             ],
             docs: String::new(),
         });
+        // ADR-058: `set` and `get` are instantiations of a generic method, `new` is not.
+        let generic = |of: &str| GenericOf {
+            of: of.into(),
+            args: vec![
+                GenericArg {
+                    param: "T".into(),
+                    ty: crate::TypeRef::named("Todo"),
+                    inferred: true,
+                },
+                GenericArg {
+                    param: "U".into(),
+                    ty: crate::TypeRef::vec(crate::TypeRef::U8),
+                    inferred: false,
+                },
+            ],
+        };
         let method = |name: &str, coalesce: bool| MethodDef {
             name: name.into(),
             method_id: 9,
@@ -566,6 +613,7 @@ mod tests {
             is_async: coalesce,
             takes_ctx: !coalesce,
             coalesce,
+            generic: (name != "new").then(|| generic(name)),
             docs: "docs".into(),
         };
         let signal = |name: &str, flags: bool| SignalDef {
@@ -633,6 +681,26 @@ mod tests {
         };
         schema.queries.push(query("set", true));
         schema.queries.push(query("bare", false));
+        schema.functions.push(FunctionDef {
+            name: "newest<Todo>".into(),
+            method_id: 14,
+            params: Vec::new(),
+            returns: crate::TypeRef::Unit,
+            is_async: false,
+            takes_ctx: false,
+            generic: Some(generic("newest")),
+            docs: String::new(),
+        });
+        schema.functions.push(FunctionDef {
+            name: "plain".into(),
+            method_id: 15,
+            params: Vec::new(),
+            returns: crate::TypeRef::Unit,
+            is_async: true,
+            takes_ctx: true,
+            generic: None,
+            docs: "docs".into(),
+        });
         assert_same_as_serde(&schema);
 
         let text = canonical(&schema);
@@ -650,19 +718,23 @@ mod tests {
             "\"stale_ms\":null",
             "\"kind\":\"callback\"",
             "\"kind\":\"mutation\"",
+            "\"generic\":{\"of\":\"newest\",\"args\":[{\"param\":\"T\",\"ty\":{\"kind\":\"named\",\"of\":\"Todo\"},\"inferred\":true},{\"param\":\"U\",\"ty\":{\"kind\":\"vec\",\"of\":{\"kind\":\"u8\"}},\"inferred\":false}]}",
         ] {
             assert!(text.contains(key), "{key} in {text}");
         }
         assert!(!text.contains("docs"), "{text}");
         assert!(!text.contains("\"coalesce\":false"), "{text}");
+        assert!(!text.contains("\"generic\":null"), "{text}");
+        assert_eq!(text.matches("\"generic\":{").count(), 1 + 2 * 5, "{text}");
 
         // The exchange form: labels first, the docs that are there, declaration order.
         let text = exchange(&schema);
         assert!(
             text.starts_with("{\"undra_version\":\"1.0.0\",\"crate_name\":\"flags\",\"records\":[")
         );
-        // A record and its field, a variant, an object with three methods, four ports with two.
-        assert_eq!(text.matches("\"docs\":").count(), 19, "{text}");
+        // A record and its field, a variant, an object with three methods, four ports with two, a
+        // function.
+        assert_eq!(text.matches("\"docs\":").count(), 20, "{text}");
         assert!(text.contains("\"docs\":\"a newtype\"}"), "{text}");
         let (late, early) = (
             text.find("\"Late\"").unwrap(),
@@ -716,6 +788,22 @@ mod tests {
         .boxed()
     }
 
+    /// ADR-058's label: absent most of the time, with zero to three arguments otherwise.
+    fn arb_generic() -> BoxedStrategy<Option<GenericOf>> {
+        let arg =
+            (arb_name(), arb_ty(), any::<bool>()).prop_map(|(param, ty, inferred)| GenericArg {
+                param,
+                ty,
+                inferred,
+            });
+        prop_oneof![
+            2 => Just(None),
+            1 => (arb_name(), proptest::collection::vec(arg, 0..3))
+                .prop_map(|(of, args)| Some(GenericOf { of, args })),
+        ]
+        .boxed()
+    }
+
     fn arb_method() -> BoxedStrategy<MethodDef> {
         (
             arb_key(),
@@ -723,10 +811,19 @@ mod tests {
             arb_params(),
             arb_ty(),
             any::<(bool, bool, bool)>(),
+            arb_generic(),
             arb_docs(),
         )
             .prop_map(
-                |(name, method_id, params, returns, (is_async, takes_ctx, coalesce), docs)| {
+                |(
+                    name,
+                    method_id,
+                    params,
+                    returns,
+                    (is_async, takes_ctx, coalesce),
+                    generic,
+                    docs,
+                )| {
                     MethodDef {
                         name,
                         method_id,
@@ -735,6 +832,7 @@ mod tests {
                         is_async,
                         takes_ctx,
                         coalesce,
+                        generic,
                         docs,
                     }
                 },
@@ -852,17 +950,21 @@ mod tests {
             arb_params(),
             arb_ty(),
             any::<(bool, bool)>(),
+            arb_generic(),
             arb_docs(),
         )
             .prop_map(
-                |(name, method_id, params, returns, (is_async, takes_ctx), docs)| FunctionDef {
-                    name,
-                    method_id,
-                    params,
-                    returns,
-                    is_async,
-                    takes_ctx,
-                    docs,
+                |(name, method_id, params, returns, (is_async, takes_ctx), generic, docs)| {
+                    FunctionDef {
+                        name,
+                        method_id,
+                        params,
+                        returns,
+                        is_async,
+                        takes_ctx,
+                        generic,
+                        docs,
+                    }
                 },
             )
             .boxed()

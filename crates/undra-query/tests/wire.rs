@@ -11,7 +11,7 @@ use common::*;
 use undra::meta::{QueryKind, Schema, collect_schema, ids};
 use undra::runtime::testing::{ReplyRecord, TestRuntime};
 use undra::signals::ALL_SIGNALS;
-use undra::wire::payload::{CallTarget, ChangeEntry, ChangeOp, ChangeSet, ReplyStatus};
+use undra::wire::payload::{CallTarget, ChangeEntry, ChangeOp, ChangeSet, ReplyStatus, Snapshot};
 use undra_query::{
     CtxQuery, INVALIDATE_METHOD_ID, MutationDef, QueryDef, QueryStatus, REFETCH_METHOD_ID,
 };
@@ -419,25 +419,24 @@ fn two_platform_handles_of_one_query_share_a_fetch_and_the_last_release_cancels_
 }
 
 #[test]
-fn a_snapshot_leaves_handles_out_and_restore_still_works() {
+fn a_snapshot_keeps_what_a_handle_is_made_of_and_a_restore_keeps_the_handle_working() {
     let p = Platform::new();
     p.h.serve_page(0, vec![todo(1, "milk")]);
     let handle = p.construct::<TodosQuery>(&0_u32);
     p.observe(handle);
     p.t().run_pending();
 
+    // A handle is not a snapshotted store: its one record is a recreation record (ADR-059).
     let snapshot = p.t().runtime().snapshot();
-    assert_eq!(
-        Reader::new(&snapshot).read_u32().unwrap(),
-        0,
-        "a handle is not a snapshotted store"
-    );
+    let decoded = Snapshot::decode(&mut Reader::new(&snapshot)).unwrap();
+    assert_eq!(decoded.stores.len(), 1);
+    assert_eq!(decoded.stores[0].handle, handle);
+    assert_eq!(decoded.stores[0].type_id, TodosQuery::ID);
+    assert!(decoded.stores[0].recreation().is_some());
     p.t().runtime().restore(&snapshot).unwrap();
-    // Like any object that is not in a snapshot, the handle is stale: the platform re-creates it.
-    assert_eq!(
-        p.method(handle, REFETCH_METHOD_ID).status,
-        ReplyStatus::BadRequest
-    );
+    // Unlike an object that is not in a snapshot, the handle is not stale: the platform runs
+    // nothing to re-create it, and the cache outlived the restore.
+    assert_eq!(p.method(handle, REFETCH_METHOD_ID).status, ReplyStatus::Ok);
     let again = p.construct::<TodosQuery>(&0_u32);
     let cs = p.observe(again);
     assert_eq!(

@@ -54,9 +54,9 @@ fetched and searched. Verdicts:
 | MI01 | The catalogue's matrix lists 36 things a team needs | cat:380-417 | REPO | A | verified cat:380-417 |
 | MI02 | On 1 October Undra was marked as having 10 of them, part of 9 and none of 16, with one not applicable | cat:382-417, "Undra today" column, tallied in section 11 | REPO | A | verified, re-tallied: yes = rows 1, 2, 3, 5, 6, 7, 19, 20, 21, 25; part. = 4, 8, 14, 15, 23, 26, 27, 31, 34; no = 9-13, 16-18, 22, 24, 28-30, 32, 33, 35; n/a = 36. Row 2 ("yes native · part. web") counts as yes, which flatters the 1 October baseline, not today |
 | MI03 | Since then every code piece of the v1.x program has merged, each feature after an adversarial review recorded in the repository. *Was: "Since then the pieces below have merged, each after an adversarial review"* | stat:512 ("Every code piece of the v1.1/v1.2 program is merged"); stat:305-512, one review per feature row | REPO | A | **corrected**: two small fix pieces merged without a review (swift-fs, stat:400; dev-reload-flake, stat:462), so "each" is scoped to features |
-| MI07 | At the last merge the contract grid passed 95 of 95 cells over 33 scenarios | stat:511 ("contracts 95/95 (S01–S33)"); sc:561, :578 (S21 and S22 are TypeScript only: 31 × 3 + 2 = 95) | REPO | fact-check | **added**; verified stat:511 |
+| MI07 | At the last merge the contract grid passed 101 of 101 cells over 35 scenarios, and the test suites ran 3,689 Rust, 1,864 TypeScript, 881 Kotlin, 870 Swift and 110 React Native tests. *Was: "95 of 95 cells over 33 scenarios", with 3,536 / 1,856 / 881 / 870 / 110* | `site/data/tests.json` (the numbers the page renders through `build-trust.mjs` slots); `contract-tests/scenarios.md` (S01 to S35; S21 and S22 TypeScript only: 33 × 3 + 2 = 101); `.10x/reviews/2026-10-02-reload-handles-review.md` (Counts) | REPO | fact-check | **corrected** (2026-10-02, the reload-handles merge, after generics-fn-obj's S34 and reload-handles' S35): the sentence is now generated from `site/data/tests.json`, so it follows each merge |
 | MI08 | the test suites ran 3,536 Rust, 1,856 TypeScript, 881 Kotlin, 870 Swift and 110 React Native tests | stat:511 ("Rust 3,536 · TS 1,856 + 37 · Kotlin 881 + 32 · Swift 870 · RN 110"; the +37 and +32 are separate suites the post does not count) | REPO | fact-check | **added**; verified stat:511 |
-| MI04 | Counting again today: 27 solved, 6 partial, 2 open and 1 left out by decision. *Was: 22 solved, 7 partial, 6 open* | section 11, re-derived row by row against `main` `da4fbbe` | DER | A-judge | **corrected**: six rows moved with what merged after the draft (T10, T13, T17, T22, T23, T33) |
+| MI04 | Counting again today: 28 solved, 5 partial, 2 open and 1 left out by decision. *Was: 27 solved, 6 partial, 2 open (22 solved, 7 partial, 6 open in the draft)* | section 11, re-derived row by row against `main` `da4fbbe` | DER | A-judge | **corrected**: six rows moved with what merged after the draft (T10, T13, T17, T22, T23, T33); T22 moved again with ADR-058 (generic functions, objects and stores), partial to solved |
 | MI05 | The table groups the 36 rows into 12 classes | the row labels cover 1-36 once each: 3-6, 1-2, 21-23, 7-10, 11/12/14, 15-16, 18-19, 20/24/30, 25-29 + 36, 31-32, 13/17/33/34, 35 | REPO | A | verified (counted: 4+2+3+4+3+2+2+3+6+2+4+1 = 36) |
 | MI06 | It leaves out Crux, which its own post covers | `site/blog/undra-vs-uniffi-and-crux/index.html` | REPO | A | verified |
 
@@ -103,7 +103,7 @@ fetched and searched. Verdicts:
 | M03-F2 | React Native native modules need a spec and code per platform | R5 turbo-native-modules-introduction | DOC | A-cat | verified R5: "define a typed JavaScript specification"; "write your native platform code using the generated interfaces" |
 | M03-N1 | Undra: records, enums and errors become native sum types | SPEC §10.1-10.3 (:753-886); docs/ERRORS.md:11-19 | REPO | A | verified |
 | M03-N2 | no Objective-C | SPEC §10.1 (:753); cat:123 (E1) | REPO | A | verified |
-| M03-N3 | Solved: objects cross as parameters and returns; the core calls host callbacks; newtypes stay typed. Partly: generics, one named type per instantiation, and no generic functions or objects. *Was: "Not yet: objects, callbacks, generics, newtypes"* | adr-040, adr-041, adr-042 (Status: Accepted, line 3); stat:482 (objects-callbacks), :500 (types-paging), :509 (follow-ups); SPEC:887 (§10.3a), :942 (§10.3b), :1051 (E0002 now names the instantiation route), :1079 (E0064: an object crosses as `Arc<T>` or `&T`); types.html:96-118; sc:705 (S27), :748 (S28), :861 (S31) | REPO | fact-check | **corrected**: all three ADRs shipped after the draft; generics are partial (types.html:118: "Generic objects, stores, functions, methods, ports, callbacks and queries stay out") |
+| M03-N3 | Solved: objects cross as parameters and returns; the core calls host callbacks; newtypes stay typed; generics cross as declared instantiations, functions as overloads and objects and stores as one class per alias. *Was: "Partly: generics, one named type per instantiation, and no generic functions or objects"* | adr-040, adr-041, adr-042, adr-058 (Status: Accepted, line 3); stat:482 (objects-callbacks), :500 (types-paging), :509 (follow-ups); SPEC:887 (§10.3a), :942 (§10.3b), :966 (§10.3d), :1075 (E0002), :1079 (E0064: an object crosses as `Arc<T>` or `&T`), :1108 (E0072), :1110 (E0074); types.html:94-140 (Generics), generics.html; sc:705 (S27), :748 (S28), :861 (S31), :935 (S34) | REPO | A | **corrected** (stale after ADR-058): the generics of the row are the declared ones; native generic types, an open-ended type parameter and generic queries, ports and callbacks are what types.html:126 ("What is not there") lists |
 
 ### Class 4: Data layer (rows 7 to 10)
 
@@ -144,10 +144,10 @@ fetched and searched. Verdicts:
 | M06-F2 | Flutter hot reload skips native code | F3 | DOC | A-cat | verified F3: "If you've changed native code (such as Kotlin, Java, Swift, or Objective-C), you must perform a full restart" |
 | M06-F3 | React Native Fast Refresh can fall back to a full reload | R8 | DOC | A-cat | verified R8: "Fast Refresh will fall back to doing a full reload" |
 | M06-N1 | Undra: `undra dev` reconnects | adr-051:35-36; cli.html; rev:dev-loop | REPO | A | verified |
-| M06-N2 | keeps state across a rebuild | adr-053; docs/DEV_LOOP.md:88 | REPO | A | verified |
-| M06-N3 | devtools with time travel | adr-054; docs/DEV_LOOP.md:225-242 | REPO | A | verified |
+| M06-N2 | keeps state across a rebuild | adr-053; docs/DEV_LOOP.md:89 | REPO | A | verified |
+| M06-N3 | devtools with time travel | adr-054; docs/DEV_LOOP.md:246-263 | REPO | A | verified |
 | M06-N4 | Gradle, Xcode and Vite run `undra build` | rev:tooling; stat:375; cli.html | REPO | A | verified stat:375 |
-| M06-N5 | Not yet: query handles across a reload | stat:391 ("query handles do not survive a reload (needs its own ADR)"); docs/DEV_LOOP.md:254 | REPO | A | verified; still open at stat:512 |
+| M06-N5 | Undra: query handles are carried too, so a screen that shows a query keeps working across a reload; a query without `persist` shows loading once. *Was: "Not yet: query handles across a reload"* | adr-059 (decisions 1 to 6; sections 2 and 3); docs/DEV_LOOP.md:110-126, :323-324; SPEC:441, :495-509, :748-755; proven by `crates/undra-cli/tests/dev_reload.rs` (the Remote-tab case against a real `undra dev`), `crates/undra-query/tests/restore.rs`, `crates/undra-runtime/tests/recreation.rs` and contract scenario S35 (`sc`) | REPO | A | **corrected** (`reload-handles`, 2026-10-02): the claim was open (stat:391, "still open at stat:512") and is shipped by ADR-059; the piece's adversarial review checks the files named |
 
 ### Class 7: Testing and previews (rows 18, 19)
 
@@ -291,14 +291,15 @@ fetched and searched. Verdicts:
 | ID | Claim as written | Source | Basis | Checked by | Fact-check |
 |---|---|---|---|---|---|
 | D01 | the app on a simulator, an emulator or a page reconnects by itself, with exponential backoff from 250 ms to 5 s. *Was: "on the simulator, the phone or the page"* | adr-051:35-36 (`initialDelay` 250 ms, `maxDelay` 5 s); rev:dev-reload and stat:391 (proven on the iOS simulator, the `undra` AVD and the web) | REPO | A | **corrected**: no physical phone has run it; backoff verified adr-051:35-36 |
-| D02 | and observes its stores again | adr-051; docs/DEV_LOOP.md:178 | REPO | A | verified |
+| D02 | and observes its stores again | adr-051; docs/DEV_LOOP.md:199 | REPO | A | verified |
 | D03 | the core's state is snapshotted in memory before the rebuild and restored into the new core before it listens | cli.html ("snapshotted in this process's memory, never on disk, and restored into the new core"); adr-053 | REPO | A | verified |
-| D04 | the dev bar says "Reloaded, state kept" or why not | docs/DEV_LOOP.md:88-94 | REPO | A | verified |
+| D04 | the dev bar says "Reloaded, state kept" or why not | docs/DEV_LOOP.md:89-98 | REPO | A | verified |
 | D05 | the playground's 204 KiB snapshot restores in 1.6 ms inside `undra dev`, which runs a debug build of the core (189 µs in a release build). *Was: "restores in 189 µs" (release core, in process)* | adr-053:355-357 ("inside the dev runner (a *debug* build of the core) `restore` takes 1.6 ms"); sde:dev-reload:83-84 | REPO | A | **corrected**: the dev loop runs the debug core, so 1.6 ms is the number a developer meets; 189 µs kept as the release figure |
 | D06 | 74 ms pass from suspending the old core to the new one listening | sde:dev-reload:81; adr-053:357-358 | REPO | A | verified |
-| D07 | a page served by `undra dev` shows every store's live value and a timeline of every change-set | docs/DEV_LOOP.md:233-242; adr-054 | REPO | A | verified |
-| D08 | a scrubber restores the core to an earlier step while the app follows | docs/DEV_LOOP.md:237-240 | REPO | A | verified |
-| D09 | it sits behind a per-run token | docs/DEV_LOOP.md:262-264 | REPO | A | verified |
+| D07 | a page served by `undra dev` shows every store's live value and a timeline of every change-set | docs/DEV_LOOP.md:254-263; adr-054 | REPO | A | verified |
+| D08 | a scrubber restores the core to an earlier step while the app follows | docs/DEV_LOOP.md:258-261 | REPO | A | verified |
+| D09 | it sits behind a per-run token | docs/DEV_LOOP.md:285-287 | REPO | A | verified |
+| D10 | a screen that shows a query is carried too: its query handle comes back on the same handle, with no code in the app for the handle (a value the app set by a call outside its stores, such as a server's address, is told to the new core again: the playground's three apps do it on reconnect), and its next fetch runs the code that was just rebuilt | adr-059 (section 3, "Dev reload, same schema", implementation note 10); docs/DEV_LOOP.md ("State the core holds outside its stores"); SPEC:509; `crates/undra-cli/tests/dev_reload.rs`, `crates/undra-query/tests/restore.rs` | REPO | A | **added** (`reload-handles`, 2026-10-02) |
 
 ### Shipping an update, and shipping the app
 
@@ -310,7 +311,7 @@ fetched and searched. Verdicts:
 | H04 | a queued write the new build cannot carry over becomes a dead letter the app can show | offline.html ("which ones an update could not carry over (dead letters)") | REPO | A | verified |
 | H05 | storage ports fail with typed errors (full, locked, corrupt, unavailable, io) on every platform | SPEC:1000, :676; adr-049 | REPO | A | verified |
 | H06 | the hello-world web core is 116.7 KB gzipped against a 120 KB budget. *Was: 116.6 KB* | `bench/results/web-size.jsonl:1` (`web/hello-wasm`: 116,690 bytes gzipped, budget 120,000, commit `14aae90`); `bench/budgets.toml:816-819` | REPO | A | **corrected** (refreshed by the measured slot from the record) |
-| H07 | the JavaScript a hello-world page loads up front is 22.1 KB gzipped, exactly at its 22,100-byte gate, so the next change that grows it has to make room or restate the budget. *Was: "the JavaScript runtime, 26 KB gzipped, sits under a 26,000-byte gate"* | `bench/results/web-size.jsonl:2` (`web/hello-runtime-js`: 22,100 bytes gzipped, budget 22,100, "the chunk loaded up front"); `bench/budgets.toml:821-842`; stat:509 ("zero headroom") | REPO | A | **corrected**: the number, the gate, and what is measured (the up-front chunk since ADR-052's amendment, not the whole runtime) all moved; "sits under" was false at the record |
+| H07 | the JavaScript a hello-world page loads up front is 15.8 KB gzipped against a 16 KB budget, for the production build of the runtime as an app installs it, with Vite's own preload helper reported beside it and gated on its own (16.2 KB counted in, against 16.6 KB). *Was: 22.1 KB, exactly at its 22,100-byte gate (ts-runtime-16k, ADR-057, moved it)* | `bench/results/web-size.jsonl:2-3` (`web/hello-runtime-js`: 15,680 bytes gzipped, budget 16,000, `bundler_gzipped` 691; `web/hello-runtime-js-with-helper`: 16,191, budget 16,600); `bench/budgets.toml`; adr-057 | REPO | A | **corrected** (refreshed by the measured slot from the record) |
 | H08 | CI fails a change that exceeds either | `bench/budgets.toml:793-801` (the gate is min(budget, record × 1.05)); adr-052; stat:383 | REPO | A | verified |
 | H10 | the remote transport and the default ports load on first use | `bench/budgets.toml:821-829`; stat:472 | REPO | fact-check | **added**; verified |
 | H09 | the browser database adds about 299 KB gzipped, and only to an app that imports it | res:741-743 (299,165 bytes gzipped; "only when it imports `@undra/runtime/db`") | REPO | A | verified |
@@ -339,7 +340,7 @@ fetched and searched. Verdicts:
 | O01 | Objects cannot cross as parameters or return values, and host callbacks cannot be arguments | was: SPEC E0064, E0004 | REPO | A | **removed**: false since ADR-040 and ADR-041 merged (stat:482; SPEC:1079 now says an object crosses as `Arc<T>` or `&T`) |
 | O02 | a UniFFI crate meets both on day one | was: from-uniffi.html | REPO | A | **removed**: no longer applies; the guide's own sentence was corrected in this pass |
 | O03 | ADR-040 to 042 propose the changes and none has shipped | was: Status Proposed | REPO | A | **removed**: all three Accepted and merged (stat:482, :500) |
-| O34 | Generic functions and objects: a generic record or enum crosses as one named type per instantiation; generic objects, stores, functions and methods do not cross | types.html:96-118; SPEC:1051 (E0002) | REPO | fact-check | **added**; verified types.html:118 |
+| O34 | Generics are declared, not open-ended: generic records, enums, functions, methods, objects and stores cross as the instantiations you list; a type parameter with no list, native generic types, and generic queries, ports and callbacks do not | types.html:126-140 ("What is not there"); generics.html; SPEC:1075 (E0002), :1108 (E0072), :1110 (E0074); adr-058 §6 | REPO | A | **corrected** (stale after ADR-058; was: "generic objects, stores, functions and methods do not cross"); verified types.html:126 |
 | O04 | the pagination recipe builds an infinite list on a keyed list | pagination.html | REPO | A | **removed** with its bullet: true, but no longer an open item (pagination.html:186 now points at `infinite` queries and `Lazy<T>`) |
 | O05 | there is no paged query type and no interval refetch | was: pagination.html; q:33-36 | REPO | A | **removed**: false since ADR-043 (stat:500; q:37-56) |
 | O06 | ADR-043 proposes both | was: Status Proposed | REPO | A | **removed**: Accepted and merged |
@@ -355,7 +356,7 @@ fetched and searched. Verdicts:
 | O16 | the write replays, and the screen refetches only the mutation's own key | q:88-89 | REPO | A | verified |
 | O17 | the web database serves one tab per origin | db.html; stat:453 | REPO | A | verified |
 | O18 | a migration that contains its own `COMMIT` is open | stat:453 ("Open: a migration containing its own `COMMIT`"); no later checkpoint closes it | REPO | A | verified |
-| O35 | `undra dev` carries the stores across a reload but not query handles, which need a decision record of their own | stat:391; docs/DEV_LOOP.md:254 | REPO | fact-check | **added**; verified |
+| O35 | After an `undra dev` reload a query without `persist` shows loading once, because a snapshot carries no query data, and an object that is neither a store nor a query handle is not carried over. *Was: "`undra dev` carries the stores across a reload but not query handles, which need a decision record of their own"* | adr-059 (scope: "the query cache itself", user objects deferred; Consequences); docs/DEV_LOOP.md:110-126, :323-324; `crates/undra-query/tests/restore.rs`, `crates/undra-runtime/tests/recreation.rs` | REPO | fact-check | **corrected** (`reload-handles`, 2026-10-02): the limit that was open is shipped (M06-N5); this is the limit that remains |
 | O19 | the binding call path is over its targets: 0.32 to 0.44 µs for the runtime's synchronous call in Chromium against 80 ns. *Was: "3.2 to 3.9 µs through the generated TypeScript against 80 ns"* | res:929, :988 (the 80 ns target is the in-thread `callSync` row's; the generated call's row has none, res:928) | REPO | A | **corrected**: the numbers moved with ADR-056, and the target belongs to the synchronous row |
 | O20 | about 300 ns on the iOS simulator against 60 ns | res:880, :961 (294 to 302 ns; target ≤ 60 ns) | REPO | A | verified |
 | O21 | on React Native, 100,000 updates a second do not fit a frame | was: docs/REACT_NATIVE.md | REPO | A | **removed**: false since ADR-056 (docs/REACT_NATIVE.md:253-265: about 5 ms of a 16.7 ms frame on the simulator); the new figure is B18 |
@@ -378,7 +379,7 @@ fetched and searched. Verdicts:
 | ID | Claim as written | Source | Basis | Checked by | Fact-check |
 |---|---|---|---|---|---|
 | C01 | Default is a claim about which question comes first, not about every team | editorial | DER | A-judge | verified (editorial) |
-| C02 | the open rows above are few enough to check against your own requirements in an afternoon | today's tally: 2 open rows, 6 partial (section 11) | DER | A-judge | verified (judgement; the tally it rests on is re-derived) |
+| C02 | the open rows above are few enough to check against your own requirements in an afternoon | today's tally: 2 open rows, 5 partial (section 11) | DER | A-judge | verified (judgement; the tally it rests on is re-derived) |
 | C03 | start with L1: move one function, call it from Swift, Kotlin and TypeScript | from-kmp.html ("Move one function, call it from Kotlin and Swift, ship") | REPO | A | verified (advice; the guide names Kotlin and Swift, the post adds TypeScript) |
 
 ## 8. Links the post makes (not factual claims)
@@ -420,11 +421,12 @@ site-relative link.
   the migration guides (stat:444) from Next; "A first-party inspector" left Later (devtools shipped, ADR-054); the stale "102.7 KB" is gone;
   ADR-044, ADR-045 and ADR-056 added to Since v1.0; `updated` 2026-10-02.
 * `site/data/pending.json`: `docs/realtime.html` is live; the entry is removed.
+* After the fact-check pass (2026-10-02, `reload-handles`, ADR-059): the dev-loop matrix cell (M06-N5), the dev-loop paragraph (D10) and the "Built, with a known limit" bullet (O35) changed because query handles now survive a reload; `site/data/roadmap.json` moved "Query handles across a dev reload" from Open items to Since v1.0 and `site/docs/web.html` says that a web crash restart keeps query handles on their own handle. The 36-row tally is unchanged (row 15 was already solved, T15).
 
 ## 11. The 36-row tally behind MI02 and MI04
 
 "1 Oct" is the catalogue's "Undra today" column (cat:382-417; row 2 "yes native, part. web" counted as yes). "Today" is the fact-check's reading
-of `main` `da4fbbe`. Counts: 1 Oct = 10 yes, 9 part., 16 no, 1 n/a. **Today = 27 solved, 6 partial, 2 open, 1 n/a** (the draft's 22 / 7 / 6 / 1
+of `main` `da4fbbe`. Counts: 1 Oct = 10 yes, 9 part., 16 no, 1 n/a. **Today = 28 solved, 5 partial, 2 open, 1 n/a** (T22 moved with ADR-058, after `da4fbbe`; the draft's 22 / 7 / 6 / 1
 was right for `d1b35b5`; six rows moved with the pieces merged after it).
 
 | ID | Row (cat) | 1 Oct | Today | Evidence for "today" | Basis | Checked by | Fact-check |
@@ -444,13 +446,13 @@ was right for `d1b35b5`; six rows moved with the pieces merged after it).
 | T13 | 13 OS background execution | no | **solved** (was open). Caveat: the iOS handler cannot run under BGTaskScheduler in the simulator | adr-046 §3 and amendment items 6-10; sc:830 (S30); production.html#background; stat:491 | REPO | fact-check | **corrected** |
 | T14 | 14 Default HTTP, storage and connectivity adapters on iOS, Android and web | part. | solved | rev:android-adapters; stat:351, :399; ports.html | REPO | A | verified |
 | T15 | 15 Live reload of shared logic on a device, keeping state | part. | solved | adr-051, adr-053; rev:dev-reload; stat:391 (iOS simulator, `undra` AVD, web; no physical phone, D01) | REPO | A | verified (scope noted) |
-| T16 | 16 State inspector, transaction timeline, time travel | no | solved | adr-054; docs/DEV_LOOP.md:225-260; rev:devtools | REPO | A | verified |
+| T16 | 16 State inspector, transaction timeline, time travel | no | solved | adr-054; docs/DEV_LOOP.md:246-283; rev:devtools | REPO | A | verified |
 | T17 | 17 Step-debug from UI code into shared code | no | **solved** (was open). Scope: tested with LLDB on the host and the iOS simulator; Android Studio and Chrome documented | adr-046 §2 and amendment items 12, 16; sde:prod-ops:65, :106; production.html#debugging | REPO | fact-check | **corrected** |
 | T18 | 18 Previews and UI tests without the real core | no | solved | adr-055; docs/TESTING.md; rev:testkit | REPO | A | verified |
 | T19 | 19 Deterministic tests (virtual time, fake I/O) | yes | solved | cat:141 (E19); adr-055 | REPO | A | verified |
 | T20 | 20 Compatibility check between bindings and library | yes | solved | SPEC:151; sc:396 (S16) | REPO | A | verified |
 | T21 | 21 Generated Swift passes native review | yes | solved (judgement) | CLAUDE.md:14 (R3); `crates/undra-bindgen/tests/golden/`; adr-032, adr-045 | DER | A-judge | verified (judgement) |
-| T22 | 22 Generics across the boundary | no | **partial** (was open) | adr-042 (Accepted); types.html:96-118 (named instantiations; generic objects, functions and methods stay out); sc:861 (S31) | REPO | fact-check | **corrected** |
+| T22 | 22 Generics across the boundary | no | **solved** (declared instantiations; was partial) | adr-042, adr-058 (Accepted); types.html:94-140; generics.html; sc:861 (S31), :935 (S34); SPEC:966 (§10.3d). Caveat: instantiations are listed, not open-ended; no native generic types | REPO | A | **corrected** (stale after ADR-058: partial to solved) |
 | T23 | 23 Objects, callbacks and listeners as arguments and returns | part. | **solved** (was partial) | adr-040, adr-041 (Accepted); sc:705 (S27), :748 (S28); objects.html, callbacks.html; stat:482, :509 | REPO | fact-check | **corrected** |
 | T24 | 24 Supports iOS 15 and 16 | no | solved (caveat) | adr-045; rev:ios-floor; stat:463. Caveat: no iOS 15/16 runtime has run it | REPO | A | verified |
 | T25 | 25 First-party web target with a DOM UI | yes | solved | cat:131 (E9); web.html | REPO | A | verified |

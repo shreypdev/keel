@@ -4,12 +4,12 @@ import { Counter, Probe, RemoteTodosQueryHandle, UndraIds, add, configureRemote,
 import { BASE_URL, boot } from "../src/harness.js";
 import { replies } from "../src/fake-server.js";
 import { Persisted } from "../src/memory-kv.js";
-import { sleep, step, waitFor } from "../src/wait.js";
+import { WAIT_TIMEOUT_MS, sleep, step, waitFor } from "../src/wait.js";
 
 // S22 a trapped web core restarts from its last snapshot (ADR-049; TypeScript only): `wasm-main` with recovery on.
 // A panic traps the wasm core; the runtime fails what was in flight with "restarted", instantiates the same module
-// again, restores the last snapshot (stores keep their handles), observes them again and re-creates the query handles.
-// The fourth trap within the window leaves the core dead.
+// again, restores the last snapshot (stores and query handles keep their handles, ADR-059) and observes them again; the
+// core builds a query handle when the runtime observes it. The fourth trap within the window leaves the core dead.
 
 const LIST = "s22";
 const TODOS = `${BASE_URL}/lists/${LIST}/todos`;
@@ -42,7 +42,7 @@ test("S22 a trapped web core restarts from its last snapshot", async () => {
     const q = query;
     await waitFor("the query to show the item", () => q.data.peek()?.[0]?.id === 1);
     await sleep(200);
-    // The query's entry is persisted (debounced 250 ms): the re-created handle reads it back after the restart.
+    // The query's entry is persisted (debounced 250 ms): the handle the new core builds when it is observed again reads it back.
     await waitFor("the s22 entry to be persisted", () => kv.peek(Persisted.cacheKey(UndraIds.Queries.remoteTodos, encodeValue(codecs.string, LIST))));
   });
 
@@ -70,7 +70,10 @@ test("S22 a trapped web core restarts from its last snapshot", async () => {
     const event = restarts[0] as UndraCoreRestarted;
     expect(event.report.message).toContain("kaboom");
     expect(event.restoredFromAgeMs, "restored from a snapshot").not.toBeNull();
-    expect(event.restoredFromAgeMs as number, "a recent snapshot").toBeLessThan(5_000);
+    // Bounded by WAIT_TIMEOUT_MS, a hang detector: the age is the runner's own time since step 1's last change (the snapshot follows
+    // a change within `snapshotEveryMs`, 50 ms; then a 200 ms sleep, the 250 ms persistence debounce and a probe call), about half a
+    // second, so a tighter bound would be about the machine. The claims are that a snapshot was restored at all, and step 4's state.
+    expect(event.restoredFromAgeMs as number, "a recent snapshot").toBeLessThan(WAIT_TIMEOUT_MS);
     expect(event.rejectedCalls).toBeGreaterThanOrEqual(1);
     expect(event.staleObjects, "the probe, which is not a store").toBeGreaterThanOrEqual(1);
     expect(runtimeErrors, "onError received the same").toEqual([event]);
@@ -79,20 +82,22 @@ test("S22 a trapped web core restarts from its last snapshot", async () => {
     expect(closed).toEqual([]);
   });
 
-  await step("4. the counter came back on its handle; the query handle was re-created; the probe is stale", async () => {
+  await step("4. the counter and the query handle came back on their handles; the probe is stale", async () => {
     const c = counter as Counter;
     expect(c.count.peek(), "restored").toBe(5);
     await c.add(1);
     await waitFor("the counter at 6", () => c.count.peek() === 6);
     const q = query as RemoteTodosQueryHandle;
-    expect(q.handle, "the query handle was re-created").not.toBe(queryHandleBefore);
+    // ADR-059: the snapshot names the query handle, so the core re-issued it under the same handle and the runtime did
+    // nothing to the wrapper but observe it again (it replaced the handle with a new one before).
+    expect(q.handle, "the query handle after the trap is the handle before it").toBe(queryHandleBefore);
     expect(q.data.peek()?.map((todo) => todo.id), "the wrapper still shows the item").toEqual([1]);
     // What the core held outside its stores (the server's address) went with the instance that trapped: the app
-    // configures the new one (ADR-049 3.5), then the re-created handle refetches.
+    // configures the new one (ADR-049 3.5), then the same handle refetches.
     await configureRemote({ baseUrl: BASE_URL }, core);
     const gets = server.count("GET", TODOS);
     await q.invalidate();
-    await waitFor("the refetch through the re-created handle", () => server.count("GET", TODOS) > gets && q.fetching.peek() === false);
+    await waitFor("the refetch through the query handle", () => server.count("GET", TODOS) > gets && q.fetching.peek() === false);
     expect(q.data.peek()?.map((todo) => todo.id)).toEqual([1]);
     const stale = await probe.counters().then(
       () => undefined,

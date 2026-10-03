@@ -52,7 +52,7 @@ use super::types::{is_std_type_name, ty_string};
 
 /// The placeholder that stands for the alias's name in a template's definition: the macro replaces
 /// it by `$__alias`.
-const ALIAS: &str = "__UNDRA_ALIAS";
+pub(crate) const ALIAS: &str = "__UNDRA_ALIAS";
 
 /// The placeholder of the type parameter `T`: the macro replaces it by `$T`.
 fn param_placeholder(param: &str) -> String {
@@ -157,7 +157,7 @@ impl VisitMut for Substitute<'_> {
 
 /// Keeps the attributes of a field or variant that an instantiation reads: documentation and the
 /// `#[undra(..)]` helpers (`default`).
-struct KeepReadable;
+pub(crate) struct KeepReadable;
 
 impl VisitMut for KeepReadable {
     fn visit_field_mut(&mut self, field: &mut syn::Field) {
@@ -176,7 +176,10 @@ impl VisitMut for KeepReadable {
 }
 
 /// `tokens` with every identifier of `replacements` replaced by its tokens.
-fn replace_idents(tokens: TokenStream, replacements: &HashMap<String, TokenStream>) -> TokenStream {
+pub(crate) fn replace_idents(
+    tokens: TokenStream,
+    replacements: &HashMap<String, TokenStream>,
+) -> TokenStream {
     tokens
         .into_iter()
         .flat_map(|tree| match tree {
@@ -255,29 +258,7 @@ pub(crate) fn template_macro(
     let instantiate = root.instantiate();
     let root_path = root.path_string();
     let crate_name = std::env::var("CARGO_CRATE_NAME").unwrap_or_default();
-    let arity = params.len();
-    let arity_message = Diag::new(
-        code::E0002,
-        format!(
-            "`{name_str}` takes {arity} type argument{} ({}), as declared with `#[undra::api(generic)]`",
-            if arity == 1 { "" } else { "s" },
-            params
-                .iter()
-                .map(|p| format!("`{p}`"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        "an instantiation names every type parameter of the template: the alias is what the schema and the platforms see",
-        format!(
-            "write all the arguments: `#[undra::api] pub type My{name_str} = {name_str}<{}>;`",
-            params
-                .iter()
-                .map(|_| "Todo")
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    )
-    .message();
+    let arity_message = arity_message(&name_str, params);
 
     quote! {
         #[doc(hidden)]
@@ -304,6 +285,34 @@ pub(crate) fn template_macro(
         #[allow(unused_imports, unreachable_pub)]
         pub use #macro_name as #name;
     }
+}
+
+/// The E0002 a template's catch-all rule raises for the wrong number of type arguments: "`Page`
+/// takes 1 type argument (`T`)".
+pub(crate) fn arity_message(name: &str, params: &[String]) -> String {
+    let arity = params.len();
+    Diag::new(
+        code::E0002,
+        format!(
+            "`{name}` takes {arity} type argument{} ({}), as declared with `#[undra::api(generic)]`",
+            if arity == 1 { "" } else { "s" },
+            params
+                .iter()
+                .map(|p| format!("`{p}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        "an instantiation names every type parameter of the template: the alias is what the schema and the platforms see",
+        format!(
+            "write all the arguments: `#[undra::api] pub type My{name} = {name}<{}>;`",
+            params
+                .iter()
+                .map(|_| "Todo")
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    )
+    .message()
 }
 
 /// The constant of an instantiation's inherent impl that names E0070: the impl of a second alias
@@ -477,6 +486,12 @@ struct Config {
     root: Option<Root>,
     docs: String,
     alias_docs: String,
+    /// `object` or `store` for a generic object (ADR-058); empty for a data type.
+    kind: String,
+    /// A generic store's block docs.
+    impl_docs: String,
+    /// A generic store's `restore = ".."` hook, or empty.
+    restore: String,
 }
 
 fn take_config(attrs: &mut Vec<syn::Attribute>) -> syn::Result<Config> {
@@ -500,6 +515,9 @@ fn take_config(attrs: &mut Vec<syn::Attribute>) -> syn::Result<Config> {
             Some("root") => config.root = Some(Root::from_lit(&lit)?),
             Some("docs") => config.docs = value,
             Some("alias_docs") => config.alias_docs = value,
+            Some("kind") => config.kind = value,
+            Some("impl_docs") => config.impl_docs = value,
+            Some("restore") => config.restore = value,
             _ => return Err(meta.error("unknown key")),
         }
         Ok(())
@@ -508,15 +526,298 @@ fn take_config(attrs: &mut Vec<syn::Attribute>) -> syn::Result<Config> {
 }
 
 /// `undra::__instantiate!`: the registration of one instantiation (see the module documentation).
+///
+/// A data type is one item; a generic object (ADR-058) is its signature-only impl block, a generic
+/// store its struct and then its block.
 pub(crate) fn expand_instantiate(input: TokenStream) -> TokenStream {
-    let item: syn::Item = match syn::parse2(input) {
-        Ok(item) => item,
+    struct Items(Vec<syn::Item>);
+    impl syn::parse::Parse for Items {
+        fn parse(input: syn::parse::ParseStream<'_>) -> syn::Result<Self> {
+            let mut items = Vec::new();
+            while !input.is_empty() {
+                items.push(input.parse()?);
+            }
+            Ok(Items(items))
+        }
+    }
+    let parsed = match syn::parse2::<Items>(input.clone()) {
+        Ok(items) => items.0,
         Err(error) => return error.to_compile_error(),
+    };
+    let object = parsed
+        .first()
+        .and_then(peek_kind)
+        .is_some_and(|kind| kind == "object" || kind == "store");
+    if object {
+        // Every token takes the hygiene of this expansion and keeps its own location: the tokens of
+        // a template reach here through one or two `macro_rules!` (the template, and for a store
+        // the hand-over from the impl block to the struct), each of which marks them differently,
+        // and the expansions bind locals (`__r`, `__e`) with one span and use them with another's.
+        // Only objects and stores are re-homed: it adds a line to the rendering of the errors of a
+        // data type's instantiation.
+        let Ok(items) = syn::parse2::<Items>(rehome(input)) else {
+            return syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "the template of a generic object did not parse",
+            )
+            .to_compile_error();
+        };
+        return match instantiate_object(items.0) {
+            Ok(tokens) => tokens,
+            Err(error) => error.to_compile_error(),
+        };
+    }
+    let Some(item) = parsed.into_iter().next() else {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "`undra::__instantiate!` takes the definition of a struct or an enum",
+        )
+        .to_compile_error();
     };
     match instantiate(item) {
         Ok(tokens) => tokens,
         Err(error) => error.to_compile_error(),
     }
+}
+
+/// The `kind` the `#[undra_instance(..)]` attribute of an item names, without taking it.
+fn peek_kind(item: &syn::Item) -> Option<String> {
+    let attrs = match item {
+        syn::Item::Struct(item) => &item.attrs,
+        syn::Item::Enum(item) => &item.attrs,
+        syn::Item::Impl(item) => &item.attrs,
+        _ => return None,
+    };
+    let attr = attrs.iter().find(|a| a.path().is_ident("undra_instance"))?;
+    let mut kind = None;
+    let _ = attr.parse_nested_meta(|meta| {
+        let lit: syn::LitStr = meta.value()?.parse()?;
+        if meta.path.is_ident("kind") {
+            kind = Some(lit.value());
+        }
+        Ok(())
+    });
+    kind
+}
+
+/// `tokens` with every token's hygiene replaced by this expansion's, keeping its location.
+fn rehome(tokens: TokenStream) -> TokenStream {
+    tokens
+        .into_iter()
+        .map(|mut tree| {
+            if let TokenTree::Group(group) = &tree {
+                let mut rebuilt =
+                    proc_macro2::Group::new(group.delimiter(), rehome(group.stream()));
+                rebuilt.set_span(group.span().resolved_at(proc_macro2::Span::call_site()));
+                return TokenTree::Group(rebuilt);
+            }
+            tree.set_span(tree.span().resolved_at(proc_macro2::Span::call_site()));
+            tree
+        })
+        .collect()
+}
+
+/// The part of the E0070 rule constant's name that says which instantiation it is: the type
+/// arguments as written, in an identifier, so that two aliases of one instantiation in one module
+/// define the same constant and two different instantiations never do.
+///
+/// The spelling is encoded one character at a time, without loss: ASCII letters and digits stand
+/// for themselves and every other character is `_` and a code (`_` is `__`, `:` is `_C`, `<` is
+/// `_L`, `>` is `_G`, `,` is `_M`, a space is `_W`, anything else `_U<hex>_`), and the arguments
+/// are joined by `_A`. An identifier cannot hold the punctuation itself, and dropping it made
+/// `Cache<A_B, C>` and `Cache<A, B_C>` (or `Vec<Todo>` and `VecTodo`) one constant, a false
+/// "declared twice". A plain name such as `Todo` reads as itself.
+pub(crate) fn rule_key<'a>(arguments: impl Iterator<Item = &'a syn::Type>) -> String {
+    let mut key = String::new();
+    for (index, ty) in arguments.enumerate() {
+        if index > 0 {
+            key.push_str("_A");
+        }
+        for c in ty_string(ty).chars() {
+            let code = match c {
+                c if c.is_ascii_alphanumeric() => {
+                    key.push(c);
+                    continue;
+                }
+                '_' => "_",
+                ':' => "C",
+                '<' => "L",
+                '>' => "G",
+                ',' => "M",
+                ' ' => "W",
+                '&' => "R",
+                '(' => "O",
+                ')' => "P",
+                '[' => "B",
+                ']' => "E",
+                ';' => "S",
+                '\'' => "Q",
+                '+' => "T",
+                '=' => "Y",
+                '*' => "K",
+                '!' => "N",
+                '-' => "D",
+                '.' => "F",
+                other => {
+                    key.push_str(&format!("_U{:x}_", u32::from(other)));
+                    continue;
+                }
+            };
+            key.push('_');
+            key.push_str(code);
+        }
+    }
+    key
+}
+
+/// The instantiation of a generic object (`impl Alias { signatures }`) or of a generic store
+/// (`struct Alias { fields }`, then the block): the ordinary object and store expansions on
+/// concrete tokens, under the alias's name, without the items themselves.
+fn instantiate_object(items: Vec<syn::Item>) -> syn::Result<TokenStream> {
+    instantiate_object_in(
+        items,
+        &std::env::var("CARGO_CRATE_NAME").unwrap_or_default(),
+    )
+}
+
+/// [`instantiate_object`] for the crate called `here`, for the tests of `src/tests`.
+#[cfg(test)]
+pub(crate) fn instantiate_object_in_for_tests(
+    items: Vec<syn::Item>,
+    here: &str,
+) -> syn::Result<TokenStream> {
+    instantiate_object_in(items, here)
+}
+
+/// [`instantiate_object`] for the crate called `here` (empty: not known, nothing is compared).
+fn instantiate_object_in(items: Vec<syn::Item>, here: &str) -> syn::Result<TokenStream> {
+    use super::object::{ImplMode, ObjectInstance};
+    use super::store::StoreMode;
+
+    // The type arguments come last, as a type alias of a tuple (see `object_template`).
+    let mut items = items;
+    let arguments = match items.pop() {
+        Some(syn::Item::Type(item)) if item.ident == "__UndraInstanceArgs" => match *item.ty {
+            syn::Type::Tuple(tuple) => rule_key(tuple.elems.iter()),
+            _ => String::new(),
+        },
+        Some(other) => {
+            items.push(other);
+            String::new()
+        }
+        None => String::new(),
+    };
+    let mut items = items.into_iter();
+    let Some(mut first) = items.next() else {
+        return Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "`undra::__instantiate!` takes the definitions of a generic object or store",
+        ));
+    };
+    let (config, alias) = match &mut first {
+        syn::Item::Struct(item) => (take_config(&mut item.attrs)?, item.ident.clone()),
+        syn::Item::Impl(item) => {
+            let config = take_config(&mut item.attrs)?;
+            let alias = match &*item.self_ty {
+                syn::Type::Path(path) if path.path.segments.len() == 1 => {
+                    path.path.segments[0].ident.clone()
+                }
+                other => {
+                    return Err(syn::Error::new_spanned(
+                        other,
+                        "the template of a generic object writes `impl Alias`",
+                    ));
+                }
+            };
+            (config, alias)
+        }
+        other => {
+            return Err(syn::Error::new_spanned(
+                other,
+                "`undra::__instantiate!` takes the definitions of a generic object or store",
+            ));
+        }
+    };
+    // The impls of an instantiation are only legal in the crate of its template.
+    if !config.crate_name.is_empty() && !here.is_empty() && config.crate_name != here {
+        let mut diag = foreign_alias_diag(&alias, &config.template, &config.crate_name, here);
+        diag.help = format!(
+            "declare the alias next to the template, in `{}`, and use it from here; or write the object out in this crate, with an `#[undra::api]` impl block of its own",
+            config.crate_name
+        );
+        return Err(diag.at(alias.span()));
+    }
+    let docs = if config.alias_docs.is_empty() {
+        config.docs.clone()
+    } else {
+        config.alias_docs.clone()
+    };
+    let store = config.kind == "store";
+    let mut out = TokenStream::new();
+    // A second alias of the same instantiation in the same module defines this constant again:
+    // `rustc` reports the repeated name before it gets to what the two instantiations conflict on.
+    {
+        let mut rule = format_ident!(
+            "_undra_error_{}_this_instantiation_of_{}_{}_is_declared_twice_keep_one_alias_per_instantiation",
+            code::E0070,
+            config.template,
+            arguments
+        );
+        rule.set_span(alias.span());
+        out.extend(quote::quote_spanned! {alias.span()=>
+            #[doc(hidden)]
+            #[allow(non_upper_case_globals, dead_code)]
+            const #rule: () = ();
+        });
+    }
+    if store {
+        let syn::Item::Struct(mut definition) = first else {
+            unreachable!("a store's template writes its struct first");
+        };
+        definition.attrs.push(syn::parse_quote!(#[doc = #docs]));
+        let hook = if config.restore.is_empty() {
+            None
+        } else {
+            Some(syn::parse_str::<syn::Path>(&config.restore)?)
+        };
+        out.extend(super::store::expand_store_as(
+            config.root.clone(),
+            hook,
+            definition,
+            StoreMode::Instance(&config.template),
+        )?);
+        let Some(syn::Item::Impl(mut block)) = items.next() else {
+            unreachable!("a store's template writes its impl block second");
+        };
+        let block_docs = config.impl_docs.clone();
+        block.attrs.push(syn::parse_quote!(#[doc = #block_docs]));
+        let instance = ObjectInstance {
+            template: config.template.clone(),
+            plain: false,
+        };
+        out.extend(super::object::expand_impl_as(
+            config.root,
+            true,
+            block,
+            ImplMode::Instance(&instance),
+        )?);
+    } else {
+        let syn::Item::Impl(mut block) = first else {
+            unreachable!("an object's template writes its impl block");
+        };
+        block.attrs.push(syn::parse_quote!(#[doc = #docs]));
+        let instance = ObjectInstance {
+            template: config.template.clone(),
+            plain: true,
+        };
+        out.extend(super::object::expand_impl_as(
+            config.root,
+            false,
+            block,
+            ImplMode::Instance(&instance),
+        )?);
+    }
+    Ok(out)
 }
 
 fn instantiate(item: syn::Item) -> syn::Result<TokenStream> {

@@ -1,0 +1,8 @@
+error: error[undra::E0001]: `&str` cannot cross the boundary
+         = note: references have no wire representation; every value crosses by copy
+         = help: use an owned `String`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0001_generic_object_signatures.rs:28:32
+   |
+28 |     pub fn rename(&self, name: &str) {}
+   |                                ^^^^

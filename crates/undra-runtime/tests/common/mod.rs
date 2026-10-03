@@ -349,6 +349,7 @@ const fn method(
         takes_ctx: false,
         coalesce: false,
         docs: "",
+        generic: None,
     }
 }
 
@@ -558,6 +559,7 @@ const fn function(
         takes_ctx: false,
         docs: "",
         dispatch: functions_dispatch,
+        generic: None,
     }
 }
 

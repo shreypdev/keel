@@ -1,4 +1,6 @@
-import { UndraError, UndraSchemaMismatchError, UndraSessionLostError, UndraTransportError } from "../errors.js";
+import type { LoadOptions } from "../core.js";
+import { UndraError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
+import { UndraSessionLostError } from "../errors-rare.js";
 import { errorMessage, hostPlatform } from "../platform.js";
 import { RUNTIME_VERSION } from "../version.js";
 import {
@@ -14,7 +16,9 @@ import {
   encodeHello,
   encodePortReply,
 } from "../wire/index.js";
-import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
+import { framed } from "./framed.js";
+import type { CoreTransport, PortOutcome, Transport, TransportHandler } from "./transport.js";
+import { msg } from "../messages.js";
 
 /** The parts of the WebSocket API this transport uses (a browser `WebSocket`, Node 22's global, or a test double). */
 export interface WebSocketLike {
@@ -195,7 +199,7 @@ export class RemoteTransport implements Transport {
     return new Promise<HelloPayload>((resolve, reject) => {
       const Socket = this.#options.webSocket ?? (globalThis as { WebSocket?: WebSocketFactory }).WebSocket;
       if (Socket === undefined) {
-        reject(new UndraTransportError("unsupported", "this platform has no WebSocket; pass `webSocket` to use another implementation"));
+        reject(new UndraTransportError("unsupported", msg(175)));
         return;
       }
       const url = this.#options.url;
@@ -203,7 +207,7 @@ export class RemoteTransport implements Transport {
       try {
         socket = new Socket(this.#urlFor(resume));
       } catch (error) {
-        reject(new UndraTransportError("handshake", `could not connect to ${url}: ${errorMessage(error)}`, { cause: error }));
+        reject(new UndraTransportError("handshake", msg(176, url, errorMessage(error)), { cause: error }));
         return;
       }
       socket.binaryType = "arraybuffer";
@@ -236,13 +240,13 @@ export class RemoteTransport implements Transport {
             }),
           );
         } catch (error) {
-          abort(new UndraTransportError("handshake", `could not send Hello: ${errorMessage(error)}`, { cause: error }));
+          abort(new UndraTransportError("handshake", msg(177, errorMessage(error)), { cause: error }));
         }
       };
       const onMessage = (event: Event): void => {
         const data = (event as MessageEvent).data as unknown;
         if (!(data instanceof ArrayBuffer)) {
-          const error = new UndraTransportError("protocol", "the core sent a text message; Undra speaks binary envelopes");
+          const error = new UndraTransportError("protocol", msg(178));
           if (settled) this.#fail(error);
           else abort(error);
           return;
@@ -260,7 +264,7 @@ export class RemoteTransport implements Transport {
       };
       const onClose = (event: Event): void => {
         const { code, reason } = event as CloseEvent;
-        const detail = `the connection to ${url} closed (code ${String(code)}${reason ? `: ${reason}` : ""})`;
+        const detail = msg(179, url, String(code), reason ? `: ${reason}` : "");
         if (code === SESSION_LOST) {
           const lost = new UndraSessionLostError(reason || undefined);
           if (settled) this.#fail(lost);
@@ -268,14 +272,14 @@ export class RemoteTransport implements Transport {
           return;
         }
         if (settled) this.#fail(new UndraTransportError("closed", detail));
-        else abort(new UndraTransportError("handshake", `${detail} before the core answered Hello`));
+        else abort(new UndraTransportError("handshake", msg(180, detail)));
       };
       const onError = (): void => {
         // A `close` event follows and carries the details; only an error that
         // is never followed by one (a failed connect in some runtimes) needs handling here.
         if (!settled && socket.readyState !== OPEN) {
           queueMicrotask(() => {
-            if (!settled) abort(new UndraTransportError("handshake", `could not connect to ${url}`));
+            if (!settled) abort(new UndraTransportError("handshake", msg(181, url)));
           });
         }
       };
@@ -291,7 +295,7 @@ export class RemoteTransport implements Transport {
       };
       if (timeoutMs > 0) {
         timer = setTimeout(() => {
-          abort(new UndraTransportError("timeout", `${url} did not complete the Hello exchange within ${timeoutMs} ms`));
+          abort(new UndraTransportError("timeout", msg(182, url, timeoutMs)));
         }, timeoutMs);
       }
     });
@@ -301,7 +305,7 @@ export class RemoteTransport implements Transport {
     if (!this.#open || this.#socket === null) {
       throw new UndraTransportError(
         "closed",
-        this.#closed ? "the connection is closed" : this.#policy === null ? "the core is not connected" : "the core is not connected: reconnecting",
+        this.#closed ? msg(183) : this.#policy === null ? msg(184) : msg(185),
       );
     }
     this.#post(kind, payload);
@@ -340,7 +344,7 @@ export class RemoteTransport implements Transport {
       // Not judged by the header: a mismatch must be readable to be reported.
       const envelope = decodeEnvelope(bytes);
       if (envelope.kind !== Kind.Hello) {
-        abort(new UndraTransportError("handshake", `expected Hello from the core, got ${Kind[envelope.kind] ?? String(envelope.kind)}`));
+        abort(new UndraTransportError("handshake", msg(186, Kind[envelope.kind] ?? String(envelope.kind))));
         return;
       }
       const hello = decodeHello(envelope.payload);
@@ -350,7 +354,7 @@ export class RemoteTransport implements Transport {
       }
       done(hello);
     } catch (error) {
-      abort(new UndraTransportError("handshake", `bad Hello from the core: ${errorMessage(error)}`, { cause: error }));
+      abort(new UndraTransportError("handshake", msg(187, errorMessage(error)), { cause: error }));
     }
   }
 
@@ -443,7 +447,7 @@ export class RemoteTransport implements Transport {
       } else if (error instanceof UndraError) {
         this.#fail(error);
       } else {
-        this.#fail(new UndraTransportError("protocol", `bad message from the core: ${errorMessage(error)}`, { cause: error }));
+        this.#fail(new UndraTransportError("protocol", msg(188, errorMessage(error)), { cause: error }));
       }
     }
   }
@@ -456,4 +460,24 @@ export class RemoteTransport implements Transport {
       this.#post(Kind.PortReply, encodePortReply({ portCallId, status: PortStatus.Unavailable, body: new Uint8Array(0) }));
     }
   }
+}
+
+/**
+ * The transport `UndraCore.load` makes for `mode: "remote"` (ADR-057): this module maps the options and checks the one its mode
+ * needs, so a page that never asks for it does not carry them, and hands the core the transport already framed, so the adapter
+ * that frames its messages arrives in the same fetch wave as this module.
+ */
+export function remoteTransport(options: LoadOptions): CoreTransport {
+  if (options.url === undefined) throw new UndraError("options", msg(189));
+  return framed(
+    new RemoteTransport({
+      url: options.url,
+      expectedSchemaHash: options.expectedSchemaHash,
+      ...(options.platform !== undefined && { platform: options.platform }),
+      ...(options.devtools !== undefined && { devtools: options.devtools }),
+      ...(options.webSocket !== undefined && { webSocket: options.webSocket }),
+      ...(options.handshakeTimeoutMs !== undefined && { handshakeTimeoutMs: options.handshakeTimeoutMs }),
+      ...(options.reconnect !== undefined && { reconnect: options.reconnect }),
+    }),
+  );
 }

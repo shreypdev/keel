@@ -1,12 +1,13 @@
 # Contract scenarios
 
-This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): thirty-three
-scenarios against the **real playground core** (`examples/playground/core`, the same Rust crate the
-apps run), through the real boundary. S01 to S20 and S23 to S33 run on every platform; S21 and S22 are about
+This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): thirty-five
+scenarios (S01 to S35) against the **real playground core** (`examples/playground/core`, the same Rust crate the
+apps run), through the real boundary. S01 to S20 and S23 to S35 run on every platform; S21 and S22 are about
 the web host (worker mode and crash recovery, ADR-049) and run on TypeScript only. S23 to S25 are the opt-in
 ports of ADR-047 and ADR-048; S26 is ADR-044's, S27 ADR-040's and S28 ADR-041's; S29 and S30 are ADR-046's
-(panic reports and background runs); S31 is ADR-042's (newtypes, generic instantiations, leaf types) and S32 and
-S33 are ADR-043's (paged queries and lazy lists, polling):
+(panic reports and background runs); S31 is ADR-042's (newtypes, generic instantiations, leaf types), S32 and
+S33 are ADR-043's (paged queries and lazy lists, polling), S34 is ADR-058's (generic functions, objects and stores)
+and S35 is ADR-059's (query handles across a restore):
 
 | Platform | Runner | Boundary under test |
 |---|---|---|
@@ -15,9 +16,10 @@ S33 are ADR-043's (paged queries and lazy lists, polling):
 | Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI table of the real core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
-`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20 and S23 to S33, plus
-S21 and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 95
-cells: 31 on Swift, 31 on Kotlin, 33 on TypeScript.
+`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20 and S23 to S35, plus
+S21 and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 101
+cells: 33 on Swift, 33 on Kotlin, 35 on TypeScript. The React Native column (`runtimes/rn`, the TypeScript scenarios
+over its model of the native module) runs S34 and S35 too.
 
 ## The harness (the same on every platform)
 
@@ -50,19 +52,20 @@ everything a UI would use and the runtime's own API (`UndraCore`) for what bindi
   /lists/L/todos` (body `{"title":..}`, answer 201 with the created object) and `PATCH
   /lists/L/todos/ID` (body `{"done":..}`, answer 200 with the object). `Idempotency-Key` is sent on
   POST.
-* **Two builds** (S14 steps 7 to 9, S15 steps 11 to 14; ADR-037). The runner also builds the
+* **Two builds** (S14 steps 7 to 9, S15 steps 11 to 14, S35 step 10; ADR-037, ADR-059). The runner also builds the
   playground core a second time, as **build B**: `UNDRA_PLAYGROUND_V2=1 undra build ...` (the core's
   `build.rs` turns it into `cfg(playground_v2)`; see `examples/playground/core/src/updates.rs` for what
   changes), and keeps that artefact apart from build A's. Build B has no generated bindings: the runner
   loads it with the hash the core reports (`undra_schema_hash`) and drives it through the raw API with
   the ids it knows (`Profile.new` / `Profile.describe` / `Legacy.new`, the mutation ids of `save_note` and
   `tag_note`, the function `storage_status`, whose `StorageStatus` record has the same layout in both
-  builds). TypeScript loads build B in the same process; Swift and Kotlin load one core per process, so
+  builds; for S35 the query handle types and their method ids, `configure_remote`, `Library`'s `books`).
+  TypeScript loads build B in the same process; Swift and Kotlin load one core per process, so
   they run the build-B steps in a **second process** (Swift: the same test bundle relaunched with build
   B's library in place of build A's; Kotlin: a second JVM with build B's library), handing over the `Kv`
-  contents and the snapshots in a file. The build-B process prints only `SCENARIO S14 FAIL ...` /
-  `SCENARIO S15 FAIL ...` lines (never `PASS`), so `check.sh`, which reads the last line of an id, fails
-  the scenario if build B fails and keeps build A's `PASS` otherwise.
+  contents, the snapshots and the handles in a file. The build-B process prints only `SCENARIO S14 FAIL ...` /
+  `SCENARIO S15 FAIL ...` / `SCENARIO S35 FAIL ...` lines (never `PASS`), so `check.sh`, which reads the last line
+  of an id, fails the scenario if build B fails and keeps build A's `PASS` otherwise.
 * **Waiting.** Anything asynchronous is awaited with a **5 second timeout** (polling every 10 ms or
   using the runtime's own wait), never with a bare sleep, except where a scenario says "for 200 ms
   nothing happens".
@@ -132,7 +135,9 @@ waiting for an event loop.
 
 ### S04 async call
 
-1. `add_later(20, 22, 50)` resolves to `42` after at least 45 ms and less than 2 s.
+1. `add_later(20, 22, 50)` resolves to `42` after at least 45 ms, and within the 5 s wait (a hang detector: a timer
+   that never fires is what it catches; how long after 50 ms the answer comes is the machine's, and step 2's order is
+   the claim that the delays are honoured).
 2. Three concurrent calls `add_later(i, 0, d)` with `(i, d) = (1, 400), (2, 50), (3, 200)` resolve
    in delay order `2, 3, 1` and with the right values (the delays are 150 ms apart on purpose: a stalled
    runner must not be able to reorder them).
@@ -180,7 +185,8 @@ waiting for an event loop.
 6. A cancelled call of a method **with a typed error**: start `fail_later(5000, 1)`, wait 100 ms,
    cancel it. The platform call ends as cancelled exactly as in step 2 (Swift `CancellationError`, not
    a `LabError` and not a stopped process; Kotlin `CancellationException`; TypeScript the signal's
-   reason), within 1 s; `crossings.cancelled` grew by 1; `add(1, 1) == 2` afterwards.
+   reason), in under half of the call's own 5 s delay (2.5 s after the cancel; a cancel that waited for the core's
+   answer would end 4.9 s after it); `crossings.cancelled` grew by 1; `add(1, 1) == 2` afterwards.
 
 ### S07 stream with backpressure
 
@@ -193,7 +199,8 @@ waiting for an event loop.
    normally, and `produced == 1000`.
 4. Early termination: open `probe.ticks(1000000)`, read 3 items, cancel/stop the iteration (TypeScript
    `break` out of `for await`, Kotlin cancel the collector, Swift `break` or cancel the task);
-   within 1 s `open_streams` is back to its earlier value and `produced` stays below 200.
+   `open_streams` is back to its earlier value (within the 5 s wait, a hang detector: a stream that was not cancelled
+   stays open) and `produced` stays below 200.
 5. A short stream ends: `ticks(3)` yields `0,1,2` and completes; `ticks(0)` completes with no items.
 6. A typed error part-way (ADR-036: `impl Stream<Item = Result<T, E>>`, flag 2 carries only the
    stream's own `E`): `probe.ticks_then_fail(5, 3, 7)` yields `0,1,2` and then fails with the
@@ -205,8 +212,9 @@ waiting for an event loop.
    `restore` the snapshot. The probe is not a store, so the restore invalidates it and ends the stream:
    the iteration fails as **cancelled by the core** (`UndraCallError.cancelledByCore` in Swift,
    `UndraCallError.CancelledByCore` in Kotlin and TypeScript), not as a `LabError` and
-   not as a wire decode error (Kotlin `WireException`, TypeScript `WireError`), within 1 s; `open_streams`
-   is back to its value before the step. Close the probe.
+   not as a wire decode error (Kotlin `WireException`, TypeScript `WireError`), within the 5 s wait (a hang
+   detector: the restore ends the stream while it runs, on no timer, and a stream it did not end would stay open or
+   end with its own error); `open_streams` is back to its value before the step. Close the probe.
 
 ### S08 store observe: initial change-set
 
@@ -316,7 +324,9 @@ queue, S20 step 4; the client reads it again after a backoff of about a second).
    `create_remote_todo("s14", "Offline item")` is started and **does not finish**: for 200 ms it is
    still pending; the server saw exactly 1 POST; the handle's `data` shows the placeholder.
 3. A **non-idempotent** mutation does not queue: `set_remote_done("s14", 1, true)` with the PATCH route
-   failing the same way fails **at once** with `RemoteError.Http(HttpError.Network("offline"))`.
+   failing the same way fails **at once** with `RemoteError.Http(HttpError.Network("offline"))`: the server saw one
+   PATCH for it, so the error is the first attempt's and not a retry's after its backoff (counted, not timed: the time
+   is bounded only by the 5 s wait, a hang detector; a queued mutation never fails while offline, as step 2 shows).
 4. POST is now scripted to answer `201 {"id":9,"title":"Offline item","done":false}` and the list
    route to `[{"id":9,...}]`. The test emits `Connectivity.changed(online=true, kind=Wifi)`.
 5. The pending `create_remote_todo` **resolves** to `RemoteTodo(9,"Offline item",false)`; the server saw
@@ -361,8 +371,9 @@ queue, S20 step 4; the client reads it again after a backoff of about a second).
    leaves every store as it was (TypeScript and Swift: `UndraRestoreError`, whose code is the core's, 5 for
    a malformed snapshot; the core is not closed and the next call works).
 7. A handle released **before** the snapshot is not resurrected.
-8. Stats: `live_handles` after the restore equals the count of surviving stores (the restore creates
-   no extra handles).
+8. Stats: `live_handles` after the restore equals the count of surviving stores, plus the query handles
+   that were live (a restore re-issues none that the snapshot does not name, and creates no handle of its
+   own; S35 is the scenario about those).
 9. A call in flight across a restore. `Probe` = new; start `probe.hang()`; wait until
    `counters().started == 1`; take a snapshot; `restore` it. The probe is not a store, so the restore
    invalidates it and cancels its call: `hang()` fails as **cancelled by the core** (Swift
@@ -435,8 +446,9 @@ queue, S20 step 4; the client reads it again after a backoff of about a second).
 6. Shutdown with a typed call in flight (it ends the core). Start
    `fail_later(5000, 1)`, wait 100 ms, shut the core down: the call fails as **closed** (Swift
    `UndraCallError.unavailable(.closed)`, Kotlin `UndraCallError.Unavailable` with transport reason `CLOSED`)
-   within 1 s. Then, on the shut-down core, the generated `add(1, 2)` fails the same way and
-   `Counter.increment()` on a store of that core returns (`onError` received `Unavailable`, closed). The
+   in under half of the call's own 5 s delay (2.5 s after the shutdown; a shutdown that left the call to its timer
+   would fail it 4.9 s later, or never). Then, on the shut-down core, the generated `add(1, 2)` fails the same
+   way and `Counter.increment()` on a store of that core returns (`onError` received `Unavailable`, closed). The
    shut-down core is no longer the shared one: `UndraCore.current` is nil/null, and a generated constructor
    with the default core fails as in S16.5. The process is alive.
 7. Closing ends the core's work, and a new load starts fresh (ADR-034; the last step of the run). Before
@@ -588,13 +600,15 @@ playground's `Locale` port (`hello()` answers `"Hola"`).
    `UndraTransportError("restarted")` (through generated code: `UndraCallError.Unavailable` whose transport reason is
    `"restarted"`), never retried.
 3. Within 5 s `onCoreRestarted` was called once with the panic report (message containing `kaboom`), a
-   `restoredFromAgeMs` under a few seconds, `rejectedCalls >= 1` and the stale objects; `onError` received an
-   `UndraCoreRestarted` with the same.
+   `restoredFromAgeMs` that is not null and under the 5 s wait (a hang detector: the age is the runner's own time
+   since step 1's last change, about half a second, so a tighter bound would be about the machine),
+   `rejectedCalls >= 1` and the stale objects; `onError` received an `UndraCoreRestarted` with the same.
 4. The same `Counter` wrapper shows `count == 5` (restored, same handle) and `add(1)` makes it 6; the
-   `remote_todos("s22")` handle was re-created (its wrapper still shows the item and, after the runner calls
-   `configure_remote` again, since configuration is core state outside stores and is lost with the instance
-   that trapped, `invalidate()` refetches through it); the `Probe` (not a store) is stale and fails with a typed
-   refusal.
+   `remote_todos("s22")` handle is **the handle it was before the trap** (the snapshot kept what it is made
+   of and the core re-issued it, ADR-059; the runtime runs no code of its own for it): its wrapper still shows
+   the item and, after the runner calls `configure_remote` again, since configuration is core state outside
+   stores and is lost with the instance that trapped, `invalidate()` refetches through it; the `Probe` (not a
+   store) is stale and fails with a typed refusal.
 5. Three more `explode` calls within the minute: the third restart is the last; the fourth trap leaves the core
    dead: `onClose` reports the trap, `onCoreRestarted` was called 3 times in all, and calls fail as unavailable
    (`closed`).
@@ -621,8 +635,9 @@ core's side is `ws_echo` and the `Live` object of `examples/playground/core/src/
    platform reports it: Swift, Kotlin and Node do); `live.connect("WS/ws/close?code=4001&reason=kicked")`,
    `read(1)` is `["hello"]`, `read(1)` fails with `Closed(4001, "kicked")`; `live.connect("WS/ws/drop")`,
    `read(1)` is `["hello"]`, `read(1)` fails with `WsError.Network`.
-5. A connection nobody closes: `live.connect("WS/ws/stall")`, `live.abandon()`: within 1 s the server saw the
-   client close with **1001** (going away).
+5. A connection nobody closes: `live.connect("WS/ws/stall")`, `live.abandon()`: the server saw the client close
+   with **1001** (going away), within the 5 s wait (a hang detector: the port closes a dropped connection fire and
+   forget, on no timer, so one that did not would leave it open).
 
 ### S24 server-sent events (ADR-047)
 
@@ -638,8 +653,9 @@ The opt-in `Sse` port through the platform's default adapter (Swift `URLSession.
 2. Resume: `sseFollow("HTTP/sse/feed", "2", 10)` returns `ended = true` and the events after id 2 (`three` with
    id `"2"`, `four` with id `"4"`); the server saw `Last-Event-ID: 2`.
 3. A reader that stops: `sseFollow("HTTP/sse/feed", null, 2)` returns two events and `ended = false`;
-   `sseFollow("HTTP/sse/hang", null, 0)` returns no event and `ended = false`, and within 1 s the server saw the
-   client leave.
+   `sseFollow("HTTP/sse/hang", null, 0)` returns no event and `ended = false`, and the server saw the client leave,
+   within the 5 s wait (a hang detector: the server never ends `/sse/hang`, and the port leaves it when the core
+   closes the subscription, on no timer).
 4. Typed failures: `HTTP/sse/status?code=204` and `?code=500` fail with `SseError.Refused` with that status;
    `HTTP/sse/html` fails with `SseError.Protocol`.
 
@@ -769,12 +785,14 @@ with the stores' state as seen at each call. `UndraCore.callbacks` (the registry
 4. **Cancellation reaches the host task.** `w.run(1, rep)` with a `confirm` that waits until cancelled (it
    records that its task / job / signal was cancelled) is started, and the call is cancelled: the host's
    `confirm` observes cancellation (Swift `Task.isCancelled` / `CancellationError`, Kotlin `Job` cancelled,
-   TypeScript the method's `AbortSignal` aborted) within 1 s; a `confirm` answer that arrives late is
-   discarded; no `ReportError` leaks; the registry still holds the instance until the proxy is gone.
+   TypeScript the method's `AbortSignal` aborted) within the 5 s wait (a hang detector: `confirm` waits for its
+   cancellation and nothing else, so one that never reached it would leave it waiting); a `confirm` answer that
+   arrives late is discarded; no `ReportError` leaks; the registry still holds the instance until the proxy is gone.
 5. **Interning and the registry.** `w.watch(rep)` twice with the same `rep`: one instance handle
    (`callbacks.lend` returned equal handles), the registry count for `rep` is 2 after the crossings and **1**
    once the core gave the duplicate back (`__release`), and `w.watching() == 2` (two subscriptions, one
-   proxy). Closing both `Watch`es: the core dropped the last proxy, the registry is **empty** within 1 s, and
+   proxy). Closing both `Watch`es: the core dropped the last proxy, the registry is **empty** (within the 5 s wait,
+   a hang detector: a proxy the core did not drop holds its reference for good), and
    `rep` is no longer held (a weak reference to it clears after a GC).
 6. **`coalesce` delivers only the newest per drain.** `w.burst(50, rep)` called while the runner holds the
    frame (the mirror's drain is not run): when it runs, `rep.progress` is called **once**, with `(50, 50)`,
@@ -836,10 +854,19 @@ server serves `[]`; a handle observes it.
 1. **Offline work is pending.** `Connectivity.changed(online=false, kind=None)`; POST `/lists/s30/todos` fails with
    `HttpError.Network("offline")`; `create_remote_todo("s30", "Queued")` is started and stays pending
    (`storage_status().pending == 1`). `stats().background.tasks >= 3` and `stats().background.pending >= 1`: the
-   platform can tell that a window is worth asking for. Emitting `Lifecycle.changed(Background)` writes the
-   persisted cache entry of the list at once (the Kv holds a key starting `undra.query.cache2.` within 100 ms, not
-   250 ms later).
-2. **Still offline, the run says so and does not wait.** `runInBackground(5 s)` returns in under 1 s with
+   platform can tell that a window is worth asking for. Emitting `Lifecycle.changed(Background)` writes a cache
+   entry that waits out its 250 ms persistence debounce at once, not when the debounce fires. Shown against the
+   debounce's own clock: once the first fetch's entry has been written (its own debounce waited out), the server
+   serves the list with new contents (`[{"id":1,"title":"Server <n>","done":false}]`) and the handle refetches it,
+   which makes the entry dirty and arms its debounce after an instant `armed` read just before; after `Background`
+   the Kv holds a new write of the list's key (`undra.query.cache2.<query id>.<fnv1a64 of the argument>`) less than
+   240 ms after `armed` (10 ms short of the debounce, for the clocks' granularity), which no debounce armed after
+   `armed` can have written. A trial in which the machine was slower than that (the key written before
+   `Background`, or seen 240 ms or more after `armed`) proves nothing and is repeated with the next `n`, up to five
+   times; a core that leaves the entry to its debounce fails all five. Then `Lifecycle.changed(Active)`, and the
+   server serves `[]` again.
+2. **Still offline, the run says so and does not wait.** `runInBackground(5 s)` returns in under half its deadline
+   (2.5 s; a run that waited would return at the deadline less the half second kept for the host, 4.5 s) with
    `finished == false`, `replayed == 0`, `stillPending >= 1`; the item is still queued.
 3. **Online, the run drains the queue.** POST answers `201 {"id":9,"title":"Queued","done":false}` after a delay of
    400 ms. `Connectivity.changed(online=true, kind=Wifi)` starts the replay; `runInBackground(10 s)` started
@@ -847,14 +874,17 @@ server serves `[]`; a handle observes it.
    pending `create_remote_todo` resolved; the server saw 2 POSTs with the same `Idempotency-Key`.
 4. **A run cut at its deadline leaves the work intact.** Offline again; `create_remote_todo("s30", "Slow")` queued
    (`pending == 1`); POST answers `201 {...}` after 5 s; online. `runInBackground(1 s)` returns in about
-   500 ms (the deadline less the half second kept for the host), **not later than 900 ms**, with
+   500 ms (the deadline less the half second kept for the host): after more than 300 ms, and **less than 400 ms after
+   a 500 ms timer armed beside the call** (a machine that is slow fires both late; a run that kept no half second or
+   waited for the POST ends 500 ms or more after it), with
    `finished == false`, `replayed == 0`, `stillPending == 1`: the replay in flight is the client's, not the run's, so
    the item is still queued (`pending == 1`, the Kv queue key still holds it) and **nothing is sent twice**; within
    10 s the POST answers, `pending == 0`, and the server saw exactly one POST for it after the failed one, with the
    same `Idempotency-Key`.
 5. **A host that cancels the call.** `runInBackground(30 s)` while a replay is held (offline, then online with a
    POST that answers after 3 s) is cancelled after 100 ms (Swift: the `Task` is cancelled, Kotlin: the coroutine,
-   TypeScript: the `AbortSignal`): the call fails with the platform's cancellation, the core keeps working
+   TypeScript: the `AbortSignal`): the call fails with the platform's cancellation, without waiting for the replay in
+   flight (Kotlin checks the held creation is still unanswered when the cancel returns), the core keeps working
    (`add(1, 2) == 3`) and the queue is intact (`pending == 1` until the POST answers, then 0).
 6. **Counters.** `stats().background.runs == 4`, `.finished == 1`, `.replayed == 1`.
 
@@ -932,6 +962,79 @@ transport the runner loads, TypeScript counts `Kind.Call` payloads whose first b
    returns to the query's own second.
 6. **The last observer stops it.** After the handle is closed `ticker_fetches()` does not move for 2.5 s.
 
+### S34 generic functions, objects and stores (ADR-058)
+
+`selection` (`examples/playground/core/src/selection.rs`): the generic functions `newest` and `draft`, each listed for `Todo` and `Note`, the
+generic store `Selection<T>` (the aliases `TodoSelection` and `NoteSelection`: two stores, two type ids) and the generic object `Recent<T>` (the
+alias `RecentTodos`, returned by `recent_todos`). Every step goes through the **generated** API (the raw API where a step says so). The
+platforms spell a generic function as overloads (Swift `newest(rows:)`, `draft(Todo.self, title:)`; Kotlin `newest(rows)`, `draft(Todo::class, title)`;
+TypeScript `newest("Todo", rows)`, `draft("Todo", title)`); the rows of the steps have the identities named by their counter (a to-do's `Uuid` holds it in
+its first eight bytes, big-endian; a note's `id` is it).
+
+1. **A generic function is one function per type.** `newest` of the to-dos with counters 5, 9 and 7 is the one with counter 9; of the notes with
+   counters 2 and 1 it is the one with counter 2 (a `Note`, not a `Todo`); of an empty list of either type it is nothing.
+2. **A type that no argument names is named by the caller.** `draft(Todo.self, "first")` and a second `draft` of the same type return rows
+   titled as asked, not done, with different ids; `draft(Note.self, "a note")` returns a `Note`; `newest` of the two drafts is the second.
+3. **Two instantiations are two stores.** `TodoSelection` and `NoteSelection` have different handles and different type ids
+   (`UndraIds.Objects.<Name>.typeId`). Toggling a to-do on the to-do selection delivers one change-set whose `rows` entry is a keyed patch of one
+   `Insert` (and whose `count` entry follows), and **nothing** to the note selection; toggling it again delivers one `Remove`; toggling a note
+   delivers one `Insert` to the note selection and nothing to the to-do one.
+4. **Snapshot and restore keep both.** With two to-dos ticked on a `TodoSelection` and one note on a `NoteSelection`, `snapshot`, then clear the
+   first and tick another note, then `restore`: both stores keep their handles and show the snapshot's rows and counts (2 and 1), and keep
+   working, each on its own rows.
+5. **An id that names no instantiation is refused.** A raw free-function call with `fnv1a32("fn.newest<Draft>")` fails as a bad request (status 5;
+   Swift `UndraCallError.refused`, Kotlin `UndraCallError.Refused`; TypeScript `UndraReplyError`), the core is unharmed, and the ids of the
+   instantiations that exist are `fnv1a32("fn.newest<Todo>")` and `fnv1a32("fn.newest<Note>")`.
+6. **A generic object returned from a function is the alias's class.** `recent_todos([1, 2, 3], 2)` is a `RecentTodos` whose `rows()` are the
+   to-dos with counters 3 and 2 and whose `latest()` is the one with 3; `open` of the one with 2 puts it first; a second `recent_todos([], 5)` is another
+   wrapper with no rows, and closing it leaves the first working.
+
+### S35 query handles across a restore (ADR-059)
+
+A query handle is a view of the query cache, so a snapshot keeps what it is made of (the query's parameters
+and the polling interval its observer set for itself) instead of a store's values, and a restore re-issues the
+handle under the **same value**: the app's wrapper keeps working with no code of its own, after a time travel,
+an app's own `core.restore`, a dev reload and a web crash restart. The object behind a re-issued handle is built
+when the host first uses it. Steps 1 to 9 restore into the runtime that holds the handles, through the generated
+bindings; step 10 restores into a **fresh runtime** (build B, "Two builds"; the query `roster` of
+`examples/playground/core/src/updates.rs` changes its parameter from `u32` to `String`, `remote_todos` and `ticker`
+do not change) through the raw API with the ids it knows. The server serves `GET /lists/s35/todos`.
+
+1. **Opening.** `live_handles` is read first. `remote_todos("s35")` shows the server's one item (milk);
+   `TickerQueryHandle()` is observed and has ticked; `FeedQueryHandle(evenOnly: false)` has two pages (100 rows);
+   `Library()` has read `books[0]`; `RosterQueryHandle(7)` is observed (the handle whose query build B changes);
+   a `Counter` has `add(5)`; a `Probe` exists.
+2. **The snapshot, a change and a restore.** `snapshot`; `Counter.add(10)`; the server now answers two items
+   (milk and dog); `restore(snapshot)`.
+3. **Same wrappers, nothing blinked.** The counter shows 5; the remote handle's wrapper is the same object with
+   the same handle value; the entries the mirror applied to the remote and feed wrappers during the restore are
+   none (the runner records them: `data` never became absent and nothing was sent for the handle); the GET count
+   did not move; the feed still has 100 rows; `live_handles` is what it was before the restore less one (the
+   `Probe`, the one object the restore makes stale, step 7): no query handle was dropped and the restore made no
+   handle of its own.
+4. **`refetch` is accepted** on the same remote wrapper: the GET count grows by 1 and `data` is the two items.
+5. **Polling continues.** The ticker advances (it polls every second; each runner waits up to 20 s, so a loaded machine does not fail the step) with no call from the runner (the core's timer was
+   not touched).
+6. **Pages still load.** `fetchNextPage()` on the same feed wrapper gives 150 rows; `Library.books[0]` is readable
+   again (the restore rebuilt the store and its page servers, and a page call through the new server succeeds).
+7. **What is not re-creatable stays stale.** The `Probe` is refused (status 5 / `Refused`), as in S15 step 9.
+8. **Idempotent.** `restore(snapshot)` again changes nothing more: the checks of step 3 hold (the remote wrapper
+   shows the two items it was last given, the feed 150 rows, `live_handles` unchanged, nothing applied to the
+   remote and feed wrappers).
+9. **Closing** the wrappers returns `live_handles` to its value before step 1.
+10. **A fresh runtime** (TypeScript: a second core of build B in the process; Swift and Kotlin: the build-B
+    process, the snapshot and the handles of step 1 handed over in a file, on a **new core of build B**: S14's
+    and S15's build-B steps leave stores in the core they used, which a restore replaces, so the core is shut
+    down and loaded again over an empty `Kv` and a new server first). The runner reads `live_handles`,
+    then `restore(snapshot)` succeeds. `live_handles` has grown by the stores of the snapshot (`Counter`,
+    `Library` and its two page servers) and the three query handles build B honours: 7 (the handle of `roster` is
+    not counted). No GET was made yet. After `configure_remote` (core state outside stores, as S22 says),
+    `observe(remote handle)` is answered with `status = fetching` and `data` absent, and then the data; `refetch`
+    on it is status 0 and makes one more GET; the ticker's handle delivers ticks (it is observed again like any
+    handle after a reload); `Library`'s `books` (observed again) pages through the server its op 0 names (the
+    reply says 10,000 rows); the handle of `roster` answers `refetch` with status 5, and the Log port received a
+    WARN that names it (`Handle(index=<i>, gen=<g>)`, "is not re-issued", "the types it was made from changed").
+
 ## Platform notes
 
 * TypeScript: S03 runs only in `wasm-main` mode (the only one with `callSync`); S17 step 6 is the only
@@ -955,8 +1058,13 @@ transport the runner loads, TypeScript counts `Kind.Call` payloads whose first b
   signals crate. Only TypeScript's mirror is public; Kotlin and Swift apply change-set by change-set.
 * Timing constants (50 ms delays, 200 ms quiet windows) are chosen for a loaded CI machine; do not
   shrink them.
-* S14 steps 7 to 9 and S15 steps 11 to 14 need build B (see "Two builds"). TypeScript loads both wasm
+* S14 steps 7 to 9, S15 steps 11 to 14 and S35 step 10 need build B (see "Two builds"). TypeScript loads both wasm
   modules in one process; Swift and Kotlin run build B's steps in a second process after the main run.
+* S35 steps 3 and 8 record what the platform's mirror applied to a wrapper during the restore (TypeScript: the
+  wrapper's `_apply` through `tapEntries`; Kotlin and Swift: the signal's own change counts or a collector on
+  `data`); the ticker is not asserted there (it polls). Its step 5 uses the real Timer port, as S33 does. A
+  restore reads no clock and starts no fetch (R12): a GET count that moves during steps 3, 8 or 10 before the
+  runner observes is a failure.
 * S20 step 4 differs by platform: a fresh TypeScript core can be loaded with a `Kv` whose queue reads fail, so
   the TypeScript column walks the whole "unreadable, then readable on `Active`" path; Swift and Kotlin load one
   core per process, so their harness fails the first read of the queue at load and S20 checks what that did.

@@ -99,6 +99,14 @@ impl Polling {
         self.overrides.len() != before
     }
 
+    /// The interval observer `sink_id` set for itself, in milliseconds (a snapshot keeps it).
+    pub(crate) fn override_of(&self, sink_id: u64) -> Option<u64> {
+        self.overrides
+            .iter()
+            .find(|(id, _)| *id == sink_id)
+            .map(|(_, ms)| *ms)
+    }
+
     /// Gives observer `sink_id` the interval `ms`.
     fn set_override(&mut self, sink_id: u64, ms: u64) {
         match self.overrides.iter_mut().find(|(id, _)| *id == sink_id) {

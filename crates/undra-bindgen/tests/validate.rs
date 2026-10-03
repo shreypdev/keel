@@ -697,3 +697,195 @@ fn diagnostics_have_the_spec_shape() {
     let text = messages(&s);
     assert!(text.starts_with("error[undra::E0050]: "), "{text}");
 }
+
+// ----- generic functions and methods (ADR-058) -----------------------------------------------
+
+fn instantiations() -> Schema {
+    let mut s = Schema::new("t");
+    s.records
+        .push(record("Todo", "", vec![field("id", TypeRef::U32)]));
+    s.records
+        .push(record("Note", "", vec![field("id", TypeRef::U32)]));
+    for arg in ["Todo", "Note"] {
+        s.functions.push(instance_fn(
+            "newest",
+            arg,
+            true,
+            "",
+            vec![param("rows", TypeRef::vec(named(arg)))],
+            TypeRef::option(named(arg)),
+            false,
+        ));
+    }
+    s
+}
+
+#[test]
+fn the_instantiations_of_one_generic_function_share_a_native_name_without_colliding() {
+    // `newest<Todo>` is not an identifier, the function is: the name that has to be one is the label's.
+    assert_eq!(codes(&instantiations()), Vec::<&str>::new());
+    let mut s = instantiations();
+    s.objects.push(object(
+        "Library",
+        "",
+        vec![ctor("Library", "new", vec![], false)],
+        ["Todo", "Note"]
+            .iter()
+            .map(|arg| {
+                instance_method(
+                    "Library",
+                    "pinned",
+                    arg,
+                    false,
+                    "",
+                    vec![],
+                    TypeRef::vec(named(arg)),
+                    false,
+                )
+            })
+            .collect(),
+    ));
+    assert_eq!(codes(&s), Vec::<&str>::new());
+}
+
+#[test]
+fn a_generic_function_and_a_plain_one_cannot_share_a_native_name() {
+    let mut s = instantiations();
+    s.functions
+        .push(function("newest", "", vec![], TypeRef::Unit, false));
+    assert_eq!(codes(&s), ["E0051"]);
+    let text = messages(&s);
+    assert!(
+        text.contains("`newest<Todo>`, `newest` all become `newest`"),
+        "{text}"
+    );
+}
+
+#[test]
+fn the_id_constant_of_an_instantiation_cannot_be_the_one_of_another_function() {
+    let mut s = instantiations();
+    s.functions
+        .push(function("newest_todo", "", vec![], TypeRef::Unit, false));
+    // camelCase for Swift and TypeScript, UPPER_SNAKE_CASE for Kotlin.
+    assert_eq!(codes(&s), ["E0051", "E0051"]);
+    let text = messages(&s);
+    assert!(
+        text.contains("`newest<Todo>`, `newest_todo` all become `newestTodo`"),
+        "{text}"
+    );
+    assert!(text.contains("all become `NEWEST_TODO`"), "{text}");
+    // Two instantiations of different functions that meet on one id constant.
+    let mut s = instantiations();
+    s.functions.push(instance_fn(
+        "newest_todo",
+        "Note",
+        true,
+        "",
+        vec![param("rows", TypeRef::vec(named("Note")))],
+        TypeRef::Unit,
+        false,
+    ));
+    // `newest_todo<Note>` is `newestTodoNote`, so the id constants do not meet; but TypeScript exports the family
+    // `newest_todo` as `newestTodo`, the name of the private function of `newest<Todo>` in the same module.
+    assert_eq!(codes(&s), ["E0051"], "{}", messages(&s));
+    let text = messages(&s);
+    assert!(
+        text.contains("`newest<Todo>`, `newest_todo<Note>` all become `newestTodo`"),
+        "{text}"
+    );
+    assert!(
+        text.contains("TypeScript keeps a private function"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_label_that_does_not_describe_its_definition_is_the_schemas_e0072() {
+    let mut s = instantiations();
+    s.functions[1].generic = Some(label("newest", "Todo", true));
+    assert!(codes(&s).contains(&"E0072"), "{}", messages(&s));
+    let text = messages(&s);
+    assert!(
+        text.contains("`newest<Note>` is not `newest` with `T = Todo`"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_member_that_collides_names_the_generic_method_not_its_instantiations() {
+    let mut s = Schema::new("t");
+    s.records
+        .push(record("Todo", "", vec![field("id", TypeRef::U32)]));
+    s.objects.push(object(
+        "Library",
+        "",
+        vec![ctor("Library", "new", vec![], false)],
+        vec![
+            instance_method(
+                "Library",
+                "pinned",
+                "Todo",
+                false,
+                "",
+                vec![],
+                TypeRef::vec(named("Todo")),
+                false,
+            ),
+            method("Library", "pinned", "", vec![], TypeRef::U32, false),
+        ],
+    ));
+    assert_eq!(codes(&s), ["E0051"]);
+    let text = messages(&s);
+    assert!(
+        text.contains("`pinned<Todo>`, `pinned` all become `pinned`"),
+        "{text}"
+    );
+}
+
+#[test]
+fn one_instantiation_declared_twice_is_a_name_collision_like_any_function_declared_twice() {
+    // Two modules of one core that each declare `newest` for `Todo`: the same mistake as two plain
+    // functions called `newest`, and reported the same way (E0051), not as a schema to regenerate.
+    let mut s = instantiations();
+    s.functions.push(s.functions[0].clone());
+    assert_eq!(codes(&s), ["E0051", "E0051"], "{}", messages(&s));
+    let text = messages(&s);
+    assert!(
+        text.contains("`newest<Todo>`, `newest<Todo>` all become `newestTodo`"),
+        "{text}"
+    );
+    assert!(!text.contains("regenerate the schema"), "{text}");
+}
+
+#[test]
+fn a_store_signal_cannot_take_the_typescript_name_of_an_instantiation() {
+    // TypeScript keeps one private method per instantiation (`pinnedTodo`) beside the store's
+    // signals, so a signal `pinned_todo` would be a second member of that name in the class.
+    let mut s = Schema::new("t");
+    s.records
+        .push(record("Todo", "", vec![field("id", TypeRef::U32)]));
+    s.objects.push(store(
+        object(
+            "Shelf",
+            "",
+            vec![ctor("Shelf", "new", vec![], false)],
+            vec![instance_method(
+                "Shelf",
+                "pinned",
+                "Todo",
+                false,
+                "",
+                vec![],
+                TypeRef::vec(named("Todo")),
+                false,
+            )],
+        ),
+        vec![("pinned_todo", TypeRef::U32, false, None)],
+    ));
+    assert_eq!(codes(&s), ["E0051"], "{}", messages(&s));
+    let text = messages(&s);
+    assert!(
+        text.contains("`pinned<Todo>`, `pinned_todo` all become `pinnedTodo`"),
+        "{text}"
+    );
+}

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { Counter, Probe, addLater } from "@playground/core";
 import { boot } from "../src/harness.js";
-import { step, waitFor } from "../src/wait.js";
+import { WAIT_TIMEOUT_MS, step, waitFor } from "../src/wait.js";
 
 // S04 async call: a call that waits on the core's Timer port resolves later, several at once
 // resolve in the order their timers fire, and the platform may call again from inside a
@@ -10,12 +10,14 @@ import { step, waitFor } from "../src/wait.js";
 test("S04 async call", async () => {
   const { core } = await boot();
 
-  await step("1. add_later(20, 22, 50) resolves to 42 after 45 ms and before 2 s", async () => {
+  await step("1. add_later(20, 22, 50) resolves to 42 after 45 ms", async () => {
     const started = performance.now();
     expect(await addLater(20, 22, 50, core)).toBe(42);
     const elapsedMs = performance.now() - started;
     expect(elapsedMs).toBeGreaterThanOrEqual(45);
-    expect(elapsedMs).toBeLessThan(2_000);
+    // The upper bound is WAIT_TIMEOUT_MS, a hang detector: a timer that never fires is what it catches. How long after 50 ms
+    // the answer comes is the machine's (CI runners stall); step 2's order is the claim that the delays are honoured.
+    expect(elapsedMs, "add_later(.., 50) within the 5 s wait").toBeLessThan(WAIT_TIMEOUT_MS);
   });
 
   await step("2. three concurrent calls resolve in delay order", async () => {

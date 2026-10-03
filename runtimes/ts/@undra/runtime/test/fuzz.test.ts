@@ -45,7 +45,7 @@ import {
   iterateChangeSet,
   readChangeSetHeader,
   type StreamFailure,
-} from "../src/wire/payloads.js";
+} from "../src/wire/index.js";
 import { UndraReader } from "../src/wire/reader.js";
 import { UndraWriter } from "../src/wire/writer.js";
 import { filterCodec, shapeCodec, todoCodec } from "./fixtures.js";

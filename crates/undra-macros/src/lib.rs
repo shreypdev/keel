@@ -98,7 +98,11 @@ use proc_macro::TokenStream;
 /// * on an `enum`: an enum encoded as a `u16` variant index plus fields;
 /// * on an `impl Type { .. }` block: an object whose `pub fn`s become methods
 ///   (`#[undra::api(store)]` for the impl block of a `#[undra::store]` struct);
-/// * on a free `fn`: a function.
+/// * on a free `fn`: a function;
+/// * on a struct, an enum or an `impl<T> Type<T>` block with type parameters,
+///   `#[undra::api(generic)]` marks a template that an alias instantiates
+///   (`#[undra::api] pub type TodoPage = Page<Todo>;`); on a function or a method with a type
+///   parameter, `generic(T = [Todo, Note])` lists the types it crosses the boundary for.
 ///
 /// `#[undra(default)]` on a field marks it as having a default in generated constructors (and lets a
 /// migration fill it when an older value lacks it, ADR-037).
@@ -116,6 +120,14 @@ pub fn api(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn __instantiate(input: TokenStream) -> TokenStream {
     impl_::expand_instantiate(input.into()).into()
+}
+
+/// What the local macro of a `#[undra::store(generic)]` struct calls with the signatures its impl
+/// block handed over, to export the one template of the store (ADR-058): not written by hand.
+#[doc(hidden)]
+#[proc_macro]
+pub fn __compose_store(input: TokenStream) -> TokenStream {
+    impl_::expand_compose_store(input.into()).into()
 }
 
 /// Marks an error enum: everything `#[undra::api]` does for an enum, plus `Display` from

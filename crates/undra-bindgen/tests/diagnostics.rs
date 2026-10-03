@@ -438,6 +438,60 @@ fn event_method_that_returns() -> Schema {
     s
 }
 
+/// `newest<Todo>` and `newest<Note>` over two records, the instantiations of one generic function.
+fn two_instantiations() -> Schema {
+    let mut s = Schema::new("t");
+    s.records
+        .push(record("Todo", "", vec![field("id", TypeRef::U32)]));
+    s.records
+        .push(record("Note", "", vec![field("id", TypeRef::U32)]));
+    s.records
+        .push(record("Tag", "", vec![field("id", TypeRef::U32)]));
+    for arg in ["Todo", "Note"] {
+        s.functions.push(instance_fn(
+            "newest",
+            arg,
+            true,
+            "",
+            vec![param("rows", TypeRef::vec(named(arg)))],
+            TypeRef::option(named(arg)),
+            false,
+        ));
+    }
+    s
+}
+
+/// A plain function whose id constant is the one of an instantiation (`newest_todo` and
+/// `newest<Todo>` are both `newestTodo`).
+fn instantiation_id_that_collides() -> Schema {
+    let mut s = two_instantiations();
+    s.functions
+        .push(function("newest_todo", "", vec![], TypeRef::Unit, false));
+    s
+}
+
+/// A plain function with the native name of a generic family.
+fn plain_function_named_like_a_family() -> Schema {
+    let mut s = two_instantiations();
+    s.functions
+        .push(function("newest", "", vec![], TypeRef::Unit, false));
+    s
+}
+
+/// The name says `Todo`, the label says `Tag`.
+fn label_that_does_not_describe_its_definition() -> Schema {
+    let mut s = two_instantiations();
+    s.functions[0].generic = Some(label("newest", "Tag", true));
+    s
+}
+
+/// `newest<Note>` takes two parameters and `newest<Todo>` one.
+fn instantiations_that_disagree() -> Schema {
+    let mut s = two_instantiations();
+    s.functions[0].params.push(param("limit", TypeRef::U32));
+    s
+}
+
 /// `(code, case)`: the order of the cases of a code is the order of its golden.
 const CASES: &[(&str, &[Case])] = &[
     (
@@ -515,6 +569,19 @@ const CASES: &[(&str, &[Case])] = &[
         )],
     ),
     (
+        "E0072",
+        &[
+            (
+                "a label that does not describe its definition",
+                label_that_does_not_describe_its_definition,
+            ),
+            (
+                "instantiations that are not one function",
+                instantiations_that_disagree,
+            ),
+        ],
+    ),
+    (
         "E0073",
         &[
             (
@@ -556,6 +623,14 @@ const CASES: &[(&str, &[Case])] = &[
             (
                 "a store member that an iOS 15 / 16 store already has",
                 store_member_named_like_observable_object,
+            ),
+            (
+                "an id constant that is the one of an instantiation",
+                instantiation_id_that_collides,
+            ),
+            (
+                "a function named like a generic one",
+                plain_function_named_like_a_family,
             ),
         ],
     ),

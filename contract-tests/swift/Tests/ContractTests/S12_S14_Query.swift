@@ -193,11 +193,17 @@ extension ContractScenarios {
 
             // 3. A mutation that is not idempotent does not queue: it fails at once.
             server.failNetwork("PATCH", "\(path)/1")
+            let patchesBefore = server.requests("PATCH", "\(path)/1").count
             let patchStarted = ContinuousClock.now
             try await checkThrows({
                 try await setRemoteDone(list: "s14", id: 1, done: true, ctx: core)
             }, RemoteError.http(.network("offline")), "set_remote_done while offline")
-            try check(ContinuousClock.now - patchStarted < waitLimit, "set_remote_done while offline did not fail at once (bounded by waitLimit for loaded CI runners)")
+            // "At once, not after a retry's backoff" is counted, not timed: the server saw the one PATCH, so the error came from it and
+            // not from a retry. The time is bounded by waitLimit, a hang detector (half of a first retry's backoff, BACKOFF_BASE_MS
+            // less 20 % jitter: 400 ms, would be no more stall-proof than the second this was).
+            try checkEqual(server.requests("PATCH", "\(path)/1").count, patchesBefore + 1, "PATCHes of set_remote_done while offline: it was not retried")
+            let patchTook = ContinuousClock.now - patchStarted
+            try check(patchTook < waitLimit, "set_remote_done while offline took \(patchTook) to fail, past the \(waitLimit) wait")
 
             // 4. The network returns: the queued POST is replayed.
             let queuedWhileOffline = kv.operations

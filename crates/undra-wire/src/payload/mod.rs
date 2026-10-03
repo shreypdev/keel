@@ -36,7 +36,7 @@ pub use changeset::{
     ChangeEntries, ChangeEntry, ChangeEntryRef, ChangeOp, ChangeSet, ChangeSetBuilder, ChangeSetRef,
 };
 pub use lazy::{LazyInvalidated, LazyPage, LazyValue};
-pub use snapshot::{Restore, Snapshot, SnapshotType, StoreSnapshot};
+pub use snapshot::{RECREATION_FIELD, Restore, Snapshot, SnapshotType, StoreSnapshot};
 
 wire_u8_enum! {
     /// Outcome of a call (SPEC 3.4).

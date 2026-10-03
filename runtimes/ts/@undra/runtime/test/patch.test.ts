@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { codecs } from "../src/wire/codec.js";
 import { PatchError, WireError } from "../src/wire/errors.js";
-import { type PatchOp, applyPatch, decodePatch, encodePatch } from "../src/wire/payloads.js";
+import { type PatchOp, applyPatch, decodePatch, encodePatch } from "../src/wire/index.js";
 import { UndraReader } from "../src/wire/reader.js";
 import { UndraWriter } from "../src/wire/writer.js";
 import { type Todo, todoCodec } from "./fixtures.js";

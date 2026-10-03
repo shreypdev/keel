@@ -10,7 +10,8 @@
       { "file": "ports.html", "title": "Ports & adapters" },
       { "file": "objects.html", "title": "Objects and identity" },
       { "file": "callbacks.html", "title": "Host callbacks" },
-      { "file": "types.html", "title": "Newtypes, generics and decimals" }
+      { "file": "types.html", "title": "Newtypes, generics and decimals" },
+      { "file": "generics.html", "title": "Generic functions, objects and stores" }
     ] },
     { "title": "Data and live data", "pages": [
       { "file": "paging.html", "title": "Paging and lazy lists" },
@@ -21,6 +22,7 @@
     { "title": "Test, ship, operate", "pages": [
       { "file": "testing.html", "title": "Testing your app" },
       { "file": "updates.html", "title": "Shipping an update" },
+      { "file": "reviewing-generated-code.html", "title": "Reviewing generated code" },
       { "file": "web.html", "title": "Workers & crash recovery" },
       { "file": "production.html", "title": "Operating in production" },
       { "file": "several-cores.html", "title": "One core or several" }

@@ -1,10 +1,12 @@
 //! A running `undra dev` and a raw WebSocket client for it, shared by the dev integration tests.
 #![allow(dead_code)]
 
+use std::cell::Cell;
 use std::io::{BufRead, BufReader, Read};
 use std::net::TcpStream;
 use std::process::{Child, Stdio};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use tungstenite::{Message, WebSocket};
@@ -12,8 +14,27 @@ use undra_wire::{Envelope, Kind, Writer};
 
 use super::Project;
 
+/// How long `undra dev` may stay silent: a cold build of the core and everything it depends on, on a slow runner.
+const SILENCE: Duration = Duration::from_secs(900);
+
+/// The tests that run `undra dev` take turns, whole. Every one of them builds the core into the same cargo
+/// directories, so its builds queue on cargo's locks ("Blocking waiting for file lock on build directory") behind the
+/// builds of the others: run side by side on a small machine, the ninth test waited for the eight before it, past any
+/// deadline that is meant for one build, and the parallelism bought nothing. In turn, each deadline counts the
+/// test's own work, and the first one pays for the cold build that warms the directories for the rest.
+static TURN: Mutex<()> = Mutex::new(());
+
+thread_local! {
+    /// How many `Dev`s this thread (a test) has alive: only the first takes the turn, so that a test that runs two
+    /// servers does not wait for itself.
+    static ALIVE: Cell<usize> = const { Cell::new(0) };
+}
+
 /// A running `undra dev`.
 pub struct Dev {
+    /// Held from the first server of a test to the end of the test's last.
+    _turn: Option<MutexGuard<'static, ()>>,
+    started: Instant,
     pub child: Child,
     pub lines: Receiver<String>,
     pub url: String,
@@ -28,6 +49,14 @@ impl Dev {
 
     /// Starts `undra dev` from a prepared `undra -C <project>` command (environment set).
     pub fn start_command(mut cmd: std::process::Command, extra: &[&str]) -> Dev {
+        let turn = ALIVE
+            .with(|alive| {
+                let first = alive.get() == 0;
+                alive.set(alive.get() + 1);
+                first
+            })
+            .then(|| TURN.lock().unwrap_or_else(PoisonError::into_inner));
+        let started = Instant::now();
         cmd.args(["dev", "--addr", "127.0.0.1:0"])
             .args(extra)
             .stdout(Stdio::piped())
@@ -57,6 +86,8 @@ impl Dev {
             }
         });
         let mut dev = Dev {
+            _turn: turn,
+            started,
             child,
             lines,
             url: String::new(),
@@ -64,7 +95,7 @@ impl Dev {
             log,
         };
         // The banner: the URL on a line of its own, then `schema hash   0x...`.
-        let deadline = Instant::now() + Duration::from_secs(600);
+        let deadline = Instant::now() + SILENCE;
         while dev.url.is_empty() || dev.hash == 0 {
             let line = dev.next_line(deadline);
             if line.starts_with("ws://") {
@@ -81,7 +112,9 @@ impl Dev {
         let left = deadline.saturating_duration_since(Instant::now());
         self.lines.recv_timeout(left).unwrap_or_else(|_| {
             panic!(
-                "undra dev printed nothing in time; stderr:\n{}",
+                "undra dev printed nothing in time (it has been running for {:.0?}, and was given {SILENCE:?} for a build \
+                 on its own; this test's turn began when its server was started); stderr:\n{}",
+                self.started.elapsed(),
                 self.log.lock().unwrap()
             )
         })
@@ -111,6 +144,29 @@ impl Dev {
             if line.contains(needle) {
                 return line;
             }
+        }
+    }
+
+    /// Waits for the restart that an edit of the schema causes: the first `Restarted:` line whose schema hash is not `old`.
+    /// A restart that leaves the schema as it was (a rebuild of what had not changed, which a loaded machine can add: the
+    /// watcher sees a save in two bursts further apart than its debounce, and the first rebuild reads the file before the
+    /// write) is not the one under test, and is skipped, said on stderr.
+    pub fn wait_restart_changing_schema(&self, old: u64, limit: Duration) -> String {
+        let deadline = Instant::now() + limit;
+        loop {
+            let line = self.wait_line(
+                "Restarted: ws://",
+                deadline.saturating_duration_since(Instant::now()),
+            );
+            let hash = line
+                .split("schema hash ")
+                .nth(1)
+                .and_then(|rest| rest.split(')').next())
+                .and_then(|hash| u64::from_str_radix(hash.trim_start_matches("0x"), 16).ok());
+            if hash.is_some_and(|hash| hash != old) {
+                return line;
+            }
+            eprintln!("(skipped a restart that left the schema as it was: {line})");
         }
     }
 
@@ -149,6 +205,7 @@ impl Drop for Dev {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        ALIVE.with(|alive| alive.set(alive.get().saturating_sub(1)));
     }
 }
 

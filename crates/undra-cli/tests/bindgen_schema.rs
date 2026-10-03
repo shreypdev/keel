@@ -10,16 +10,20 @@ fn fixture() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stores.schema.json")
 }
 
-/// The files compared with the goldens: one of each language, plus the two package manifests the
-/// CLI adds.
+/// The files compared with the goldens: one of each language, the package manifests the CLI adds and the
+/// `.gitattributes` of each tree (ADR-062).
 const GOLDEN_FILES: &[&str] = &[
+    "swift/.gitattributes",
     "swift/Package.swift",
     "swift/Sources/GoldenStores/Generated/Stores.swift",
     "kotlin/build.gradle.kts",
+    "kotlin/.gitattributes",
     "kotlin/.gitignore",
     "kotlin/src/main/kotlin/dev/undra/generated/golden_stores/Stores.kt",
+    "ts/.gitattributes",
     "ts/package.json",
     "ts/src/stores.ts",
+    "ts/tsconfig.json",
 ];
 
 fn golden_dir() -> std::path::PathBuf {
