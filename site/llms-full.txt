@@ -14,9 +14,10 @@ Undra owns the part of your app that is not pixels: domain logic, reactive state
 
 - **New here?** [Getting started](https://shreypdev.github.io/undra/docs/getting-started.html) installs the toolchain and CLI, scaffolds a project, runs the live dev loop and puts an app on each platform.
 - **Want a working example of a login, a paged list or an offline queue?** The [cookbook](https://shreypdev.github.io/undra/docs/cookbook/) has each as a tested recipe, and [Fieldbook](https://shreypdev.github.io/undra/docs/sample.html) puts them together in one app.
-- **Writing a core?** [Core concepts](https://shreypdev.github.io/undra/docs/concepts.html) covers stores, signals, computeds and keyed lists. [Queries & mutations](https://shreypdev.github.io/undra/docs/queries.html) covers the data layer, and [Ports & adapters](https://shreypdev.github.io/undra/docs/ports.html) covers everything that touches the outside world. [Objects](https://shreypdev.github.io/undra/docs/objects.html), [host callbacks](https://shreypdev.github.io/undra/docs/callbacks.html) and [types](https://shreypdev.github.io/undra/docs/types.html) cover what else crosses the boundary.
+- **Writing a core?** [Core concepts](https://shreypdev.github.io/undra/docs/concepts.html) covers stores, signals, computeds and keyed lists. [Queries & mutations](https://shreypdev.github.io/undra/docs/queries.html) covers the data layer, and [Ports & adapters](https://shreypdev.github.io/undra/docs/ports.html) covers everything that touches the outside world. [Objects](https://shreypdev.github.io/undra/docs/objects.html), [host callbacks](https://shreypdev.github.io/undra/docs/callbacks.html), [types](https://shreypdev.github.io/undra/docs/types.html) and [generic functions, objects and stores](https://shreypdev.github.io/undra/docs/generics.html) cover what else crosses the boundary.
 - **Data that arrives or grows?** [Paging and lazy lists](https://shreypdev.github.io/undra/docs/paging.html), [polling](https://shreypdev.github.io/undra/docs/polling.html), [WebSocket and server-sent events](https://shreypdev.github.io/undra/docs/realtime.html) and the [local database](https://shreypdev.github.io/undra/docs/db.html).
-- **Testing, shipping, running?** [Testing your app](https://shreypdev.github.io/undra/docs/testing.html), [Shipping an update](https://shreypdev.github.io/undra/docs/updates.html), [Operating in production](https://shreypdev.github.io/undra/docs/production.html), and [one core or several](https://shreypdev.github.io/undra/docs/several-cores.html).
+- **Testing, shipping, running?** [Testing your app](https://shreypdev.github.io/undra/docs/testing.html), [Shipping an update](https://shreypdev.github.io/undra/docs/updates.html), [Reviewing generated code](https://shreypdev.github.io/undra/docs/reviewing-generated-code.html), [workers and crash recovery](https://shreypdev.github.io/undra/docs/web.html) on the web, [Operating in production](https://shreypdev.github.io/undra/docs/production.html) (crash reports, background runs, the size of the shipped core), and [one core or several](https://shreypdev.github.io/undra/docs/several-cores.html).
+- **Fitting it into what you have?** [Bazel](https://shreypdev.github.io/undra/docs/bazel.html) builds the core and its bindings in your graph, and [your network stack](https://shreypdev.github.io/undra/docs/cookbook/network-stack.html) (OkHttp, URLSession, fetch) carries the core's requests.
 - **Moving an existing app?** The guides [from Kotlin Multiplatform](https://shreypdev.github.io/undra/docs/cookbook/from-kmp.html) and [from UniFFI](https://shreypdev.github.io/undra/docs/cookbook/from-uniffi.html), and [supporting iOS 15 and 16](https://shreypdev.github.io/undra/docs/cookbook/ios-15-16.html).
 - **Looking something up?** [The CLI](https://shreypdev.github.io/undra/docs/cli.html) lists every command and flag. [Architecture](https://shreypdev.github.io/undra/docs/architecture.html) explains the schema, the generators, the wire and the twelve rules. The API overviews show what a record, error, store or port looks like in [Swift](https://shreypdev.github.io/undra/docs/api-swift.html), [Kotlin](https://shreypdev.github.io/undra/docs/api-kotlin.html) and [TypeScript](https://shreypdev.github.io/undra/docs/api-typescript.html).
 
@@ -151,7 +152,7 @@ Nothing is downloaded: the templates are part of the `undra` binary. The project
 | Path | What it is |
 | --- | --- |
 | `core/` | The Rust core: a working to-do store with `#[undra::store]` and `#[undra::api]` |
-| `generated/` | Swift, Kotlin and TypeScript bindings for that core, already generated |
+| `generated/` | Swift, Kotlin and TypeScript bindings for that core, already generated ([how to review them](https://shreypdev.github.io/undra/docs/reviewing-generated-code.html)) |
 | `ios/` `android/` `web/` | One minimal, real app per platform, using the generated bindings |
 
 Without other flags the project uses released versions: the Undra crates at the git tag of the `undra` that made it, `@undra/runtime` from npm, the Swift runtime as a Swift package and the Kotlin runtime from Maven Central. Pass `--undra-path ~/src/undra` (or set `UNDRA_PATH`) to use a checkout's crates and runtimes instead.
@@ -219,7 +220,7 @@ Build and install from `android/` with Gradle (`./gradlew :app:installDebug`); t
 
 ## 6. Build what you ship
 
-In a project made by `undra init` the app builds do this for you: Gradle's `undraBuild` task, Xcode's build phase and the `undra()` Vite plugin (`@undra/runtime/vite`) run `undra build` before each app builds, and skip it while the core is unchanged. They find `undra` on `PATH`; `undra doctor` checks that it is there. The explicit form is for packaging and for CI steps that build the core once:
+In a project made by `undra init` the app builds do this for you: Gradle's `undraBuild` task, Xcode's build phase and the `undra()` Vite plugin (`@undra/runtime/vite`) run `undra build` before each app builds, and skip it while the core is unchanged. They find `undra` on `PATH`; `undra doctor` checks that it is there. A repository built by Bazel uses [the Bazel rules](https://shreypdev.github.io/undra/docs/bazel.html) instead, which call the same CLI. The explicit form is for packaging and for CI steps that build the core once:
 
 bash
 
@@ -237,7 +238,7 @@ undra build --platform ios,android,web --release
 
 `undra init` also writes `.github/workflows/undra.yml`: a job for the core (format, clippy, tests, `undra bindgen --check`) and one per app, each installing `undra` at the version pinned once at the top of the file. When a newer Undra is out, `undra upgrade` moves every pin of the project (the core's dependency, the runtimes, the workflow) in step, regenerates the bindings and prints the migration notes of every release it crosses; `undra upgrade --dry-run` shows the lines first.
 
-Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 118.4 KB gzipped (budget 120 KB, gated in CI) and the arm64-v8a Android `.so` is 898.2 KB (budget 1.2 MB per ABI, gated in CI).
+Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 118.4 KB gzipped (budget 120 KB, gated in CI) and the arm64-v8a Android `.so` is 898.2 KB (budget 1.2 MB per ABI, gated in CI). To trade speed for size, or size for speed, set `opt_level` in `undra.toml`: [Operating in production](https://shreypdev.github.io/undra/docs/production.html#size) has the numbers for each setting.
 
 ## Prefer to explore first?
 
@@ -2036,7 +2037,7 @@ A row per upload; progress and a retry button are plain reads and one call.
 ## Limits
 
 - The `Http` port has no streaming body and `Fs` reads a file whole, so the recipe suits photos and documents, not a multi-hundred-megabyte video.
-- The queue replays while the app runs. Undra does not yet hand an upload to the operating system's background execution (BGTaskScheduler, WorkManager).
+- The queue replays while the app runs, and in the windows the OS gives a [background run](https://shreypdev.github.io/undra/docs/production.html#background) (`BGTaskScheduler`, WorkManager). Undra does not hand the transfer itself to the OS, so a part is sent only while the app or one of those windows is alive.
 - Progress is per acknowledged part, not per byte on the wire.
 
 Source: [`examples/cookbook/core/src/upload.rs`](https://github.com/shreypdev/undra/blob/main/examples/cookbook/core/src/upload.rs).
@@ -2810,8 +2811,8 @@ By design, v1 has no sync engine, no hosted services and no shared UI of any kin
 
 - [`docs/SPEC.md`](https://github.com/shreypdev/undra/blob/main/docs/SPEC.md): the binding specification for the wire, the ABI, the schema, the runtime model and the generated shapes. Code that disagrees with it is wrong.
 - [`bench/RESULTS.md`](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md): every benchmark row, the machine, and what is still waiting for devices.
-- [`.10x/reviews/`](https://github.com/shreypdev/undra/tree/main/.10x/reviews): the four adversarial reviews of signals, runtime, macros and ffi.
-- [`contract-tests/scenarios.md`](https://github.com/shreypdev/undra/blob/main/contract-tests/scenarios.md): the seventeen scenarios that define "the platforms agree".
+- [`.10x/reviews/`](https://github.com/shreypdev/undra/tree/main/.10x/reviews): the adversarial reviews: the four core crates (signals, runtime, macros, ffi) first, then every feature before it merged.
+- [`contract-tests/scenarios.md`](https://github.com/shreypdev/undra/blob/main/contract-tests/scenarios.md): the 35 scenarios that define "the platforms agree".
 
 ---
 
