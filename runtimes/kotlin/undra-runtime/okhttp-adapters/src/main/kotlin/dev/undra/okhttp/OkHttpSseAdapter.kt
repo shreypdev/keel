@@ -12,6 +12,7 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -29,7 +30,7 @@ import okhttp3.ResponseBody
  * (`RealtimeAdapterContract`) runs on this one:
  *
  *  - The request is a `GET` with `Accept: text/event-stream`, `Cache-Control: no-cache`, the given headers and, to resume,
- *    `Last-Event-ID`; redirects are the client's.
+ *    `Last-Event-ID` (its UTF-8 bytes, so an id that is not ASCII resumes too); redirects are the client's.
  *  - `open` returns after a 2xx answer other than 204 whose content type is `text/event-stream`: another status is `Refused` with
  *    it, another type `Protocol`, an unreachable server, a timeout or a TLS failure `Network`, an unusable URL or header `Refused`
  *    without a status. Cancelling `open` cancels the call.
@@ -107,19 +108,21 @@ public class OkHttpSseAdapter(private val client: () -> OkHttpClient) : SseAdapt
 
     private fun build(url: String, headers: List<Header>, lastEventId: String?): Request {
         val target = url.toHttpUrlOrNull() ?: throw SseError.Refused(null, "invalid URL: $url (not an http or https URL with a host)")
-        val builder = Request.Builder().url(target).get()
+        val all = Headers.Builder()
         try {
-            builder.header("Accept", "text/event-stream")
-            builder.header("Cache-Control", "no-cache")
-            for (header in headers) builder.addHeader(header.name, header.value)
+            all.add("Accept", "text/event-stream")
+            all.add("Cache-Control", "no-cache")
+            for (header in headers) all.add(header.name, header.value)
             if (lastEventId != null) {
                 if (lastEventId.any { it == '\r' || it == '\n' || it == '\u0000' }) throw SseError.Refused(null, "the last event id contains a line break or a NUL")
-                builder.header("Last-Event-ID", lastEventId)
+                // An id is any text the server sent; it goes back as its UTF-8 bytes (the fetch standard's EventSource), which OkHttp's
+                // checked add refuses for anything but ASCII.
+                all.addUnsafeNonAscii("Last-Event-ID", lastEventId)
             }
         } catch (e: IllegalArgumentException) {
             throw SseError.Refused(null, OkHttpRules.describe(e))
         }
-        return builder.build()
+        return Request.Builder().url(target).get().headers(all.build()).build()
     }
 
     /** [base] as a long-lived stream wants it: no read or call timeout, HTTP/1.1 only. Everything else is the app's. */

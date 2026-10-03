@@ -81,7 +81,11 @@ internal object OkHttpRules {
                 throw HttpError.InvalidUrl("header '${header.name}' is not allowed: ${e.message}")
             }
         }
-        val payload = request.body ?: if (requiresBody(request.method)) ByteArray(0) else null
+        // A GET or HEAD has no body (checkBody refused a non-empty one; an empty one is none, not a reason to fail the request).
+        val payload = when {
+            request.method == HttpMethod.GET || request.method == HttpMethod.HEAD -> null
+            else -> request.body ?: if (requiresBody(request.method)) ByteArray(0) else null
+        }
         try {
             builder.method(request.method.name, payload?.toRequestBody(null))
         } catch (e: IllegalArgumentException) {
