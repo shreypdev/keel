@@ -193,6 +193,15 @@ private fun closeQuietly(stream: InputStream) {
     }
 }
 
+/** Closes [stream] after its connection was aborted, when whatever the platform throws for that no longer matters. */
+private fun releaseQuietly(stream: InputStream) {
+    try {
+        stream.close()
+    } catch (e: Exception) {
+        // already released, or the socket under it is gone: either way nothing is held
+    }
+}
+
 /** Daemon threads for the blocking parts of opening a stream with `HttpURLConnection`. */
 private val openThreads: ExecutorService = Executors.newCachedThreadPool { task ->
     Thread(task, "undra-sse-open").also { it.isDaemon = true }
@@ -280,6 +289,16 @@ public class SseStreamReader(
     }
 
     private fun readLoop() {
+        try {
+            readAll()
+        } finally {
+            // The reader is the one thread that reads the body, so it is the one that lets it go, however the stream ended: a body
+            // left open keeps its connection (an OkHttp call holds it in its pool) even after [abort] closed the socket.
+            releaseQuietly(body)
+        }
+    }
+
+    private fun readAll() {
         val parser = SseParser(lastEventId)
         val decoder = StandardCharsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
@@ -342,7 +361,12 @@ public class SseStreamReader(
         stopping = true
         gate.withLock { roomChanged.signalAll() }
         inbox.close()
-        withContext(Dispatchers.IO) { abort() }
+        // A stream nobody started reading has no reader to let its body go: this does, and no reader starts after it.
+        val unread = started.compareAndSet(false, true)
+        withContext(Dispatchers.IO) {
+            abort()
+            if (unread) releaseQuietly(body)
+        }
     }
 
     override fun setRoom(room: Int) {

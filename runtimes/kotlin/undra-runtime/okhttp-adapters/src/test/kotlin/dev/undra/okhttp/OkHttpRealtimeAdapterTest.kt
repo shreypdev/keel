@@ -195,6 +195,22 @@ class OkHttpRealtimeAdapterTest : RealtimeAdapterContract(
             assertEq("2", seen.headers["last-event-id"])
         }
 
+        case("SSE: a closed stream leaves no connection in use in the app's pool, whether its reader waited for room or for data") {
+            val server = server()
+            val client = appClient()
+            val port = SsePortAdapter(OkHttpSseAdapter(client))
+            within {
+                // Nobody pulls: the reader fills the binding's buffer and waits for room, holding the body.
+                val flood = port.open("${server.http}/sse/flood?n=2000&size=65536", emptyList(), null)
+                eventually("the server is writing") { server.last("/sse/flood").written > 0 }
+                port.close(flood)
+                // The server sends nothing: the reader waits in a read.
+                port.close(port.open("${server.http}/sse/hang", emptyList(), null))
+            }
+            eventually("no connection is in use") { client.connectionPool.connectionCount() == client.connectionPool.idleConnectionCount() }
+            eventually("the server saw both leave") { server.last("/sse/flood").clientClosed && server.last("/sse/hang").clientClosed }
+        }
+
         case("SSE: the app's read timeout and call timeout do not end a quiet stream") {
             val server = server()
             val impatient = OkHttpClient.Builder().readTimeout(200, TimeUnit.MILLISECONDS).callTimeout(500, TimeUnit.MILLISECONDS).build()
