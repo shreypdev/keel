@@ -120,8 +120,9 @@ pub fn build(
     let manifest = session.shim_manifest()?;
     let names = session.core_names()?;
     let library = format!("lib{}.a", names.namespace());
-    // A release build is the size-tuned mobile profile (ADR-052, "native size gates").
-    let profile = Profile::mobile(release);
+    // A release build is the profile `[ios] opt_level` names, the size-tuned `release-mobile` by default
+    // (ADR-052, "native size gates").
+    let profile = Profile::mobile(release, session.project.config.ios.opt_level);
     let target_dir = session.target_dir()?;
     let stage =
         crate::shim::ios_stage_dir(&target_dir, &session.project.root).join(profile.dir_name());

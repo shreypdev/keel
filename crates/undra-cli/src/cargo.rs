@@ -12,6 +12,7 @@ use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
+use crate::config::NativeOptLevel;
 use crate::error::{CliError, Code, Result};
 use crate::sys::Sys;
 use crate::toolchain::Toolchain;
@@ -421,6 +422,9 @@ pub enum Profile {
     /// alone (`panic = "unwind"`, constitution R6): what an iOS or Android `--release` build uses
     /// (ADR-052, "native size gates").
     ReleaseMobile,
+    /// `release-mobile-z`: `release` with `opt-level = "z"` for every crate and `panic = "unwind"`:
+    /// what `opt_level = "z"` in `[ios]` or `[android]` of `undra.toml` builds (ADR-052).
+    ReleaseMobileZ,
     /// `release-wasm`: `release` with `opt-level = "z"` and `panic = "abort"` (SPEC 7).
     ReleaseWasm,
 }
@@ -433,18 +437,21 @@ impl Profile {
             Profile::Dev => "debug",
             Profile::Release => "release",
             Profile::ReleaseMobile => "release-mobile",
+            Profile::ReleaseMobileZ => "release-mobile-z",
             Profile::ReleaseWasm => "release-wasm",
         }
     }
 
-    /// The profile of an iOS or Android build: `release-mobile` for `--release`, cargo's dev profile
+    /// The profile of an iOS or Android build: for `--release`, the one `opt_level` of the
+    /// platform's table in `undra.toml` names (`release-mobile` by default); cargo's dev profile
     /// otherwise.
     #[must_use]
-    pub fn mobile(release: bool) -> Profile {
-        if release {
-            Profile::ReleaseMobile
-        } else {
-            Profile::Dev
+    pub fn mobile(release: bool, level: NativeOptLevel) -> Profile {
+        match (release, level) {
+            (false, _) => Profile::Dev,
+            (true, NativeOptLevel::Small) => Profile::ReleaseMobile,
+            (true, NativeOptLevel::Smallest) => Profile::ReleaseMobileZ,
+            (true, NativeOptLevel::Fastest) => Profile::Release,
         }
     }
 
@@ -455,6 +462,7 @@ impl Profile {
             Profile::Dev => vec![],
             Profile::Release => vec!["--release"],
             Profile::ReleaseMobile => vec!["--profile", "release-mobile"],
+            Profile::ReleaseMobileZ => vec!["--profile", "release-mobile-z"],
             Profile::ReleaseWasm => vec!["--profile", "release-wasm"],
         }
     }
@@ -503,6 +511,7 @@ pub fn unpacked_debuginfo(profile: Profile) -> String {
             Profile::Dev => "dev",
             Profile::Release => "release",
             Profile::ReleaseMobile => "release-mobile",
+            Profile::ReleaseMobileZ => "release-mobile-z",
             Profile::ReleaseWasm => "release-wasm",
         }
     )
@@ -1201,8 +1210,23 @@ mod tests {
             ["--profile", "release-mobile"]
         );
         assert_eq!(Profile::Release.args(), ["--release"]);
-        assert_eq!(Profile::mobile(true), Profile::ReleaseMobile);
-        assert_eq!(Profile::mobile(false), Profile::Dev);
+        // `opt_level` of `[ios]` / `[android]`: "s" (the default), "z", "3"; a debug build is `dev`.
+        use crate::config::NativeOptLevel::{Fastest, Small, Smallest};
+        assert_eq!(Profile::mobile(true, Small), Profile::ReleaseMobile);
+        assert_eq!(Profile::mobile(true, Smallest), Profile::ReleaseMobileZ);
+        assert_eq!(Profile::mobile(true, Fastest), Profile::Release);
+        for level in [Small, Smallest, Fastest] {
+            assert_eq!(Profile::mobile(false, level), Profile::Dev);
+        }
+        assert_eq!(Profile::ReleaseMobileZ.dir_name(), "release-mobile-z");
+        assert_eq!(
+            Profile::ReleaseMobileZ.args(),
+            ["--profile", "release-mobile-z"]
+        );
+        assert_eq!(
+            unpacked_debuginfo(Profile::ReleaseMobileZ),
+            "profile.release-mobile-z.split-debuginfo=\"unpacked\""
+        );
         assert_eq!(
             unpacked_debuginfo(Profile::ReleaseMobile),
             "profile.release-mobile.split-debuginfo=\"unpacked\""
@@ -1256,6 +1280,7 @@ mod tests {
         ];
         assert_eq!(flags_of(remap_of(&sys, Profile::Release)), expected);
         assert_eq!(flags_of(remap_of(&sys, Profile::ReleaseMobile)), expected);
+        assert_eq!(flags_of(remap_of(&sys, Profile::ReleaseMobileZ)), expected);
         assert_eq!(flags_of(remap_of(&sys, Profile::ReleaseWasm)), expected);
 
         // A rustc that knows the scope flag remaps the binary only, not its messages.

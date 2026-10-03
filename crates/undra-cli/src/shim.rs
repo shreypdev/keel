@@ -424,13 +424,27 @@ mod tests {
                 .unwrap_or_else(|| panic!("no release-mobile override for {hot}: {text}"));
             assert!(table.contains("opt-level = 3"), "{hot}: {table}");
         }
-        // The speed profile is what the host builds use, and it is left as it was.
+        // The speed profile is what the host builds use (and `opt_level = "3"`), and it is left as it was.
         let release = text
             .split("[profile.release]")
             .nth(1)
             .and_then(|rest| rest.split("\n[").next())
             .unwrap();
         assert!(release.contains("opt-level = 3"), "{release}");
+        // `opt_level = "z"`: the smallest, `z` for every crate (no override keeps a crate at 3), still unwinding.
+        let smallest = text
+            .split("[profile.release-mobile-z]")
+            .nth(1)
+            .and_then(|rest| rest.split("\n[").next())
+            .unwrap();
+        assert!(smallest.contains("inherits = \"release\""), "{smallest}");
+        assert!(smallest.contains("opt-level = \"z\""), "{smallest}");
+        assert!(smallest.contains("panic = \"unwind\""), "{smallest}");
+        assert!(!smallest.contains("abort"), "{smallest}");
+        assert!(
+            !text.contains("[profile.release-mobile-z.package."),
+            "{text}"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
