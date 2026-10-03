@@ -586,7 +586,8 @@ npm run build                                 # type-checks and bundles
 
 There is no `undra build` to run first: the `undra()` plugin of `web/vite.config.ts` (`@undra/runtime/vite`) runs
 `undra build --platform web` when Vite starts, for `npm run build` as for `npm run dev`, and under `npm run dev` it
-rebuilds the core and reloads the page whenever `core/src` changes. It finds `undra` on `PATH` (or `UNDRA_BIN`) and says
+rebuilds the core and reloads the page onto it whenever `core/src` changes (a page opened with `?undra=`, below, is left on the
+core `undra dev` serves, which keeps its state). It finds `undra` on `PATH` (or `UNDRA_BIN`) and says
 how to install it when it is missing; `UNDRA_SKIP_BUILD=1` skips it when the core was built in an earlier step.
 
 The page loads the wasm core and runs it on the main thread. Add `?undra=ws://127.0.0.1:7443` to the URL

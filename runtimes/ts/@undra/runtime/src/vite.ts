@@ -18,6 +18,10 @@ import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
  * - Under `vite dev` the plugin watches the core's `src/**`, its manifests and `Cargo.lock`, rebuilds on
  *   a change (one build at a time, the first one included; a burst of saves counted once) and reloads the
  *   page onto the new core. A failed build keeps the old core and shows the error in Vite's overlay.
+ * - A page that runs the core `undra dev` serves (`?undra=ws://...` in its URL, or `VITE_UNDRA_DEV_URL`) is
+ *   not reloaded: `undra dev` has already moved it to the rebuilt core with its state (ADR-053), and a reload
+ *   would start it from scratch. The page decides, in a small module the plugin adds to it under `vite dev`
+ *   (`virtual:undra/dev-reload`); a page without it (no index.html of Vite's) gets the plain reload.
  * - Under Vitest (mode `test`) it builds nothing unless `inTests` is set.
  * - `undra` is looked up as `UNDRA_BIN`, then on `PATH`, then where the installers put it. When it is
  *   not found the error says how to install it, in the shape of the CLI's own errors (C0003).
@@ -45,10 +49,43 @@ export interface ViteWatcherLike {
   on(event: string, listener: (path: string) => void): unknown;
 }
 
-/** What the plugin sends to the page: a full reload, or an error for Vite's overlay. */
+/** What the plugin sends to the page: a full reload, the rebuilt core's event for its client module, or an error for Vite's overlay. */
 export type VitePayload =
   | { readonly type: "full-reload"; readonly path?: string }
+  | { readonly type: "custom"; readonly event: typeof CORE_REBUILT_EVENT; readonly data: { readonly file: string } }
   | { readonly type: "error"; readonly err: { readonly message: string; readonly stack: string } };
+
+/** The event the plugin sends when the core was rebuilt; its client module ({@link DEV_RELOAD_ID}) decides whether to reload. */
+export const CORE_REBUILT_EVENT = "undra:core-rebuilt";
+
+/** The module the plugin adds to the page under `vite dev`: it reloads the page onto a rebuilt core unless `undra dev` serves the page's core. */
+export const DEV_RELOAD_ID = "virtual:undra/dev-reload";
+
+/** The tag Vite puts into index.html for {@link UndraVitePlugin.transformIndexHtml}. */
+export interface HtmlTagLike {
+  readonly tag: "script";
+  readonly attrs: { readonly type: "module"; readonly src: string };
+  readonly injectTo: "head";
+}
+
+/**
+ * The client module: whether this page runs the core `undra dev` serves is what the template's `startUndra` reads
+ * (`?undra=` in the URL, else `VITE_UNDRA_DEV_URL`; a production build reads neither). Such a page stays: `undra dev`
+ * has moved it to the rebuilt core with its state. Any other page loads the rebuilt wasm.
+ */
+export const DEV_RELOAD_SOURCE = `// Added by the undra() Vite plugin under vite dev (@undra/runtime/vite).
+const url = new URLSearchParams(location.search).get("undra") ?? import.meta.env.VITE_UNDRA_DEV_URL;
+const servedByUndraDev = typeof url === "string" && url.length > 0;
+if (import.meta.hot) {
+  import.meta.hot.on(${JSON.stringify(CORE_REBUILT_EVENT)}, () => {
+    if (servedByUndraDev) {
+      console.info("[undra] the core was rebuilt; this page runs the core undra dev serves, which kept its state, so it is not reloaded");
+      return;
+    }
+    location.reload();
+  });
+}
+`;
 
 /** The part of Vite's dev server the plugin uses. */
 export interface ViteDevServerLike {
@@ -64,6 +101,10 @@ export interface UndraVitePlugin {
   configResolved(config: ViteConfigLike): void;
   buildStart(): Promise<void>;
   configureServer(server: ViteDevServerLike): void;
+  resolveId(id: string): string | undefined;
+  load(id: string): string | undefined;
+  transformIndexHtml(): HtmlTagLike[];
+  handleHotUpdate(context: { readonly file: string }): [] | undefined;
 }
 
 /** Options of {@link undra}. Every one has a default that fits a project made by `undra init`. */
@@ -152,22 +193,35 @@ export interface CoreLayout {
   readonly projectRoot: string;
   /** The core crate's directory (`[core] path`, default `core`). */
   readonly coreDir: string;
+  /** Where `undra build` writes (`[paths] build`, default `build`). */
+  readonly buildDir: string;
 }
 
-/** Reads `[core] path` out of the text of an `undra.toml`; `core` when it has none. */
-export function corePathOf(toml: string): string {
+/** Reads the string `key` of `[table]` out of the text of an `undra.toml`; `fallback` when it has none. */
+function tomlString(toml: string, wanted: string, key: string, fallback: string): string {
   let table = "";
+  const pattern = new RegExp(`^${key}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`);
   for (const raw of toml.split("\n")) {
     const line = raw.trim();
     if (line.startsWith("[")) {
       table = line.replace(/^\[+|\]+.*$/g, "").trim();
-    } else if (table === "core") {
-      const match = /^path\s*=\s*(?:"([^"]*)"|'([^']*)')/.exec(line);
+    } else if (table === wanted) {
+      const match = pattern.exec(line);
       const value = match?.[1] ?? match?.[2];
       if (value !== undefined && value !== "") return value;
     }
   }
-  return "core";
+  return fallback;
+}
+
+/** Reads `[core] path` out of the text of an `undra.toml`; `core` when it has none. */
+export function corePathOf(toml: string): string {
+  return tomlString(toml, "core", "path", "core");
+}
+
+/** Reads `[paths] build` out of the text of an `undra.toml`; `build` when it has none. */
+export function buildPathOf(toml: string): string {
+  return tomlString(toml, "paths", "build", "build");
 }
 
 /** Finds the project from `start` upwards; `null` when no directory has an `undra.toml`. */
@@ -176,7 +230,8 @@ export function findCoreLayout(start: string): CoreLayout | null {
   for (;;) {
     const file = join(dir, "undra.toml");
     if (existsSync(file)) {
-      return { projectRoot: dir, coreDir: resolve(dir, corePathOf(readFileSync(file, "utf8"))) };
+      const toml = readFileSync(file, "utf8");
+      return { projectRoot: dir, coreDir: resolve(dir, corePathOf(toml)), buildDir: resolve(dir, buildPathOf(toml)) };
     }
     const parent = dirname(dir);
     if (parent === dir) return null;
@@ -247,6 +302,10 @@ export function undra(options: UndraPluginOptions = {}): UndraVitePlugin {
   let running = false;
   let again: string | undefined;
   let rebuild: ((file: string) => Promise<void>) | undefined;
+  // Whether a page has loaded the client module: then a rebuilt core is an event the page decides on, else a plain reload.
+  let clientInstalled = false;
+  // What `undra build` writes (`[paths] build` of undra.toml): a change there is the plugin's to announce, not Vite's.
+  let buildDir: string | undefined;
 
   const skip = (): boolean =>
     (options.skip ?? process.env["UNDRA_SKIP_BUILD"] === "1") || (options.inTests !== true && config?.mode === "test");
@@ -329,6 +388,7 @@ export function undra(options: UndraPluginOptions = {}): UndraVitePlugin {
       }
       const targets = watchTargets(layout, options.watch ?? [], projectDir());
       server.watcher.add([...targets.dirs, ...targets.files]);
+      buildDir = layout.buildDir;
 
       const debounce = options.debounceMs ?? 150;
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -347,7 +407,9 @@ export function undra(options: UndraPluginOptions = {}): UndraVitePlugin {
             logger?.info(`undra: ${changed} changed, rebuilding the core`);
             try {
               await build();
-              server.ws.send({ type: "full-reload" });
+              server.ws.send(
+                clientInstalled ? { type: "custom", event: CORE_REBUILT_EVENT, data: { file: changed } } : { type: "full-reload" },
+              );
             } catch (e) {
               const message = e instanceof Error ? e.message : String(e);
               logger?.error(message);
@@ -369,6 +431,29 @@ export function undra(options: UndraPluginOptions = {}): UndraVitePlugin {
         }, debounce);
       };
       for (const event of ["change", "add", "unlink"]) server.watcher.on(event, onChange);
+    },
+
+    resolveId(id) {
+      return id === DEV_RELOAD_ID ? `\0${DEV_RELOAD_ID}` : undefined;
+    },
+
+    load(id) {
+      if (id !== `\0${DEV_RELOAD_ID}`) return undefined;
+      clientInstalled = true;
+      return DEV_RELOAD_SOURCE;
+    },
+
+    // Under `vite dev` (and only while the plugin builds the core) the page gets the client module.
+    transformIndexHtml() {
+      if (config?.command !== "serve" || skip()) return [];
+      return [{ tag: "script", attrs: { type: "module", src: `/@id/${DEV_RELOAD_ID}` }, injectTo: "head" }];
+    },
+
+    // The wasm `undra build` rewrites is imported by the page (`?url`): left to Vite, its change reloads every page, the ones
+    // `undra dev` serves included. The plugin announces a rebuilt core itself, once, after the build.
+    handleHotUpdate({ file }) {
+      if (buildDir === undefined || skip()) return undefined;
+      return resolve(file).startsWith(resolve(buildDir) + sep) ? [] : undefined;
     },
   };
 }
