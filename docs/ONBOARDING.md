@@ -416,7 +416,10 @@ UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test symbols --test debuggi
 at `opt-level = 3`: `s` everywhere made the core's own operations 17% slower. That is 8% off the Android library of a hello world
 (987,720 to 905,520 bytes, arm64-v8a), 13% off the playground's, and 8% off what the iOS slice adds to an app, with the device bench rows
 inside their noise (ADR-052, amendment "native size gates"). The host build stays on `release`; `opt-level = "z"` would take 8 to 13 points
-more and slows the call path up to 1.5x, so it is not the default. The sizes are gated, not just printed:
+more and slows a call about 1.5x, so it is not the default. An app with a hard byte budget chooses it per platform, `opt_level = "z"`
+in `[android]` or `[ios]` of its `undra.toml` (the `release-mobile-z` profile: 774,480 bytes for the hello world, 2,024,336 for the playground,
+arm64-v8a), and `opt_level = "3"` is the speed profile (`release`) for an app whose own hot code should not be optimised for size. The gates
+measure the default. The sizes are gated, not just printed:
 
 ```bash
 scripts/native-size.sh                    # the hello-world core per Android ABI and the iOS device slice, against bench/budgets.toml

@@ -699,10 +699,16 @@ Android build is `cargo ndk .. rustc --profile release-mobile`, the iOS one `car
   and the entry points). `opt-level = "s"` for everything was the first design and the speed check (below) is why it is not the profile: the device rows
   moved by up to 8%, and the core's own operations measured on the host were 17% slower (median over 88 rows, up to 5x for two loops the vectoriser no longer
   takes up). With these four crates at 3 the device rows are inside their noise and the host rows are 3% slower (median), for about 6 points of the size. A unit
-  test (`shim.rs`) fails if one of the four drops out of the profile. Cargo's per-package override is honoured under fat LTO because the optimiser's size
-  attribute is per function, set when its crate is compiled.
-* There is no knob in `undra.toml` (`[web] opt_level` exists because the web had a measured choice between `s` and `z`; this one has the choice
-  below, decided). A knob for teams that choose size over speed is the first follow-up, because `z` is what takes a core like the user's under 1.2 MB.
+  test (`shim.rs`) fails if one of the four drops out of the profile. What the override keeps at 3, precisely (the review checked it with `CARGO_TERM_VERBOSE=true undra
+  build --platform android --release`: rustc gets `-C opt-level=3` for those four crates and `-C opt-level=s` for every other one, the app's core, `serde_json` and the shim
+  included): the code each of the four compiles itself, optimised at 3 before the link and without the `optsize` attribute. Two things stay at `s` whatever the list says:
+  the link-time optimisation of the whole library runs at the shim's level (`s`), and a generic function of those crates instantiated for the app's own types (a store's
+  signal of the app's record, the codec of the app's record) is compiled in the app's crate, at `s`. The device rows and the host rows below are measured with both, so
+  the numbers include them.
+* **`opt_level` in `[ios]` and in `[android]` of `undra.toml`** (added by the review, "The knob" below): this profile is the default, `"s"`. A team with a
+  hard byte budget sets `"z"`, which builds `release-mobile-z` (`opt-level = "z"` for every crate, the call path included; `panic = "unwind"` kept); a team
+  whose own hot code should not be optimised for size sets `"3"`, which builds `release`, the speed profile every native release build used before. It is a
+  setting of the project, like `[web] opt_level`, so the Xcode and Gradle builds that run `undra build --release` get it without a flag. The gates measure the default.
 
 ### The levers
 
@@ -782,7 +788,8 @@ a hello world is the price of a Rust library that unwinds and of nothing Undra d
 **Findings.** Nothing debug-only is linked into a release core, so there is no feature to put it behind. The devtools hub is in the CLI (`undra dev`); a core carries the runtime's
 inspector registry (`undra-runtime::ext`, a few hundred bytes). `undra-testkit` links nothing into a core that does not use it. No `regex`, no second JSON stack, no float
 formatting outside `serde_json`'s (`zmij`, 17.7 KB, in the playground only). `Backtrace::force_capture` in `guard.rs` (the status 2 body) does not link the symboliser: the
-standard hook already did. This piece changes no crate's code; it is a profile, a gate and a record.
+standard hook already did (the review measured it: with `capture_backtrace` returning an empty string the hello world's arm64 library is 6,616 bytes smaller, 0.7%, and all 127 of
+its `gimli` and `addr2line` symbols are still there; those bytes capture and format the report's `backtrace` text, which ADR-046 defines, so it stays). This piece changes no crate's code; it is a profile, a gate and a record.
 
 ### The gates
 
@@ -795,6 +802,12 @@ number and at most 5% over the record, whichever is lower, the web rows' shape (
 | `android/hello-arm64-v8a` | `libhello_core.so`, stripped, 16 KB aligned | 905,520 | 1,200,000 | 950,796 |
 | `android/hello-x86_64` | the same | 971,464 | 1,200,000 | 1,020,037 |
 | `ios/hello-arm64` | the device slice of the XCFramework, linked and stripped (above) | 793,517 | 900,000 | 833,192 |
+
+**Is the iOS row what an app gains?** The review linked the same slice into a minimal iOS executable whose `main` takes the address of
+`hello_core_undra_api`, against the same executable without the core (`clang -Wl,-dead_strip`, `strip -S -x`, Xcode 26.6): its `__TEXT`, `__DATA_CONST` and `__DATA` sections
+grew by **786,457** bytes, and `__LINKEDIT` (chained fixups, the function starts, the indirect symbols) by 6,904. The row's 793,517 is 0.9% above the sections an app gains (the dylib
+the script links keeps a few more bytes of `__TEXT`) and leaves out the 0.9% of `__LINKEDIT`: within a percent of the file growth either way, so the row is an honest
+measure of the delta; the page padding of the app's segments is the app's.
 
 The script fails when a library's LOAD segments are not 16 KB aligned (Google Play), when one contains the builder's home directory, the checkout or the project (the remapping of this ADR),
 and, like the web gate, when it cannot measure (no NDK, no cargo-ndk, no Xcode: exit 2). The record is `bench/results/native-size.jsonl` (it replaces `android-size.jsonl`; the README and the site
@@ -858,22 +871,64 @@ at 1.24x (the restore runs in `undra-meta`'s closures and the app's generated re
 which dev tooling and tests run; a shipped core encodes change-sets and the platform decodes them). What is not claimed: a physical device (these are the emulator and the simulator on a shared Mac), and the
 emulator's cold load being faster for every variant (0.8x) is its noise, not a win.
 
+### The knob (review, 2026-10-02)
+
+The brief's question was whether to leave 1.2 MB to a follow-up. The knob is a few lines (a profile in the shim's template, a key in two tables of `undra.toml`,
+`Profile::mobile(release, level)`), so it is in this piece: `[android] opt_level` and `[ios] opt_level`, `"s"` (the default), `"z"` or `"3"` (also the integer `3`), any other
+value a `C0002` that names the three. `undra init` writes the line commented out. Measured through the knob itself (`undra build --release` with each value, the same
+template and playground as above, rustc 1.99.0, NDK r27, Xcode 26.6):
+
+| `opt_level` | profile | hello arm64-v8a | hello x86_64 | hello, iOS linked | playground arm64-v8a | playground x86_64 | playground, iOS linked |
+|---|---|---|---|---|---|---|---|
+| `"3"` | `release` | 987,720 | 1,054,352 | 859,853 | 2,860,992 | 3,026,936 | 2,637,348 |
+| `"s"` (default) | `release-mobile` | 905,520 (−8.3%) | 971,480 (−7.9%) | 793,517 (−7.7%) | 2,498,856 (−12.7%) | 2,599,592 (−14.1%) | 2,317,056 (−12.1%) |
+| `"z"` | `release-mobile-z` | 774,480 (−21.6%) | 841,256 (−20.2%) | 608,574 (−29.2%) | 2,024,336 (−29.2%) | 2,250,640 (−25.6%) | 1,653,480 (−37.3%) |
+
+(The hello world's x86_64 and iOS bytes differ from the table above by 16 and 8 bytes: the project's path, the `TypeId` constants.) The middle ground, `z` with the
+call path kept at 3 (`CARGO_PROFILE_RELEASE_MOBILE_OPT_LEVEL=z` on the default profile), measures 883,472 bytes for the hello world's arm64-v8a library (2.4% under the default:
+the four call-path crates are most of a hello world) and 2,197,976 for the playground's (12.0% under the default, 8.6% over `"z"`). It is not a value of the knob: its speed was
+not measured (the app's own code and every generic instantiated for its types would be at `z`), and the knob's job is the smallest library; it stays the follow-up below.
+
+**Speed, re-measured by the review** (the playground's device bench, the three variants built through the knob, installed in turn and run interleaved in rotating order; on
+the emulator a warm-up run after each install is discarded and the device rests 10 s first, because the package broadcasts of an install wake system apps). Each cell is the median of
+the variant's runs; "noise" is the ratio of the `"3"` variant's odd-round median to its even-round one. The shared emulator ran 3 to 4 times slower in absolute terms than the
+committed results of 2026-10-01 (a call 1,068 ns against 266), steadily so (noise 1.00x to 1.03x on the four call rows), so the ratios are the reading:
+
+| row | Android emulator, 8 runs each: `"s"` / `"3"` | `"z"` / `"3"` | iPhone 17 Pro simulator, 5 runs each: `"s"` / `"3"` | `"z"` / `"3"` | noise (emulator / simulator) |
+|---|---|---|---|---|---|
+| sync call | 0.99x | **1.58x** | 0.99x | **1.33x** | 1.02x / 1.01x |
+| 1 KB record | 1.03x | 1.17x | 1.00x | 1.18x | 1.00x / 1.00x |
+| keyed insert, 10k | 1.00x | 0.97x | 0.99x | 1.04x | 1.03x / 1.01x |
+| change-set, 100 signals | 1.01x | 1.15x | 0.99x | 1.13x | 1.02x / 1.03x |
+| drain frame | 1.02x | 0.95x | 0.95x | 0.77x | 1.00x / 1.19x |
+| cold load (first in the run) | 1.08x | 1.10x | 0.94x | 0.92x | 1.18x / 1.09x |
+
+This reproduces the piece's reading: the default profile is inside the noise on every row of both targets (the implementer's 0.83x was the emulator's cold load and its 0.85x the
+drain frame, both rows whose noise was 1.07x and 1.18x: noise, not a win), and `"z"` costs a synchronous call 1.58x on the emulator and 1.33x on the simulator, a record or a
+change-set 13% to 18%. A team that sets `"z"` pays that, and the host rows above (1.84x median for the core's own operations) say what it costs inside the core.
+
 ### Where the user's number lands
 
-U4's 1.6 MB core is not the hello world, which is now 905,520 bytes. Scaled by what the profile did to the playground (a core with queries and stores, −12.7% on arm64) and to the hello world
-(−8.3%), a 1.6 MB core becomes **about 1.40 to 1.47 MB** per ABI with this change. That does **not** reach 1.2 MB, and the honest reading is: the hello-world budget is met with
-25% to spare, a core like the user's is 8% to 13% smaller, and what is left is the user's core, the runtime and Rust's unwind tables. What would reach it, measured: uniform `opt-level = "z"`
-(about 1.13 MB scaled by the playground's −29.2%, 1.25 by the hello world's −21.6%) at the price in speed above, and relocation packing is another 4% (`s` with it: about 1.28 to 1.33 MB). The
-follow-ups, in bytes per risk: a `[android] opt_level` and `[ios] opt_level` knob (the option that closes U4: uniform `s` or `z`, 8 to 13 points more off the Android library, the call path 1.1x to 1.5x
-slower at `z`); `z` on the cold crates only (`undra-meta`, `undra-ports`, `undra-query`, the generated schema code) with the call path at 3, which the per-package override allows and this piece did not
-measure; relocation packing behind the app's `min_sdk` (−4%); and the runtime's own size (`undra-runtime::runtime` is 65 KB of the 98 KB, `undra-meta`'s `Schema::canonical_json` 12 KB).
+U4's 1.6 MB core is not the hello world, and it was measured with the speed profile. Split it as the hello world's 987,720 bytes (the runtime, the standard library, a
+template's worth of core) plus about 612 KB of the user's own, and scale the second part as the playground's own part scales (what the playground adds over the hello world:
+1,873,272 bytes at `opt-level = 3`, −14.9% at the default, −33.3% at `z`): the core becomes **about 1.43 MB** per ABI with no setting changed (the hello world's −8.3% and the
+playground's −12.7% bound it at 1.40 to 1.47) and **about 1.18 MB with `opt_level = "z"` in `[android]`** (bounded by 1.13 and 1.25; the CLI prints "1.6 MB" for 1.55 to 1.65 million
+bytes, which makes it 1.15 to 1.22 MB). The default does not reach 1.2 MB; `"z"` reaches it, narrowly and not for every core of that size, for the price above (a synchronous call 1.58x on the emulator). Relocation packing would take another 4% (`-Wl,--pack-dyn-relocs=android` through `RUSTFLAGS`, for an
+app whose `min_sdk` loads it). So the answer to U4 is a setting, measured and documented, not a promise: the team sets `opt_level = "z"`, measures its own core with `undra build
+--release` (it prints the size) and reads the speed rows above against its own hot paths.
+
+The follow-ups, in bytes per risk: `z` on the cold crates only with the call path at 3 (measured for bytes above: −12.0% of the playground under the default; its speed is the open
+question); relocation packing applied by the CLI when `[android] min_sdk` is one whose loader reads the packed format (−3% to −4%; the review's reading is that the packed
+format is read from API 23, under the default `min_sdk` of 26, which wants a load test on the oldest emulator before the CLI turns it on); and the runtime's own size
+(`undra-runtime::runtime` is 65 KB of the 98 KB, `undra-meta`'s `Schema::canonical_json` 12 KB).
 
 ### Consequences
 
 * A mobile release build changes bytes and the profile's name: `target/<triple>/release-mobile/` replaces `release/` for iOS and Android (the CLI's debug-size hint reads the new directory); the generated Xcode and
   Gradle integrations call `undra build --release` and are unaffected. A project that built with its own `CARGO_PROFILE_RELEASE_*` variables must set the `release-mobile` ones (or `RUSTFLAGS`) now.
 * The next change that grows a hello-world core by 5% re-records in the same commit, with the measured cause. A toolchain bump (rustc, the NDK, Xcode) can move the numbers by a few percent: re-record after a look at why.
-* The Android record was measured on macOS; the CI job measures on Ubuntu with the same NDK and rustc. The two agree to a few dozen bytes here (a 16-byte difference between two builds on this Mac, the
-  `TypeId` constants of the note above); the 5% tolerance is what absorbs a real runner difference.
+* The Android record was measured on macOS; the CI job measures on Ubuntu with the same NDK and rustc. The first hosted run (the pull request's merge commit, 2026-10-03) measured 905,896 bytes for
+  arm64-v8a (+376, 0.04%) and 971,168 for x86_64 (−296): a few hundred bytes of path- and host-dependent constants (16 bytes move between two checkouts on this Mac, the `TypeId` constants of the
+  note above); the 5% tolerance absorbs that a hundred times over.
 * `scripts/bench-device.sh --device android` fails on macOS when exactly one emulator is running (`[ "$(... | wc -l)" = 1 ]` is false because `wc -l` pads its count): `--target <serial>` is the way until that
   script is fixed (not this piece's file).

@@ -1656,6 +1656,16 @@ Your own work joins the run with `undra::background::register(ctx, name, pending
 
 The Android numbers are the stripped, 16 KB aligned file Gradle packages. The iOS number is what the device slice of the XCFramework adds to an app once its link has kept what is reachable and dropped the local symbols; the `.a` file itself is larger and is not a measure. A bigger core is bigger: the playground, with queries, persistence and several stores, is 2.50 MB for arm64-v8a (2.86 MB before, 13% less).
 
+When a byte budget is hard, choose size over speed per platform with `opt_level` in `[android]` or `[ios]` of `undra.toml`. `"z"` optimises every crate for size, the call path included; `"3"` is the speed profile, for an app whose own hot code (it is optimised for size by default, like everything outside the call path) should not be. A panic unwinds in all three, and the Xcode and Gradle builds pick the setting up with no flag.
+
+| `opt_level` | Hello world, arm64-v8a | Playground, arm64-v8a | Playground, added to an iOS app | A synchronous call (Android emulator / iOS simulator) |
+| --- | --- | --- | --- | --- |
+| `"3"` | 987.7 KB | 2.86 MB | 2.64 MB | 1x |
+| `"s"` (the default) | 905.5 KB | 2.50 MB | 2.32 MB | 0.99x / 0.99x |
+| `"z"` | 774.5 KB | 2.02 MB | 1.65 MB | 1.58x / 1.33x |
+
+At `"z"` a 1 KB record or a change-set of 100 signals also costs 13% to 18% more; the default is within the noise on every row the device bench measures. A core of 1.6 MB at the old speed profile is about 1.43 MB at the default and about 1.18 MB at `"z"`. Measure your own: `undra build --release` prints the size.
+
 The sizes are gated in CI (`scripts/native-size.sh`: over the design's budget, or more than 5% over the recorded size, fails). To measure your own core, `undra build --release` prints each library's size at the end. To see where the bytes are, the NDK's tools read the unstripped twin that `--release` keeps in `build/symbols/android/<abi>/`:
 
 sh
@@ -2248,7 +2258,7 @@ Builds the core for each platform and puts the result where the app shells look 
 
 **Not a manual step.** In a project made by `undra init` the app builds run `undra build` for you, each only when the core changed: Gradle's `undraBuild` task (`preBuild` depends on it; a release variant builds a release core), Xcode's *Build the Undra core* Run Script phase (before Compile Sources, with input and output file lists) and the `undra()` Vite plugin from `@undra/runtime/vite` (on start, and under `vite dev` on every change of `core/src`, followed by a reload). They find `undra` on `PATH`, or in `~/.undra/bin` and the other usual places, and say how to install it when it is missing (`error[undra::C0003]`).
 
-`--release` turns on LTO and one codegen unit. The web build is always optimized. On iOS and Android the release build is also tuned for size (the `release-mobile` profile of the generated crate: `opt-level = "s"`, and a panic still unwinds so the core can contain it), and the host build keeps `opt-level = 3`. Sizes are printed at the end next to the design's budgets. A debug Android core is tens of megabytes per ABI, so package with `--release`. The library is your core plus the Undra C ABI, built from a small crate generated under `target/undra/`; you never write that crate.
+`--release` turns on LTO and one codegen unit. The web build is always optimized. On iOS and Android the release build is also tuned for size (the `release-mobile` profile of the generated crate: `opt-level = "s"`, and a panic still unwinds so the core can contain it), and the host build keeps `opt-level = 3`. `opt_level` in `[ios]` or `[android]` of `undra.toml` chooses the smallest library (`"z"`, calls about 1.5x slower) or the fastest (`"3"`) instead; the [production page](https://shreypdev.github.io/undra/docs/production.html#size) has the numbers. Sizes are printed at the end next to the design's budgets. A debug Android core is tens of megabytes per ABI, so package with `--release`. The library is your core plus the Undra C ABI, built from a small crate generated under `target/undra/`; you never write that crate.
 
 **No `-force_load`.** Each iOS slice is one prelinked object whose only global symbol is the core's entry, `hello_core_undra_api`, which the generated bindings call. It links like any other static library, in debug and release, and [another core](https://shreypdev.github.io/undra/docs/several-cores.html) can sit next to it.
 
@@ -2365,6 +2375,12 @@ version = "0.1"                # path = "…" points at a checkout of the Undra 
 
 [ios]
 deployment_target = "17.0"     # 15.0 or later; below 17.0 the Swift stores are ObservableObjects
+# opt_level = "s"              # release builds: "s" small (the default), "z" smallest (calls about 1.5x slower), "3" fastest
+
+[android]
+abis = ["arm64-v8a", "x86_64"]
+min_sdk = 26
+# opt_level = "s"              # the same choice for the Android libraries
 ```
 
 Commit `generated/` or regenerate it in CI, and gate on `undra bindgen --check` so a stale binding cannot ship.

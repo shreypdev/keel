@@ -59,8 +59,8 @@ playground). The first design was `s` everywhere; the host rows are what changed
 
 ## Open
 
-* A `[android] opt_level` / `[ios] opt_level` knob for teams that choose `z` (measured: 8 to 13 points more off the Android library, the call path 1.1x to 1.5x slower): it is what
-  takes a core like the user's under 1.2 MB. Better still, `z` on the cold crates only (`undra-meta`, `undra-ports`, `undra-query`, generated schema code) with the call path at 3.
+* The `[android] opt_level` / `[ios] opt_level` knob landed in the review (`.10x/reviews/2026-10-02-android-size-review.md`, ADR-052's "The knob"): `"s"` (the default),
+  `"z"` (`release-mobile-z`, `z` for every crate) or `"3"` (`release`). Still open: `z` on the cold crates only with the call path at 3 (its bytes are in the ADR, its speed is not).
 * Relocation packing behind `min_sdk` (−3 to −4%).
 * The runtime's own size (`undra-runtime::runtime` 65 KB, `undra-meta`'s `Schema::canonical_json` 12 KB), each a piece of its own.
 * `scripts/bench-device.sh --device android` fails on macOS when exactly one emulator is running (`wc -l` pads its count, so `[ "$(... | wc -l)" = 1 ]` is false): pass
