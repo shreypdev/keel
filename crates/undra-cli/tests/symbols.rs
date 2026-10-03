@@ -594,8 +594,21 @@ struct ElfSection {
     size: u64,
 }
 
-/// The sections of the code: what `debug = "line-tables-only"` lets LLVM lay out differently.
-const CODE_SECTIONS: [&str; 4] = [".text", ".eh_frame", ".eh_frame_hdr", ".gcc_except_table"];
+/// The sections of the code and what points at it: what `debug = "line-tables-only"` lets LLVM lay out
+/// differently. The relocations and the relro data (`.rela.dyn`, `.data.rel.ro`) are here because they are
+/// the vtables and function pointers of the code: at a size-optimising profile (`release-mobile`, ADR-052's
+/// amendment of 2026-10-02) LLVM folds identical functions (`RawVec::grow_one` of one type and another) a
+/// little differently with line tables than without, so a few of them are one function in one library and two
+/// in the other: measured 4 relocations of about 5,100 and 48 bytes of 98,000 of `.data.rel.ro`, beside 216 bytes
+/// of 1.74 MB of `.text`. At `opt-level = 3`, the profile this test was written for, they were equal.
+const CODE_SECTIONS: [&str; 6] = [
+    ".text",
+    ".eh_frame",
+    ".eh_frame_hdr",
+    ".gcc_except_table",
+    ".rela.dyn",
+    ".data.rel.ro",
+];
 
 /// Why the Android library `with` (built with symbols, ADR-046, then stripped by `undra build`)
 /// is not the library `plain` (built with `--no-symbols`: `debug = false`, `strip = "symbols"`,
@@ -604,14 +617,17 @@ const CODE_SECTIONS: [&str; 4] = [".text", ".eh_frame", ".eh_frame_hdr", ".gcc_e
 ///
 /// * add a section: the same sections, in the same order, of the same kinds (a `.debug_*`,
 ///   `.symtab` or `.strtab` left behind would be one), compared exactly;
-/// * change the data: every section that holds bytes in the file and is not code (`.rodata`,
-///   `.data`, the relocations, the dynamic symbols, the notes) has the same size, exactly;
-///   `.shstrtab`, which `llvm-strip` writes anew, is not larger;
-/// * change the code: the code and its unwind tables differ by at most a thousandth. Line tables
-///   do not change what is compiled, but LLVM's output with them is not byte-identical (a
-///   function's alignment here and there: measured 0 or 16 bytes over 2.1 MB of `.text`, either
-///   way, on this branch and before ADR-058). A thousandth is two orders above that and two below
-///   what a change in what is compiled costs (a dependency, an opt-level, an inlining policy).
+/// * change the data: every section that holds bytes in the file and is neither code nor what points at
+///   it (`.rodata`, `.data`, the dynamic symbols, the notes) has the same size, exactly; `.shstrtab`,
+///   which `llvm-strip` writes anew, is not larger;
+/// * change the code: the code, its unwind tables and the relocations and relro data that point at it
+///   ([`CODE_SECTIONS`]) differ by at most a thousandth. Line tables do not change what is compiled,
+///   but LLVM's output with them is not byte-identical (a function's alignment here and there:
+///   measured 0 or 16 bytes over 2.1 MB of `.text`, either way, on this branch and before ADR-058;
+///   at `opt-level = "s"` also which of several identical functions are folded: 216 bytes of
+///   `.text` over 1.74 MB, 4 relocations). A thousandth is two orders above the first and one above
+///   the second, and two below what a change in what is compiled costs (a dependency, an
+///   opt-level, an inlining policy).
 ///
 /// The file sizes are not compared: they move with that noise, and an exact `<=` on them failed
 /// on code that kept the symbols correctly.
