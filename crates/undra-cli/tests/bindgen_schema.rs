@@ -59,6 +59,13 @@ fn a_schema_file_generates_the_three_trees() {
     for file in GOLDEN_FILES {
         let actual = std::fs::read_to_string(out.path().join(file))
             .unwrap_or_else(|_| panic!("{file} was not generated"));
+        // The manifests name the release this `undra` belongs to (ADR-063): the golden says `<version>`, so a release's
+        // version bump does not change it.
+        let actual = if file.ends_with("Package.swift") || file.ends_with("build.gradle.kts") {
+            actual.replace(env!("CARGO_PKG_VERSION"), "<version>")
+        } else {
+            actual
+        };
         let golden = golden_dir().join(file);
         if updating {
             std::fs::create_dir_all(golden.parent().unwrap()).unwrap();

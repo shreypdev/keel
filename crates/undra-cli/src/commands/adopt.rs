@@ -33,6 +33,8 @@ use super::init::{Setup, generate_bindings, scaffold_core, variables};
 /// when `undra/` already exists with files in it.
 pub fn run(env: &Env<'_>, args: &AdoptArgs) -> Result<()> {
     let ui = env.ui;
+    // ADR-063: where a released project's dependencies come from (GitHub, or the mirror the environment names).
+    let dist = crate::dist::Dist::from_sys(env.sys)?;
     let start = match &args.path {
         Some(p) if p.is_absolute() => p.clone(),
         Some(p) => env.start_dir()?.join(p),
@@ -111,6 +113,7 @@ pub fn run(env: &Env<'_>, args: &AdoptArgs) -> Result<()> {
         names,
         config,
         repo: undra_repo,
+        dist,
     };
 
     ui.step(&format!("Adding an Undra core to {}", repo.display()));
@@ -120,7 +123,7 @@ pub fn run(env: &Env<'_>, args: &AdoptArgs) -> Result<()> {
 
     let runtimes = match &setup.repo {
         Some(repo) => Runtimes::in_repo(repo),
-        None => Runtimes::from_registries(&setup.config.undra_version),
+        None => Runtimes::released(&setup.config.undra_version, &setup.dist),
     };
     let steps = Steps {
         undra_dir: &setup.root,
@@ -165,7 +168,7 @@ pub fn run(env: &Env<'_>, args: &AdoptArgs) -> Result<()> {
             "UNDRA_SOURCE_NOTE",
             match &setup.repo {
                 Some(r) => format!("The core uses the Undra crates, and the apps the Undra runtimes, from the checkout at `{}`.", r.display()),
-                None => "The core depends on the released Undra crates; the apps on the matching runtimes (Swift package, Maven artifact, npm package).".to_owned(),
+                None => "The core depends on the released Undra crates (a git tag of the Undra repository); the apps on the runtimes of the same release, all from that repository (the Swift package at its root, the Kotlin artifacts JitPack builds from the tag, the npm package attached to the GitHub Release; ADR-063).".to_owned(),
             },
         );
     let guide = guide_vars
@@ -375,8 +378,11 @@ impl Steps<'_> {
                 "the `UndraRuntime` package at `{}` (the generated package depends on it)",
                 dir.display()
             ),
-            RuntimeRef::Registry { version } => {
-                format!("`UndraRuntime` {version}.x from https://github.com/shreypdev/undra-swift")
+            RuntimeRef::Release { version, dist } => {
+                format!(
+                    "`UndraRuntime` {version} (up to the next major version) from {}",
+                    dist.git_url
+                )
             }
         };
         text.push_str(&format!(
@@ -400,9 +406,15 @@ impl Steps<'_> {
         let bindings = self.rel(&app.root, &self.generated().join("kotlin"));
         let jni = self.rel(&module, &self.build().join("android/jniLibs"));
         let kts = app.kotlin_dsl;
-        let version = match &self.runtimes.kotlin {
-            RuntimeRef::Path(_) => "0.1.0-SNAPSHOT".to_owned(),
-            RuntimeRef::Registry { version } => format!("{version}.0"),
+        // The coordinates of the runtime's modules: the checkout's own (a composite build substitutes them), or the release's
+        // (ADR-063) with the repository they are fetched from.
+        let (group, version, repository) = match &self.runtimes.kotlin {
+            RuntimeRef::Path(_) => ("dev.undra", "0.1.0-SNAPSHOT".to_owned(), None),
+            RuntimeRef::Release { version, dist } => (
+                crate::dist::MAVEN.group,
+                crate::dist::maven_version(version),
+                dist.gradle_repository("       ", kts),
+            ),
         };
         let package = self
             .config
@@ -426,7 +438,7 @@ impl Steps<'_> {
                     RuntimeRef::Path(dir) => {
                         format!("\n   includeBuild(\"{}\")", self.rel(&app.root, dir))
                     }
-                    RuntimeRef::Registry { .. } => String::new(),
+                    RuntimeRef::Release { .. } => String::new(),
                 },
             )
         } else {
@@ -439,7 +451,7 @@ impl Steps<'_> {
                     RuntimeRef::Path(dir) => {
                         format!("\n   includeBuild('{}')", self.rel(&app.root, dir))
                     }
-                    RuntimeRef::Registry { .. } => String::new(),
+                    RuntimeRef::Release { .. } => String::new(),
                 },
             )
         };
@@ -458,13 +470,18 @@ impl Steps<'_> {
             "1. **Include the bindings module** in `{settings}`:\n\n   ```\n   {include}{include_build}\n   ```\n\n   The generated module (`{}`) is a plain JVM library with the Kotlin plugin; its `build.gradle.kts` uses\n   `id(\"org.jetbrains.kotlin.jvm\")` without a version, so declare that plugin (Kotlin 2.0.x) in your root build script\n   with `apply false`, as you do for the Android and Kotlin Android plugins.\n",
             self.generated().join("kotlin").display()
         ));
+        if let Some(lines) = &repository {
+            text.push_str(&format!(
+                "   The runtime comes from the release's tag (ADR-063): add its repository to `dependencyResolutionManagement {{ repositories {{ }} }}`\n   of `{settings}` (it is consulted for Undra's group only):\n\n   ```\n{lines}   ```\n"
+            ));
+        }
         let deps = if kts {
             format!(
-                "implementation(project(\":core-bindings\"))\n   implementation(\"dev.undra:runtime:{version}\")\n   implementation(\"dev.undra:android-adapters:{version}\")"
+                "implementation(project(\":core-bindings\"))\n   implementation(\"{group}:runtime:{version}\")\n   implementation(\"{group}:android-adapters:{version}\")"
             )
         } else {
             format!(
-                "implementation project(':core-bindings')\n   implementation 'dev.undra:runtime:{version}'\n   implementation 'dev.undra:android-adapters:{version}'"
+                "implementation project(':core-bindings')\n   implementation '{group}:runtime:{version}'\n   implementation '{group}:android-adapters:{version}'"
             )
         };
         let jni_line = if kts {
@@ -510,9 +527,10 @@ impl Steps<'_> {
                     self.rel(&app.dir, dir)
                 ));
             }
-            RuntimeRef::Registry { version } => {
+            RuntimeRef::Release { version, dist } => {
+                let url = dist.npm_url("undra-runtime", version);
                 text.push_str(&format!(
-                    "1. **Install the runtime and the bindings.**\n\n   ```sh\n   npm install @undra/runtime@^{version}.0 {generated}\n   ```\n\n   (`{generated}` is the generated package, `{ts_package}`; it imports `@undra/runtime` as a peer dependency.)\n"
+                    "1. **Install the runtime and the bindings.** The runtime is an asset of the Undra release on GitHub (ADR-063): npm, pnpm\n   and yarn install its URL without a registry.\n\n   ```sh\n   npm install {url} {generated}\n   ```\n\n   (`{generated}` is the generated package, `{ts_package}`; it imports `@undra/runtime` as a peer dependency.)\n"
                 ));
             }
         }

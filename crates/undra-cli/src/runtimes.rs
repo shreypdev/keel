@@ -1,12 +1,13 @@
 //! Where the platform runtimes (Swift, Kotlin, TypeScript) are found.
 //!
-//! The generated bindings and the app shells depend on `UndraRuntime`, `dev.undra:runtime` and
+//! The generated bindings and the app shells depend on `UndraRuntime`, the Kotlin runtime and
 //! `@undra/runtime`. In a checkout of the Undra repository they are used straight from it (no
-//! publishing step, edits show immediately); otherwise they come from the package registries at
-//! the project's Undra version.
+//! publishing step, edits show immediately); otherwise they come from the project's Undra release,
+//! from where [`Dist`] says (ADR-063: GitHub, unless a mirror is named).
 
 use std::path::{Path, PathBuf};
 
+use crate::dist::{Dist, full_version};
 use crate::error::{CliError, Code, Result};
 use crate::project::Project;
 
@@ -15,10 +16,12 @@ use crate::project::Project;
 pub enum RuntimeRef {
     /// A directory (absolute) in a checkout.
     Path(PathBuf),
-    /// The package registry, at this version.
-    Registry {
-        /// The version requested.
+    /// A release (ADR-063).
+    Release {
+        /// The release, in full (`1.0.0`).
         version: String,
+        /// Where its artifacts are fetched from.
+        dist: Dist,
     },
 }
 
@@ -42,9 +45,9 @@ pub const TS_IN_REPO: &str = "runtimes/ts/@undra/runtime";
 
 impl Runtimes {
     /// The runtimes of `project`: `[runtimes]` overrides, else the checkout of `[undra] path`,
-    /// else the registries.
+    /// else the release `[undra] version` names, fetched from `dist`.
     #[must_use]
-    pub fn for_project(project: &Project) -> Runtimes {
+    pub fn for_project(project: &Project, dist: &Dist) -> Runtimes {
         let repo = project.undra_repo();
         let pick = |over: &Option<String>, in_repo: &str| -> RuntimeRef {
             if let Some(path) = over {
@@ -53,8 +56,9 @@ impl Runtimes {
             }
             match &repo {
                 Some(repo) => RuntimeRef::Path(repo.join(in_repo)),
-                None => RuntimeRef::Registry {
-                    version: project.config.undra_version.clone(),
+                None => RuntimeRef::Release {
+                    version: full_version(&project.config.undra_version),
+                    dist: dist.clone(),
                 },
             }
         };
@@ -75,16 +79,17 @@ impl Runtimes {
         }
     }
 
-    /// Runtimes taken from the registries.
+    /// Runtimes of the release `version`, fetched from `dist`.
     #[must_use]
-    pub fn from_registries(version: &str) -> Runtimes {
-        let registry = RuntimeRef::Registry {
-            version: version.to_owned(),
+    pub fn released(version: &str, dist: &Dist) -> Runtimes {
+        let release = RuntimeRef::Release {
+            version: full_version(version),
+            dist: dist.clone(),
         };
         Runtimes {
-            swift: registry.clone(),
-            kotlin: registry.clone(),
-            ts: registry,
+            swift: release.clone(),
+            kotlin: release.clone(),
+            ts: release,
         }
     }
 }
@@ -153,14 +158,27 @@ mod tests {
     }
 
     #[test]
-    fn registry_when_there_is_no_checkout() {
-        let r = Runtimes::for_project(&project("/p", None));
-        assert_eq!(r, Runtimes::from_registries(crate::config::UNDRA_VERSION));
+    fn the_release_when_there_is_no_checkout() {
+        let r = Runtimes::for_project(&project("/p", None), &Dist::github());
+        assert_eq!(
+            r,
+            Runtimes::released(crate::config::UNDRA_VERSION, &Dist::github())
+        );
+        // A two-part version an older `undra init` wrote is the first release of its line.
+        let mut old = project("/p", None);
+        old.config.undra_version = "0.9".to_owned();
+        assert!(matches!(
+            Runtimes::for_project(&old, &Dist::github()).kotlin,
+            RuntimeRef::Release { version, .. } if version == "0.9.0"
+        ));
     }
 
     #[test]
     fn checkout_paths_when_undra_path_is_set() {
-        let r = Runtimes::for_project(&project("/nonexistent/p", Some("../undra")));
+        let r = Runtimes::for_project(
+            &project("/nonexistent/p", Some("../undra")),
+            &Dist::github(),
+        );
         assert!(
             matches!(&r.swift, RuntimeRef::Path(p) if p.ends_with("undra/runtimes/swift/UndraRuntime")),
             "{r:?}"
@@ -175,7 +193,7 @@ mod tests {
     fn overrides_win() {
         let mut p = project("/nonexistent/p", Some("../undra"));
         p.config.runtimes.kotlin = Some("vendor/kotlin".into());
-        let r = Runtimes::for_project(&p);
+        let r = Runtimes::for_project(&p, &Dist::github());
         assert_eq!(
             r.kotlin,
             RuntimeRef::Path(PathBuf::from("/nonexistent/p/vendor/kotlin"))

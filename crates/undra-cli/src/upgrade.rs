@@ -1,21 +1,23 @@
 //! `undra upgrade`: finding every place a project pins its Undra version, and the edits that
 //! move them all to this `undra`'s version in lockstep.
 //!
-//! A project pins Undra in six kinds of file, each in the shape `undra init` writes it:
+//! A project pins Undra in six kinds of file, each in the shape `undra init` writes it (ADR-063: one release, all from
+//! the Undra repository on GitHub):
 //!
 //! | File | The pin | After an upgrade to `1.2.3` |
 //! |---|---|---|
 //! | `Cargo.toml` of the core (and any crate of the project) | `undra = { git = "...", tag = "v1.0.0" }`, or a registry version | `tag = "v1.2.3"` / `"1.2.3"` |
-//! | `undra.toml` | `[undra] version = "1.0"` | `"1.2"` |
-//! | `web/package.json` (any `package.json`) | `"@undra/runtime": "^1.0.0"`, `"@undra/react-native"` | `"^1.2.0"` |
-//! | `android/**/*.gradle(.kts)` | `dev.undra:runtime:1.0.0`, `dev.undra:android-adapters:1.0.0`, `dev.undra:android-work:1.0.0`, `dev.undra:okhttp-adapters:1.0.0` | `1.2.0` |
-//! | `ios/**/project.pbxproj` | the `undra-swift` package's `minimumVersion = 1.0.0;` | `1.2.0` |
+//! | `undra.toml` | `[undra] version = "1.0.0"` | `"1.2.3"` |
+//! | `web/package.json` (any `package.json`) | `"@undra/runtime"` (and `@undra/react-native`, `@undra/testkit`): the release asset's URL, or a registry range | the URL of `v1.2.3`'s asset |
+//! | `android/**/*.gradle(.kts)` | `<group>:runtime:<v>` and the other modules of [`dist::MAVEN_MODULES`], either group of [`dist::MAVEN_GROUPS`] | [`dist::maven_coordinate`]`(module, "1.2.3")` |
+//! | `ios/**/project.pbxproj` | the Undra Swift package's `minimumVersion = 1.0.0;` (the repository, or the old `undra-swift` URL) | `1.2.3`, from the repository |
 //! | `.github/workflows/*.yml` | `UNDRA_VERSION: "1.0.0"` | `"1.2.3"` |
 //!
-//! The runtimes are pinned to the release line (`major.minor.0`, the registries' compatible range),
-//! the crates and the workflow to the exact release, exactly as `undra init` pins them, so an
-//! upgraded project and a fresh one agree. A dependency on a checkout of the repository (a `path`)
-//! is not a pin a release can move: [`Plan::path_pins`] lists them and the command changes nothing.
+//! Every pin is moved to the exact release, as `undra init` writes it, so an upgraded project and a fresh one agree. A pin
+//! written before ADR-063 (a release line: `^0.1.0`, `"0.1"`, `dev.undra:runtime:0.1.0`, the `undra-swift` package) is read as
+//! the line it names and moved to the release's address. When the Kotlin pins move to a group that needs a repository
+//! (JitPack's), the project's `settings.gradle(.kts)` gets it ([`add_gradle_repository`]). A dependency on a checkout of the
+//! repository (a `path`) is not a pin a release can move: [`Plan::path_pins`] lists them and the command changes nothing.
 //!
 //! The editors work on lines and change only the version text (or, for a git dependency, the one
 //! `tag`/`rev`/`branch` pair), so a file's comments and formatting survive. A version that is not
@@ -25,8 +27,12 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::config::{UNDRA_REPO_URL, UNDRA_SWIFT_PACKAGE_URL};
+use crate::dist::{self, Dist};
 use crate::semver::Semver;
+
+/// The Swift package of the runtime before ADR-063: a repository that never existed. A project that names it is moved to
+/// the Undra repository.
+const OLD_SWIFT_PACKAGE_URL: &str = "https://github.com/shreypdev/undra-swift";
 
 /// One edit: a line, what it pins, and the text before and after.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,30 +100,20 @@ pub struct FileResult {
     pub unmovable: Vec<Unmovable>,
 }
 
-/// The release a pin of each kind is moved to, as text.
+/// The release a pin of each kind is moved to, and where its artifacts are fetched from.
 #[derive(Clone, Debug)]
 pub struct Target {
     /// The version of this `undra`.
     pub version: Semver,
+    /// The addresses of the release (GitHub's, or a mirror's: ADR-063).
+    pub dist: Dist,
 }
 
 impl Target {
-    /// `1.2.3`: the crates' tag (with a `v`) and the workflow.
+    /// `1.2.3`: what every pin names (ADR-063).
     #[must_use]
     pub fn full(&self) -> String {
         self.version.to_string()
-    }
-
-    /// `1.2.0`: what the registries' runtimes are asked for.
-    #[must_use]
-    pub fn runtime(&self) -> String {
-        format!("{}.0", self.version.line())
-    }
-
-    /// `1.2`: `[undra] version` of `undra.toml`.
-    #[must_use]
-    pub fn line(&self) -> String {
-        self.version.line()
     }
 }
 
@@ -163,28 +159,30 @@ fn is_undra_crate(name: &str) -> bool {
 }
 
 /// Whether `url` is Undra's repository: with or without `.git` or a trailing slash, in any case,
-/// over https, http or ssh (`git@github.com:shreypdev/undra.git`, `ssh://git@github.com/...`).
-fn is_undra_repo(url: &str) -> bool {
-    same_repository(url, UNDRA_REPO_URL)
+/// over https, http or ssh (`git@github.com:shreypdev/undra.git`, `ssh://git@github.com/...`), or the mirror `dist` names.
+fn is_undra_repo(url: &str, dist: &Dist) -> bool {
+    same_repository(url, dist::REPO_URL) || same_repository(url, &dist.git_url)
 }
 
-/// Whether `url` names the repository `wanted` (an `https://` URL), in any of the spellings
-/// [`is_undra_repo`] accepts.
+/// Whether `url` names the repository `wanted`, in any of the spellings [`is_undra_repo`] accepts.
 fn same_repository(url: &str, wanted: &str) -> bool {
-    let wanted = wanted
-        .trim_end_matches('/')
-        .trim_start_matches("https://")
-        .to_ascii_lowercase();
-    let given = url.trim().trim_end_matches('/').trim_end_matches(".git");
-    let given = given
-        .strip_prefix("https://")
-        .or_else(|| given.strip_prefix("http://"))
-        .or_else(|| given.strip_prefix("ssh://git@"))
-        .or_else(|| given.strip_prefix("git@"))
-        .unwrap_or(given)
+    normalized_repository(url) == normalized_repository(wanted)
+}
+
+/// A repository URL without its scheme or user, `.git` or trailing slash, with an scp-like `host:path` made `host/path`,
+/// lowercased; a `file://` URL keeps its scheme (it is a path, not a host).
+fn normalized_repository(url: &str) -> String {
+    let url = url.trim().trim_end_matches('/').trim_end_matches(".git");
+    if url.starts_with("file://") {
+        return url.to_ascii_lowercase();
+    }
+    url.strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .or_else(|| url.strip_prefix("ssh://git@"))
+        .or_else(|| url.strip_prefix("git@"))
+        .unwrap_or(url)
         .replacen(':', "/", 1)
-        .to_ascii_lowercase();
-    given == wanted
+        .to_ascii_lowercase()
 }
 
 /// The pieces of `line` around the quoted value of `key = "value"`: the text before the value, the
@@ -236,9 +234,16 @@ pub fn edit_undra_toml(text: &str, target: &Target) -> FileResult {
                 version: Semver::parse(&value),
                 shown: value.clone(),
                 line: n,
-                exact: false,
+                // `1.0.0` names a release (ADR-063); `1.0`, what an older `undra init` wrote, a release line.
+                exact: value
+                    .split(['-', '+'])
+                    .next()
+                    .unwrap_or("")
+                    .split('.')
+                    .count()
+                    == 3,
             });
-            let new = format!("{before}{}{after}", target.line());
+            let new = format!("{before}{}{after}", target.full());
             if new != line {
                 result.changes.push(Change {
                     line: n,
@@ -396,7 +401,7 @@ fn move_dependency(
     }
     let tag = format!("v{}", target.full());
     if let Some(url) = dep.git {
-        if !is_undra_repo(url) {
+        if !is_undra_repo(url, &target.dist) {
             result.unmovable.push(Unmovable {
                 line,
                 text: text.trim().to_owned(),
@@ -718,44 +723,62 @@ pub fn edit_cargo_toml(text: &str, target: &Target) -> FileResult {
 // ---------------------------------------------------------------------------------------------
 // package.json
 
-/// The npm packages of the Undra repository, released in lockstep: the runtime and the React Native
-/// host over it (`@undra/react-native` peer-depends on the same line of `@undra/runtime`).
-const UNDRA_NPM_PACKAGES: &[&str] = &["@undra/runtime", "@undra/react-native"];
+/// Whether `url` is an asset of an Undra release: under GitHub's release URL or the mirror's (ADR-063).
+fn is_undra_release_url(url: &str, dist: &Dist) -> bool {
+    [dist::RELEASES_URL, dist.release_url.as_str()]
+        .iter()
+        .any(|base| url.starts_with(&format!("{base}/")))
+}
 
-/// Moves `"@undra/runtime"` and `"@undra/react-native"` to `^<major>.<minor>.0`.
+/// Moves the npm packages of the Undra repository (released in lockstep, [`dist::NPM_PACKAGES`]: the runtime, the React
+/// Native host and the testing kit, which name the runtime as a peer) to the URL of the target release's asset (ADR-063).
+///
+/// A registry range (`^0.1.0`, what was written before the release assets) moves to the URL too; a local path (`file:`,
+/// `link:`, ...) is a checkout, and a tarball somewhere else is a fork: both are left.
 #[must_use]
 pub fn edit_package_json(text: &str, target: &Target) -> FileResult {
     let mut result = FileResult::default();
     for (n, line, eol) in lines_of(text) {
         let trimmed = line.trim_start();
-        let package = UNDRA_NPM_PACKAGES
+        let package = dist::NPM_PACKAGES
             .iter()
-            .find(|name| trimmed.starts_with(&format!("\"{name}\"")));
-        if let Some(&package) = package {
+            .find(|(name, _)| trimmed.starts_with(&format!("\"{name}\"")));
+        if let Some(&(package, stem)) = package {
             if let Some(colon) = line.find(':') {
                 let after = &line[colon + 1..];
                 if let Some(open) = after.find('"') {
                     if let Some(len) = after[open + 1..].find('"') {
                         let value = &after[open + 1..open + 1 + len];
+                        let asset = dist::npm_url_version(value, stem);
                         let is_local = ["file:", "link:", "workspace:", "portal:"]
                             .iter()
                             .any(|p| value.starts_with(p));
-                        if is_local {
+                        let unmovable = match asset {
+                            Some(_) if is_undra_release_url(value, &target.dist) => None,
+                            Some(_) => Some(Why::Fork),
+                            None if is_local => Some(Why::Path),
+                            None if value.contains("://") || value.contains(".tgz") => {
+                                Some(Why::Fork)
+                            }
+                            None => None,
+                        };
+                        if let Some(why) = unmovable {
                             result.unmovable.push(Unmovable {
                                 line: n,
                                 text: trimmed.trim().to_owned(),
-                                why: Why::Path,
+                                why,
                             });
                         } else {
-                            let (_, version) = split_requirement(value);
+                            let version = asset.unwrap_or_else(|| split_requirement(value).1);
                             result.pins.push(Pin {
                                 what: package.to_owned(),
                                 version: Semver::parse(version),
                                 shown: value.to_owned(),
                                 line: n,
-                                exact: false,
+                                // An asset is one release; a range is a release line.
+                                exact: asset.is_some(),
                             });
-                            let new_value = format!("^{}", target.runtime());
+                            let new_value = target.dist.npm_url(stem, &target.full());
                             let start = colon + 1 + open + 1;
                             let new =
                                 format!("{}{new_value}{}", &line[..start], &line[start + len..]);
@@ -826,14 +849,28 @@ fn gradle_comment_mask(line: &str, in_block: &mut bool) -> Vec<bool> {
     mask
 }
 
-/// Moves `dev.undra:runtime:<v>`, `dev.undra:android-adapters:<v>` and the optional modules
-/// `dev.undra:android-work:<v>` (WorkManager, ADR-046) and `dev.undra:okhttp-adapters:<v>` (the app's
-/// `OkHttpClient` behind the network ports, ADR-060, built on the runtime's embedding API, so it must move
-/// with the runtime) to `<major>.<minor>.0`.
+/// The first Undra coordinate (`<group>:` of [`dist::MAVEN_GROUPS`]) in `text` at or after `from`: where it starts and its
+/// group.
+fn next_coordinate(text: &str, from: usize) -> Option<(usize, &'static str)> {
+    dist::MAVEN_GROUPS
+        .iter()
+        .filter_map(|group| {
+            text[from..]
+                .find(&format!("{group}:"))
+                .map(|at| (from + at, *group))
+        })
+        // The earliest; at one place the longer group wins (`com.github...` is not a prefix of `dev.undra`, but be exact).
+        .min_by_key(|(at, group)| (*at, usize::MAX - group.len()))
+}
+
+/// Moves the Kotlin modules of the runtime ([`dist::MAVEN_MODULES`]: `runtime`, `android-adapters`, and the optional
+/// `android-work`, `undra-compose`, `okhttp-adapters` and `testkit`, which are built on the runtime's API and so move
+/// with it) to [`dist::maven_coordinate`] of the target: the group and the version of the release channel
+/// ([`dist::MAVEN`]), whichever group of [`dist::MAVEN_GROUPS`] they had.
 ///
 /// Only a version written out is moved; a variable (`$undraVersion`), a dynamic version (`+`) and
 /// anything in a comment are left as they are (a variable is reported: its definition is where the
-/// author moves it).
+/// author moves it). A `-SNAPSHOT` version is the runtime of a checkout (`includeBuild`): not a release.
 #[must_use]
 pub fn edit_gradle(text: &str, target: &Target) -> FileResult {
     let mut result = FileResult::default();
@@ -842,33 +879,28 @@ pub fn edit_gradle(text: &str, target: &Target) -> FileResult {
         let comment = gradle_comment_mask(line, &mut in_block);
         let mut out = line.to_owned();
         let mut search_from = 0;
-        while let Some(at) = out[search_from..].find("dev.undra:") {
-            let start = search_from + at;
-            let rest = &out[start + "dev.undra:".len()..];
+        while let Some((start, group)) = next_coordinate(&out, search_from) {
+            let rest = &out[start + group.len() + 1..];
             let Some(colon) = rest.find(':') else { break };
-            let module = &rest[..colon];
+            let module = rest[..colon].to_owned();
             // A comment is left alone, except the commented-out dependency the generated app ships for the optional
             // WorkManager module: uncommenting it later must give the version of the others.
             let template_line = module == "android-work"
                 && line
                     .trim_start()
-                    .starts_with("// implementation(\"dev.undra:android-work:");
+                    .starts_with(&format!("// implementation(\"{group}:android-work:"));
             if comment.get(start).copied().unwrap_or(false) && !template_line {
-                search_from = start + "dev.undra:".len();
+                search_from = start + group.len() + 1;
                 continue;
             }
             let after = &rest[colon + 1..];
             let end = after
                 .find(['"', '\'', ')', ' ', ','])
                 .unwrap_or(after.len());
-            let version = &after[..end];
-            let version_start = start + "dev.undra:".len() + colon + 1;
-            search_from = version_start + end;
-            if !matches!(
-                module,
-                "runtime" | "android-adapters" | "android-work" | "okhttp-adapters"
-            ) || version.is_empty()
-            {
+            let version = after[..end].to_owned();
+            let coordinate_end = start + group.len() + 1 + colon + 1 + end;
+            search_from = coordinate_end;
+            if !dist::MAVEN_MODULES.contains(&module.as_str()) || version.is_empty() {
                 continue;
             }
             if version.contains("SNAPSHOT") {
@@ -880,7 +912,7 @@ pub fn edit_gradle(text: &str, target: &Target) -> FileResult {
                 });
                 continue;
             }
-            if Semver::parse(version).is_none() {
+            if Semver::parse(&version).is_none() {
                 result.unmovable.push(Unmovable {
                     line: n,
                     text: line.trim().to_owned(),
@@ -889,20 +921,21 @@ pub fn edit_gradle(text: &str, target: &Target) -> FileResult {
                 continue;
             }
             result.pins.push(Pin {
-                what: format!("dev.undra:{module}"),
-                version: Semver::parse(version),
-                shown: version.to_owned(),
+                what: format!("{group}:{module}"),
+                version: Semver::parse(&version),
+                shown: version.clone(),
                 line: n,
-                exact: false,
+                // The release channel's coordinates name one release (a tag on JitPack); `dev.undra:<m>:x.y.0` was a line.
+                exact: group == dist::MAVEN.group || version.starts_with('v'),
             });
-            let new_version = target.runtime();
-            out.replace_range(version_start..version_start + end, &new_version);
-            search_from = version_start + new_version.len();
+            let new = dist::maven_coordinate(&module, &target.full());
+            out.replace_range(start..coordinate_end, &new);
+            search_from = start + new.len();
         }
         if out != line {
             result.changes.push(Change {
                 line: n,
-                what: "dev.undra runtime".to_owned(),
+                what: "the Undra Kotlin runtime".to_owned(),
                 old: line.trim().to_owned(),
                 new: out.trim().to_owned(),
             });
@@ -913,16 +946,63 @@ pub fn edit_gradle(text: &str, target: &Target) -> FileResult {
     result
 }
 
+/// Adds the repository of [`dist::MAVEN`] (when it has one) to the `dependencyResolutionManagement { repositories { } }` block
+/// of a Gradle settings script that lacks it, after the block's last line: what `undra init` writes, for a project whose
+/// Kotlin pins move to that group. `None` when there is nothing to add or no such block (the caller says so).
+#[must_use]
+pub fn add_gradle_repository(text: &str, kotlin_dsl: bool, dist: &Dist) -> Option<FileResult> {
+    let url = dist.maven_repo.as_deref()?;
+    if text.contains(url) {
+        return None;
+    }
+    let lines: Vec<(usize, &str, &str)> = lines_of(text).collect();
+    let management = lines
+        .iter()
+        .position(|(_, l, _)| l.trim_start().starts_with("dependencyResolutionManagement"))?;
+    let open = management
+        + lines[management..]
+            .iter()
+            .position(|(_, l, _)| l.trim_start().starts_with("repositories"))?;
+    // The block's closing brace: the first line back at the indentation of `repositories`.
+    let indent = &lines[open].1[..lines[open].1.len() - lines[open].1.trim_start().len()];
+    let close = open
+        + 1
+        + lines[open + 1..]
+            .iter()
+            .position(|(_, l, _)| *l == format!("{indent}}}"))?;
+    let added = dist.gradle_repository(&format!("{indent}    "), kotlin_dsl)?;
+    let mut result = FileResult::default();
+    for (i, (_, line, eol)) in lines.iter().enumerate() {
+        if i == close {
+            result.after.push_str(&added);
+        }
+        result.after.push_str(line);
+        result.after.push_str(eol);
+    }
+    result.changes.push(Change {
+        line: lines[close].0,
+        what: "the Undra Kotlin runtime's repository".to_owned(),
+        old: String::new(),
+        new: format!(
+            "maven {{ url = uri(\"{url}\") }} (for {} only)",
+            dist::MAVEN.group
+        ),
+    });
+    Some(result)
+}
+
 // ---------------------------------------------------------------------------------------------
 // Xcode project
 
-/// Moves the Undra Swift package requirement of a `project.pbxproj` to `<major>.<minor>.0`.
+/// Moves the Undra Swift package requirement of a `project.pbxproj` to the target release, and a reference to the
+/// `undra-swift` repository of before ADR-063 (which never existed) to the Undra repository.
 #[must_use]
 pub fn edit_pbxproj(text: &str, target: &Target) -> FileResult {
     let mut result = FileResult::default();
-    // The lines of each XCRemoteSwiftPackageReference object, to know whether it is Undra's.
+    // The lines of each XCRemoteSwiftPackageReference object, to know whether it is Undra's (and whether it names the old
+    // repository).
     let lines: Vec<(usize, &str, &str)> = lines_of(text).collect();
-    let mut is_undra_block = vec![false; lines.len()];
+    let mut block = vec![None::<bool>; lines.len()];
     let mut i = 0;
     while i < lines.len() {
         if lines[i].1.contains("isa = XCRemoteSwiftPackageReference;") {
@@ -932,14 +1012,20 @@ pub fn edit_pbxproj(text: &str, target: &Target) -> FileResult {
                 end += 1;
             }
             // Undra's package by its URL, not by a substring: `acme/undra-charts` is someone else's.
-            let ours = lines[i..=end].iter().any(|(_, l, _)| {
-                quoted(l, "repositoryURL")
-                    .is_some_and(|(_, url, _)| same_repository(&url, UNDRA_SWIFT_PACKAGE_URL))
-            });
-            if ours {
-                for flag in &mut is_undra_block[i..=end] {
-                    *flag = true;
+            let url = lines[i..=end]
+                .iter()
+                .find_map(|(_, l, _)| quoted(l, "repositoryURL").map(|(_, url, _)| url));
+            let kind = url.as_deref().and_then(|url| {
+                if same_repository(url, OLD_SWIFT_PACKAGE_URL) {
+                    Some(true)
+                } else if is_undra_repo(url, &target.dist) {
+                    Some(false)
+                } else {
+                    None
                 }
+            });
+            for flag in &mut block[i..=end] {
+                *flag = kind;
             }
             i = end + 1;
         } else {
@@ -948,7 +1034,21 @@ pub fn edit_pbxproj(text: &str, target: &Target) -> FileResult {
     }
     for (i, (n, line, eol)) in lines.iter().enumerate() {
         let mut done = false;
-        if is_undra_block[i] {
+        if let Some(old_repository) = block[i] {
+            if old_repository {
+                if let Some((before, _, after)) = quoted(line, "repositoryURL") {
+                    let new = format!("{before}{}{after}", target.dist.git_url);
+                    result.changes.push(Change {
+                        line: *n,
+                        what: "the Undra Swift package".to_owned(),
+                        old: line.trim().to_owned(),
+                        new: new.trim().to_owned(),
+                    });
+                    result.after.push_str(&new);
+                    result.after.push_str(eol);
+                    continue;
+                }
+            }
             for key in ["minimumVersion", "version"] {
                 let trimmed = line.trim_start();
                 let Some(rest) = trimmed.strip_prefix(key) else {
@@ -966,10 +1066,11 @@ pub fn edit_pbxproj(text: &str, target: &Target) -> FileResult {
                     version: Semver::parse(value),
                     shown: value.to_owned(),
                     line: *n,
-                    exact: false,
+                    // The old repository's requirement was a release line; the Undra repository's names the release.
+                    exact: !old_repository,
                 });
                 let indent = &line[..line.len() - trimmed.len()];
-                let new = format!("{indent}{key} = {};", target.runtime());
+                let new = format!("{indent}{key} = {};", target.full());
                 if new != *line {
                     result.changes.push(Change {
                         line: *n,
@@ -1072,6 +1173,9 @@ pub struct Plan {
     pub pins: Vec<(PathBuf, Pin)>,
     /// Dependencies a release does not move.
     pub unmovable: Vec<(PathBuf, Unmovable)>,
+    /// The Kotlin pins moved to a group whose repository no Gradle settings script of the project declares, and none could
+    /// be given it (no `dependencyResolutionManagement { repositories { } }` block): the author adds it (ADR-063).
+    pub gradle_repository_missing: bool,
 }
 
 /// A file with edits.
@@ -1208,18 +1312,21 @@ fn is_candidate(root: &Path, path: &Path) -> bool {
     path.strip_prefix(root).ok().and_then(kind_of).is_some()
 }
 
-/// Reads the project's files and plans the edits that move every pin to `target`.
+/// Reads the project's files and plans the edits that move every pin to `target`, fetched from `dist`.
 #[must_use]
-pub fn plan(root: &Path, generated: &Path, target: &Semver) -> Plan {
+pub fn plan(root: &Path, generated: &Path, target: &Semver, dist: &Dist) -> Plan {
     let target_text = Target {
         version: target.clone(),
+        dist: dist.clone(),
     };
     let mut plan = Plan {
         target: target.clone(),
         files: Vec::new(),
         pins: Vec::new(),
         unmovable: Vec::new(),
+        gradle_repository_missing: false,
     };
+    let mut settings = Vec::new();
     for rel in candidate_files(root, generated) {
         let Some(kind) = kind_of(&rel) else { continue };
         let Ok(text) = std::fs::read_to_string(root.join(&rel)) else {
@@ -1233,6 +1340,13 @@ pub fn plan(root: &Path, generated: &Path, target: &Semver) -> Plan {
             Kind::Pbxproj => edit_pbxproj(&text, &target_text),
             Kind::Workflow => edit_workflow(&text, &target_text),
         };
+        if kind == Kind::Gradle
+            && rel
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("settings.gradle"))
+        {
+            settings.push((rel.clone(), text.clone(), result.after.clone()));
+        }
         plan.pins
             .extend(result.pins.into_iter().map(|p| (rel.clone(), p)));
         plan.unmovable
@@ -1246,6 +1360,43 @@ pub fn plan(root: &Path, generated: &Path, target: &Semver) -> Plan {
             });
         }
     }
+    // The Kotlin pins name the release channel's group now: its repository has to be declared where `undra init` declares
+    // it (a checkout's composite build needs none, and a project without Kotlin pins is not touched).
+    let kotlin_pins = plan.pins.iter().any(|(_, p)| {
+        dist::MAVEN_GROUPS
+            .iter()
+            .any(|g| p.what.starts_with(&format!("{g}:")))
+    });
+    if kotlin_pins && !plan.on_a_checkout() {
+        if let Some(url) = dist.maven_repo.as_deref() {
+            let mut declared = false;
+            for (rel, before, after) in settings {
+                if after.contains(url) {
+                    declared = true;
+                    continue;
+                }
+                let kts = rel.to_string_lossy().ends_with(".kts");
+                let Some(added) = add_gradle_repository(&after, kts, dist) else {
+                    continue;
+                };
+                declared = true;
+                match plan.files.iter_mut().find(|f| f.path == rel) {
+                    Some(edit) => {
+                        edit.after = added.after;
+                        edit.changes.extend(added.changes);
+                    }
+                    None => plan.files.push(FileEdit {
+                        path: rel,
+                        before,
+                        after: added.after,
+                        changes: added.changes,
+                    }),
+                }
+            }
+            plan.gradle_repository_missing = !declared;
+        }
+    }
+    plan.files.sort_by(|a, b| a.path.cmp(&b.path));
     plan
 }
 
@@ -1256,8 +1407,11 @@ mod tests {
     fn target(text: &str) -> Target {
         Target {
             version: Semver::parse(text).unwrap(),
+            dist: Dist::github(),
         }
     }
+
+    const ASSET: &str = "https://github.com/shreypdev/undra/releases/download";
 
     fn cargo(text: &str) -> FileResult {
         edit_cargo_toml(text, &target("0.2.1"))
@@ -1391,26 +1545,46 @@ mod tests {
             "git@github.com:shreypdev/undra.git",
             "ssh://git@github.com/shreypdev/undra",
         ] {
-            assert!(is_undra_repo(url), "{url}");
+            assert!(is_undra_repo(url, &Dist::github()), "{url}");
         }
-        assert!(!is_undra_repo("https://github.com/shreypdev/undra-fork"));
-        assert!(!is_undra_repo("https://example.com/undra"));
+        assert!(!is_undra_repo(
+            "https://github.com/shreypdev/undra-fork",
+            &Dist::github()
+        ));
+        assert!(!is_undra_repo("https://example.com/undra", &Dist::github()));
+        // A mirror the environment names is Undra's too (ADR-063).
+        let mirror = Dist {
+            git_url: "file:///tmp/remote/undra.git".into(),
+            ..Dist::github()
+        };
+        assert!(is_undra_repo("file:///tmp/remote/undra.git", &mirror));
+        assert!(is_undra_repo("file:///tmp/remote/undra", &mirror));
+        assert!(!is_undra_repo(
+            "file:///tmp/remote/undra.git",
+            &Dist::github()
+        ));
     }
 
     // ----- the other files
 
     #[test]
-    fn undra_toml_moves_the_release_line_only() {
+    fn undra_toml_moves_to_the_full_release() {
         let text = "[project]\nname = \"a\"\nid = \"com.example.a\"\n\n[undra]\n# comment\nversion = \"0.1\"   # the line\n\n[bindings]\nversion = \"keep\"\n";
         let r = edit_undra_toml(text, &target("0.2.1"));
         assert_eq!(
             r.after,
             text.replace(
                 "version = \"0.1\"   # the line",
-                "version = \"0.2\"   # the line"
+                "version = \"0.2.1\"   # the line"
             )
         );
         assert_eq!(r.pins[0].version, Semver::parse("0.1"));
+        assert!(!r.pins[0].exact, "a two-part version is a release line");
+        let full = edit_undra_toml("[undra]\nversion = \"0.1.4\"\n", &target("0.2.1"));
+        assert!(
+            full.pins[0].exact,
+            "a full version names a release (ADR-063)"
+        );
         let path = edit_undra_toml(
             "[undra]\nversion = \"0.1\"\npath = \"../undra\"\n",
             &target("0.2.1"),
@@ -1419,33 +1593,79 @@ mod tests {
     }
 
     #[test]
-    fn package_json_moves_the_runtime_range() {
-        let text = "{\n  \"dependencies\": {\n    \"@undra/runtime\": \"^0.1.0\",\n    \"react\": \"^19.0.0\"\n  }\n}\n";
-        let r = edit_package_json(text, &target("0.2.1"));
-        assert_eq!(r.after, text.replace("^0.1.0", "^0.2.0"));
+    fn package_json_moves_a_release_asset_or_a_range_to_the_targets_asset() {
+        let text = format!(
+            "{{\n  \"dependencies\": {{\n    \"@undra/runtime\": \"{ASSET}/v0.1.0/undra-runtime-0.1.0.tgz\",\n    \"react\": \"^19.0.0\"\n  }}\n}}\n"
+        );
+        let r = edit_package_json(&text, &target("0.2.1"));
+        assert_eq!(
+            r.after,
+            text.replace(
+                "v0.1.0/undra-runtime-0.1.0.tgz",
+                "v0.2.1/undra-runtime-0.2.1.tgz"
+            )
+        );
         assert_eq!(r.pins[0].version, Semver::parse("0.1.0"));
+        assert!(r.pins[0].exact, "an asset is one release");
+        // A registry range of before ADR-063 moves to the asset too, and was a release line.
+        let range = edit_package_json("  \"@undra/runtime\": \"^0.1.0\",\n", &target("0.2.1"));
+        assert_eq!(
+            range.after,
+            format!("  \"@undra/runtime\": \"{ASSET}/v0.2.1/undra-runtime-0.2.1.tgz\",\n")
+        );
+        assert!(!range.pins[0].exact);
         let local = edit_package_json(
             "{ \"dependencies\": {\n \"@undra/runtime\": \"file:../rt\"\n} }\n",
             &target("0.2.1"),
         );
-        assert_eq!(local.unmovable.len(), 1);
+        assert_eq!(local.unmovable[0].why, Why::Path);
         assert!(local.changes.is_empty());
+        // Someone else's tarball is a fork: left, and said.
+        let fork = edit_package_json(
+            "  \"@undra/runtime\": \"https://example.com/v0.1.0/undra-runtime-0.1.0.tgz\",\n",
+            &target("0.2.1"),
+        );
+        assert_eq!(fork.unmovable[0].why, Why::Fork);
+        assert!(fork.changes.is_empty());
         // Already there: untouched.
-        let same = edit_package_json("  \"@undra/runtime\": \"^0.2.0\",\n", &target("0.2.1"));
-        assert!(same.changes.is_empty());
+        let same = edit_package_json(
+            &format!("  \"@undra/runtime\": \"{ASSET}/v0.2.1/undra-runtime-0.2.1.tgz\",\n"),
+            &target("0.2.1"),
+        );
+        assert!(same.changes.is_empty() && same.pins.len() == 1);
+        // A mirror's asset (the rehearsal's) moves within the mirror.
+        let mirror = Target {
+            dist: Dist {
+                release_url: "http://127.0.0.1:8123/releases".into(),
+                ..Dist::github()
+            },
+            ..target("0.2.1")
+        };
+        let r = edit_package_json(
+            "  \"@undra/runtime\": \"http://127.0.0.1:8123/releases/v0.1.0/undra-runtime-0.1.0.tgz\",\n",
+            &mirror,
+        );
+        assert_eq!(
+            r.after,
+            "  \"@undra/runtime\": \"http://127.0.0.1:8123/releases/v0.2.1/undra-runtime-0.2.1.tgz\",\n"
+        );
     }
 
     #[test]
     fn gradle_moves_both_coordinates_and_leaves_a_checkout_alone() {
-        let text = "dependencies {\n    implementation(\"dev.undra:runtime:0.1.0\")\n    implementation(\"dev.undra:android-adapters:0.1.0\")\n    implementation(\"com.other:lib:1.0\")\n}\n";
+        let text = "dependencies {\n    implementation(\"com.github.shreypdev.undra:runtime:v0.1.0\")\n    implementation(\"com.github.shreypdev.undra:android-adapters:v0.1.0\")\n    implementation(\"com.other:lib:1.0\")\n}\n";
         let r = edit_gradle(text, &target("0.2.1"));
-        assert_eq!(r.after, text.replace("0.1.0", "0.2.0"));
+        assert_eq!(r.after, text.replace("v0.1.0", "v0.2.1"));
         assert_eq!(r.changes.len(), 2);
+        assert!(r.pins.iter().all(|p| p.exact), "a tag names one release");
         let groovy = edit_gradle(
-            "implementation 'dev.undra:runtime:0.1.0'\n",
+            "implementation 'com.github.shreypdev.undra:runtime:v0.1.0'\n",
             &target("0.2.1"),
         );
-        assert_eq!(groovy.after, "implementation 'dev.undra:runtime:0.2.0'\n");
+        assert_eq!(
+            groovy.after,
+            "implementation 'com.github.shreypdev.undra:runtime:v0.2.1'\n"
+        );
         let snapshot = edit_gradle(
             "implementation(\"dev.undra:runtime:0.1.0-SNAPSHOT\")\n",
             &target("0.2.1"),
@@ -1455,46 +1675,105 @@ mod tests {
     }
 
     #[test]
+    fn gradle_moves_the_maven_central_coordinates_of_before_to_the_release_channel() {
+        // ADR-063: `dev.undra:<module>:<line>.0` was written for Maven Central, where it was never published.
+        let text = "dependencies {\n    implementation(\"dev.undra:runtime:0.1.0\")\n    implementation(\"dev.undra:undra-compose:0.1.0\")\n    testImplementation(\"dev.undra:testkit:0.1.0\")\n}\n";
+        let r = edit_gradle(text, &target("0.2.1"));
+        assert_eq!(
+            r.after,
+            text.replace("dev.undra:", "com.github.shreypdev.undra:")
+                .replace(":0.1.0\"", ":v0.2.1\"")
+        );
+        assert_eq!(r.pins.len(), 3);
+        assert!(
+            r.pins.iter().all(|p| !p.exact),
+            "a Maven Central version was a release line"
+        );
+        assert_eq!(r.pins[0].what, "dev.undra:runtime");
+    }
+
+    #[test]
+    fn the_jitpack_repository_is_added_to_the_settings_block_init_writes() {
+        let settings = "dependencyResolutionManagement {\n    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)\n    repositories {\n        google()\n        mavenCentral()\n    }\n}\n\nrootProject.name = \"demo\"\n";
+        let r = add_gradle_repository(settings, true, &Dist::github()).unwrap();
+        let expected = Dist::github().gradle_repository("        ", true).unwrap();
+        assert_eq!(
+            r.after,
+            settings.replace(
+                "        mavenCentral()\n    }\n",
+                &format!("        mavenCentral()\n{expected}    }}\n")
+            )
+        );
+        assert_eq!(r.changes.len(), 1);
+        // Declared already, or no block to put it in: nothing to add.
+        assert!(add_gradle_repository(&r.after, true, &Dist::github()).is_none());
+        assert!(
+            add_gradle_repository("rootProject.name = \"x\"\n", true, &Dist::github()).is_none()
+        );
+        let r = add_gradle_repository(settings, false, &Dist::github()).unwrap();
+        assert!(
+            r.after
+                .contains("        maven {\n            url 'https://jitpack.io'\n"),
+            "{}",
+            r.after
+        );
+    }
+
+    #[test]
     fn gradle_moves_the_optional_work_module_commented_out_or_not() {
         // The generated app has the line commented out (ADR-046: WorkManager is an optional module): it moves
         // with the others, so that an upgraded project is the one `undra init` would write; other comments do not.
-        let commented =
-            "dependencies {\n    // implementation(\"dev.undra:android-work:0.1.0\")\n}\n";
+        let commented = "dependencies {\n    // implementation(\"com.github.shreypdev.undra:android-work:v0.1.0\")\n}\n";
         let moved = edit_gradle(commented, &target("0.2.1"));
-        assert_eq!(moved.after, commented.replace("0.1.0", "0.2.0"));
-        let prose = "    // we used dev.undra:android-work:0.1.0 for a while\n";
+        assert_eq!(moved.after, commented.replace("v0.1.0", "v0.2.1"));
+        let prose = "    // we used com.github.shreypdev.undra:android-work:v0.1.0 for a while\n";
         assert!(edit_gradle(prose, &target("0.2.1")).changes.is_empty());
-        let on = "dependencies {\n    implementation(\"dev.undra:android-work:0.1.0\")\n}\n";
+        let on = "dependencies {\n    implementation(\"com.github.shreypdev.undra:android-work:v0.1.0\")\n}\n";
         let r = edit_gradle(on, &target("0.2.1"));
-        assert_eq!(r.after, on.replace("0.1.0", "0.2.0"));
-        assert_eq!(r.pins[0].what, "dev.undra:android-work");
+        assert_eq!(r.after, on.replace("v0.1.0", "v0.2.1"));
+        assert_eq!(r.pins[0].what, "com.github.shreypdev.undra:android-work");
     }
 
     #[test]
     fn gradle_moves_the_optional_okhttp_module_with_the_runtime() {
         // ADR-060: okhttp-adapters is compiled against the runtime's embedding API (SseStreamReader,
         // ReadAheadSource), which may change between releases: left behind, it would meet a newer runtime.
-        let text = "dependencies {\n    implementation(\"dev.undra:runtime:0.1.0\")\n    implementation(\"dev.undra:okhttp-adapters:0.1.0\")\n}\n";
+        let text = "dependencies {\n    implementation(\"com.github.shreypdev.undra:runtime:v0.1.0\")\n    implementation(\"com.github.shreypdev.undra:okhttp-adapters:v0.1.0\")\n}\n";
         let r = edit_gradle(text, &target("0.2.1"));
-        assert_eq!(r.after, text.replace("0.1.0", "0.2.0"));
-        assert_eq!(r.pins[1].what, "dev.undra:okhttp-adapters");
+        assert_eq!(r.after, text.replace("v0.1.0", "v0.2.1"));
+        assert_eq!(r.pins[1].what, "com.github.shreypdev.undra:okhttp-adapters");
     }
 
     #[test]
     fn pbxproj_moves_the_swift_package_requirement_of_undra_only() {
-        let text = "/* Begin XCRemoteSwiftPackageReference section */\n\t\tA1 /* UndraRuntime package */ = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"https://github.com/shreypdev/undra-swift\";\n\t\t\trequirement = {\n\t\t\t\tkind = upToNextMajorVersion;\n\t\t\t\tminimumVersion = 0.1.0;\n\t\t\t};\n\t\t};\n\t\tA2 /* Other */ = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"https://github.com/other/pkg\";\n\t\t\trequirement = {\n\t\t\t\tkind = upToNextMajorVersion;\n\t\t\t\tminimumVersion = 1.0.0;\n\t\t\t};\n\t\t};\n/* End XCRemoteSwiftPackageReference section */\n";
+        let text = "/* Begin XCRemoteSwiftPackageReference section */\n\t\tA1 /* UndraRuntime package */ = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"https://github.com/shreypdev/undra\";\n\t\t\trequirement = {\n\t\t\t\tkind = upToNextMajorVersion;\n\t\t\t\tminimumVersion = 0.1.0;\n\t\t\t};\n\t\t};\n\t\tA2 /* Other */ = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"https://github.com/other/pkg\";\n\t\t\trequirement = {\n\t\t\t\tkind = upToNextMajorVersion;\n\t\t\t\tminimumVersion = 1.0.0;\n\t\t\t};\n\t\t};\n/* End XCRemoteSwiftPackageReference section */\n";
         let r = edit_pbxproj(text, &target("0.2.1"));
         assert_eq!(
             r.after,
-            text.replace("minimumVersion = 0.1.0;", "minimumVersion = 0.2.0;")
+            text.replace("minimumVersion = 0.1.0;", "minimumVersion = 0.2.1;")
         );
         assert_eq!(r.changes.len(), 1);
         assert_eq!(r.pins[0].version, Semver::parse("0.1.0"));
+        assert!(r.pins[0].exact);
         let local = edit_pbxproj(
             "\t\t\trelativePath = \"../../runtimes/swift/UndraRuntime\";\n",
             &target("0.2.1"),
         );
         assert_eq!(local.unmovable.len(), 1);
+    }
+
+    #[test]
+    fn pbxproj_moves_the_undra_swift_package_of_before_to_the_repository() {
+        // ADR-063: `undra-swift` never existed; the package is at the root of the Undra repository.
+        let text = "\t\tA1 = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"https://github.com/shreypdev/undra-swift\";\n\t\t\trequirement = {\n\t\t\t\tkind = upToNextMajorVersion;\n\t\t\t\tminimumVersion = 0.1.0;\n\t\t\t};\n\t\t};\n";
+        let r = edit_pbxproj(text, &target("0.2.1"));
+        assert_eq!(
+            r.after,
+            text.replace("undra-swift", "undra")
+                .replace("minimumVersion = 0.1.0;", "minimumVersion = 0.2.1;")
+        );
+        assert_eq!(r.changes.len(), 2);
+        assert!(!r.pins[0].exact, "the old requirement was a release line");
     }
 
     #[test]
@@ -1552,6 +1831,7 @@ mod tests {
             files: Vec::new(),
             pins: vec![pin("0.3.0", false), pin("0.5.2", true), pin("0.4.9", true)],
             unmovable: Vec::new(),
+            gradle_repository_missing: false,
         };
         // The release the crates and the workflow are on, not what the registries' ranges floor at.
         assert_eq!(plan.current(), Semver::parse("0.4.9"));
@@ -1573,12 +1853,9 @@ mod tests {
     }
 
     #[test]
-    fn the_target_spells_each_pin_the_way_init_does() {
-        let t = target("1.2.3");
-        assert_eq!(
-            (t.full().as_str(), t.runtime().as_str(), t.line().as_str()),
-            ("1.2.3", "1.2.0", "1.2")
-        );
+    fn the_target_names_one_release() {
+        assert_eq!(target("1.2.3").full(), "1.2.3");
+        assert_eq!(target("1.2.3-rc.1").full(), "1.2.3-rc.1");
     }
 
     // ----- look-alikes: only the real pins move (review, 2026-10-01)
@@ -1592,7 +1869,8 @@ mod tests {
         let r = edit_pbxproj(&text, &target("0.2.1"));
         assert_eq!(
             r.after,
-            text.replace("minimumVersion = 0.1.0;", "minimumVersion = 0.2.0;"),
+            text.replace("minimumVersion = 0.1.0;", "minimumVersion = 0.2.1;")
+                .replace("shreypdev/undra-swift", "shreypdev/undra"),
             "only Undra's package moves; {other} keeps 3.4.5"
         );
         assert_eq!(r.pins.len(), 1, "{:?}", r.pins);
@@ -1620,7 +1898,7 @@ mod tests {
             r.after,
             text.replace(
                 "implementation(\"dev.undra:runtime:0.1.0\")",
-                "implementation(\"dev.undra:runtime:0.2.0\")"
+                "implementation(\"com.github.shreypdev.undra:runtime:v0.2.1\")"
             ),
             "{}",
             r.after
@@ -1640,24 +1918,30 @@ mod tests {
     }
 
     #[test]
-    fn package_json_moves_the_runtime_and_react_native_and_nothing_that_looks_like_them() {
-        let text = "{\n  \"description\": \"needs \\\"@undra/runtime\\\": ^0.0.1\",\n  \"dependencies\": {\n    \"@undra/runtime-extras\": \"^0.1.0\",\n    \"@undra/react-native\": \"^0.1.0\",\n    \"react\": \"^19.0.0\"\n  },\n  \"devDependencies\": {\n    \"@undra/runtime\": \"^0.1.0\"\n  }\n}\n";
+    fn package_json_moves_the_three_packages_and_nothing_that_looks_like_them() {
+        let text = "{\n  \"description\": \"needs \\\"@undra/runtime\\\": ^0.0.1\",\n  \"dependencies\": {\n    \"@undra/runtime-extras\": \"^0.1.0\",\n    \"@undra/react-native\": \"^0.1.0\",\n    \"react\": \"^19.0.0\"\n  },\n  \"devDependencies\": {\n    \"@undra/runtime\": \"^0.1.0\",\n    \"@undra/testkit\": \"^0.1.0\"\n  }\n}\n";
         let r = edit_package_json(text, &target("0.2.1"));
         assert_eq!(
             r.after,
             text.replace(
                 "\"@undra/react-native\": \"^0.1.0\"",
-                "\"@undra/react-native\": \"^0.2.0\""
+                &format!(
+                    "\"@undra/react-native\": \"{ASSET}/v0.2.1/undra-react-native-0.2.1.tgz\""
+                )
             )
             .replace(
                 "\"@undra/runtime\": \"^0.1.0\"",
-                "\"@undra/runtime\": \"^0.2.0\""
+                &format!("\"@undra/runtime\": \"{ASSET}/v0.2.1/undra-runtime-0.2.1.tgz\"")
+            )
+            .replace(
+                "\"@undra/testkit\": \"^0.1.0\"",
+                &format!("\"@undra/testkit\": \"{ASSET}/v0.2.1/undra-testkit-0.2.1.tgz\"")
             ),
             "{}",
             r.after
         );
         assert!(r.after.contains("\"@undra/runtime-extras\": \"^0.1.0\""));
-        assert_eq!(r.pins.len(), 2, "{:?}", r.pins);
+        assert_eq!(r.pins.len(), 3, "{:?}", r.pins);
         let local = edit_package_json(
             "  \"@undra/react-native\": \"file:../../runtimes/rn/@undra/react-native\",\n",
             &target("0.2.1"),
@@ -1701,25 +1985,25 @@ mod tests {
                 "undra.toml",
                 edit_undra_toml,
                 "[undra]\nversion = \"0.1\"\n",
-                "[undra]\nversion = \"0.2\"\n",
+                "[undra]\nversion = \"0.2.1\"\n",
             ),
             (
                 "package.json",
                 edit_package_json,
                 "{\n  \"@undra/runtime\": \"^0.1.0\"\n}\n",
-                "{\n  \"@undra/runtime\": \"^0.2.0\"\n}\n",
+                "{\n  \"@undra/runtime\": \"https://github.com/shreypdev/undra/releases/download/v0.2.1/undra-runtime-0.2.1.tgz\"\n}\n",
             ),
             (
                 "build.gradle",
                 edit_gradle,
                 "implementation 'dev.undra:runtime:0.1.0'\n",
-                "implementation 'dev.undra:runtime:0.2.0'\n",
+                "implementation 'com.github.shreypdev.undra:runtime:v0.2.1'\n",
             ),
             (
                 "project.pbxproj",
                 edit_pbxproj,
-                "\t\tA1 = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"https://github.com/shreypdev/undra-swift\";\n\t\t\trequirement = {\n\t\t\t\tminimumVersion = 0.1.0;\n\t\t\t};\n\t\t};\n",
-                "\t\tA1 = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"https://github.com/shreypdev/undra-swift\";\n\t\t\trequirement = {\n\t\t\t\tminimumVersion = 0.2.0;\n\t\t\t};\n\t\t};\n",
+                "\t\tA1 = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"https://github.com/shreypdev/undra\";\n\t\t\trequirement = {\n\t\t\t\tminimumVersion = 0.1.0;\n\t\t\t};\n\t\t};\n",
+                "\t\tA1 = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"https://github.com/shreypdev/undra\";\n\t\t\trequirement = {\n\t\t\t\tminimumVersion = 0.2.1;\n\t\t\t};\n\t\t};\n",
             ),
             (
                 "undra.yml",
@@ -1761,6 +2045,7 @@ mod tests {
                 pin("1.0.0-rc.1", true),
             ],
             unmovable: Vec::new(),
+            gradle_repository_missing: false,
         };
         assert!(plan.ahead().is_none(), "{:?}", plan.ahead());
         // A project on the final release is ahead of its release candidate, and the next line is ahead.

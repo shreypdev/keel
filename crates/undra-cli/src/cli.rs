@@ -63,7 +63,10 @@ pub enum Command {
   ios/ android/ web/   one minimal, real app per platform, using the generated bindings\n\n\
 Nothing is downloaded: the templates are part of this binary. The core depends on the Undra crates of the release \
 this binary belongs to (`undra = { git = \"https://github.com/shreypdev/undra\", tag = \"v<version>\" }`) and the \
-apps on the matching runtimes. Point --undra-path at a checkout of the Undra repository to use its crates and \
+apps on the runtimes of the same release, all from that repository: the Swift package at its root, the Kotlin \
+artifacts JitPack builds from the tag (`com.github.shreypdev.undra:runtime:v<version>`) and the npm package attached \
+to the GitHub Release (ADR-063). UNDRA_DIST_GIT_URL, UNDRA_DIST_RELEASE_URL and UNDRA_DIST_MAVEN_REPO replace those \
+addresses (a rehearsal of a release, or a mirror). Point --undra-path at a checkout of the Undra repository to use its crates and \
 runtimes directly instead (a project created inside a checkout does that without the flag).",
         after_long_help = "\
 EXAMPLES
@@ -292,10 +295,12 @@ EXAMPLES
         long_about = "Reads the Undra version a project pins in every place `undra init` writes it: the core's \
 `undra` dependency in Cargo.toml (a git tag, or a registry version; a dependency pinned by `rev` or `branch` is \
 pinned by the release's tag afterwards), `[undra] version` in undra.toml, \
-`@undra/runtime` (and `@undra/react-native`) in package.json, `dev.undra:runtime` and `dev.undra:android-adapters` in \
-the Gradle scripts, the Undra Swift package in the Xcode project, and `UNDRA_VERSION` in the CI workflow. It moves them all to the \
-version of this `undra` in one step, shaped as `undra init` would write them (so an upgraded project and a new one \
-agree), regenerates the bindings (`undra bindgen`), and prints the migration notes of every release the project crosses.\n\n\
+`@undra/runtime` (and `@undra/react-native`, `@undra/testkit`) in package.json, the runtime's Kotlin modules \
+(`com.github.shreypdev.undra:runtime`, `:android-adapters`, ...; the `dev.undra:android-adapters` group of before \
+too) in the Gradle scripts, the Undra Swift package in the Xcode project, and `UNDRA_VERSION` in the CI workflow. It \
+moves them all to the version of this `undra` in one step, shaped as `undra init` would write them (the release \
+asset's URL, the release's tag; so an upgraded project and a new one agree, ADR-063), adds the Kotlin runtime's \
+repository to settings.gradle.kts when the pins move to it, regenerates the bindings (`undra bindgen`), and prints the migration notes of every release the project crosses.\n\n\
 Only the version text changes; comments and formatting stay. A version that is not written out (a Gradle variable) \
 is left and named. The files are written all or none. Your app's own project files (the Xcode build \
 phase, the Gradle task, vite.config.ts) are not edited: the notes say what a newer `undra init` adds. A project that \

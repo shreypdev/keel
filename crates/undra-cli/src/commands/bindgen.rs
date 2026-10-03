@@ -25,6 +25,9 @@ use super::Env;
 /// See the modules it drives: [`crate::schema`], [`crate::bindgen`], [`crate::builds`].
 pub fn run(env: &Env<'_>, args: &BindgenArgs) -> Result<()> {
     let ui = env.ui;
+    // ADR-063: a released project's packages name the release where the environment says (GitHub unless a mirror is
+    // set); a malformed setting stops the command before the core is built.
+    let dist = crate::dist::Dist::from_sys(env.sys)?;
     let project = match Project::discover(&env.start_dir()?) {
         Ok(project) => Some(project),
         // `--schema` needs no project: generating from a file is the fallback of SPEC 13.
@@ -46,7 +49,7 @@ pub fn run(env: &Env<'_>, args: &BindgenArgs) -> Result<()> {
         ui.warn("the schema is empty: the core has no `#[undra::api]` items that are `pub`, or its registrations were not linked");
     }
 
-    let plan = plan(session.as_ref(), args, &schema, &env.start_dir()?)?;
+    let plan = plan(session.as_ref(), args, &schema, &env.start_dir()?, &dist)?;
     let files = bindgen::plan_files(&schema, &plan)?;
 
     if args.check {
@@ -181,6 +184,7 @@ fn plan(
     args: &BindgenArgs,
     schema: &Schema,
     cwd: &Path,
+    dist: &crate::dist::Dist,
 ) -> Result<Plan> {
     let mut generator = Generator::for_crate(&schema.crate_name);
     // The iOS floor and the Swift observation mode (ADR-045): the project's, and what the command line says.
@@ -203,7 +207,7 @@ fn plan(
         args.ios_deployment_target.as_deref(),
     )?;
     let mut platforms = Platform::ALL.to_vec();
-    let mut runtimes = Runtimes::from_registries(crate::config::UNDRA_VERSION);
+    let mut runtimes = Runtimes::released(crate::config::UNDRA_VERSION, dist);
     let mut default_out = cwd.join("generated");
     if let Some(session) = session {
         let project = &session.project;
@@ -226,7 +230,7 @@ fn plan(
             generator.swift_typed_throws = typed;
         }
         platforms.clone_from(&project.config.platforms);
-        runtimes = Runtimes::for_project(project);
+        runtimes = Runtimes::for_project(project, dist);
         default_out = project.generated_dir();
     }
     if let Some(list) = &args.platforms {

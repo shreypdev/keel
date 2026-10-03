@@ -20,6 +20,17 @@ use common::{TempDir, flag, run_err, run_ok, undra};
 
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
+/// Where the npm packages of a release are downloaded (ADR-063).
+const ASSETS: &str = "https://github.com/shreypdev/undra/releases/download";
+
+/// The `@undra/runtime` dependency of a project on the current release.
+fn runtime_url() -> String {
+    format!("{ASSETS}/v{CURRENT}/undra-runtime-{CURRENT}.tgz")
+}
+
+/// What `undra init` writes into `dependencyResolutionManagement { repositories { } }` (ADR-063).
+const JITPACK: &str = "        // Undra's Kotlin runtime, built from the release tag (ADR-063). Only its group is looked up here.\n        maven {\n            url = uri(\"https://jitpack.io\")\n            content { includeGroup(\"com.github.shreypdev.undra\") }\n        }\n";
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/upgrade")
@@ -69,9 +80,8 @@ fn upgrade(root: &Path, args: &[&str]) -> (String, String) {
     )
 }
 
-/// What the released fixture's files become: the old pins replaced by the current version's.
+/// What the released fixture's files become: the old pins replaced by the current release's, from GitHub (ADR-063).
 fn upgraded(tree: &BTreeMap<String, String>) -> BTreeMap<String, String> {
-    let line = CURRENT.rsplit_once('.').unwrap().0;
     let mut out = tree.clone();
     for (path, text) in &mut out {
         if path.starts_with("generated/") || path == "core/src/lib.rs" {
@@ -79,24 +89,34 @@ fn upgraded(tree: &BTreeMap<String, String>) -> BTreeMap<String, String> {
         }
         *text = text
             .replace("tag = \"v0.0.9\"", &format!("tag = \"v{CURRENT}\""))
-            .replace("version = \"0.0\"\n", &format!("version = \"{line}\"\n"))
-            .replace("\"^0.0.9\"", &format!("\"^{line}.0\""))
+            .replace("version = \"0.0\"\n", &format!("version = \"{CURRENT}\"\n"))
+            .replace("\"^0.0.9\"", &format!("\"{}\"", runtime_url()))
             .replace(
                 "dev.undra:runtime:0.0.9",
-                &format!("dev.undra:runtime:{line}.0"),
+                &format!("com.github.shreypdev.undra:runtime:v{CURRENT}"),
             )
             .replace(
                 "dev.undra:android-adapters:0.0.9",
-                &format!("dev.undra:android-adapters:{line}.0"),
+                &format!("com.github.shreypdev.undra:android-adapters:v{CURRENT}"),
             )
             .replace(
                 "minimumVersion = 0.0.9;",
-                &format!("minimumVersion = {line}.0;"),
+                &format!("minimumVersion = {CURRENT};"),
+            )
+            .replace(
+                "repositoryURL = \"https://github.com/shreypdev/undra-swift\";",
+                "repositoryURL = \"https://github.com/shreypdev/undra\";",
             )
             .replace(
                 "UNDRA_VERSION: \"0.0.9\"",
                 &format!("UNDRA_VERSION: \"{CURRENT}\""),
             );
+        if path == "android/settings.gradle.kts" {
+            *text = text.replace(
+                "        mavenCentral()\n    }\n}",
+                &format!("        mavenCentral()\n{JITPACK}    }}\n}}"),
+            );
+        }
     }
     out
 }
@@ -118,6 +138,7 @@ fn a_dry_run_shows_every_line_that_would_change_and_writes_nothing() {
         "undra.toml",
         "web/package.json",
         "android/app/build.gradle.kts",
+        "android/settings.gradle.kts",
         "ios/Demo.xcodeproj/project.pbxproj",
         ".github/workflows/undra.yml",
     ] {
@@ -142,7 +163,15 @@ fn a_dry_run_shows_every_line_that_would_change_and_writes_nothing() {
         stdout.contains("    - \"@undra/runtime\": \"^0.0.9\","),
         "{stdout}"
     );
-    assert!(stdout.contains("7 lines in 6 files."), "{stdout}");
+    assert!(
+        stdout.contains(&format!("    + \"@undra/runtime\": \"{}\",", runtime_url())),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("    + maven { url = uri(\"https://jitpack.io\") } (for com.github.shreypdev.undra only)"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("9 lines in 7 files."), "{stdout}");
     // The notes of the release it crosses, and the way out.
     assert!(
         stdout.contains(&format!("Migration notes, 0.0.9 to {CURRENT}")),
@@ -172,7 +201,7 @@ fn every_pin_moves_in_lockstep_and_nothing_else_changes() {
         before["generated/ts/package.json"]
     );
     assert_eq!(after["core/src/lib.rs"], before["core/src/lib.rs"]);
-    assert!(stdout.contains("Updated 6 files."), "{stdout}");
+    assert!(stdout.contains("Updated 7 files."), "{stdout}");
     assert!(
         stderr.contains("bindings not regenerated (--no-bindgen): run `undra bindgen`"),
         "{stderr}"
@@ -219,29 +248,45 @@ fn an_upgraded_project_is_the_project_init_would_have_made() {
     run_ok(undra().args(["init", "lockstep", "--dir"]).arg(dir.path()));
     let root = dir.path().join("lockstep");
     let fresh = read_tree(&root);
-    let line = CURRENT.rsplit_once('.').unwrap().0;
+    // Each file aged by the pins it holds, as a project made before ADR-063 had them.
+    let age = |file: &str, text: &str| -> String {
+        match file {
+            "undra.toml" => {
+                text.replace(&format!("version = \"{CURRENT}\"\n"), "version = \"0.0\"\n")
+            }
+            "core/Cargo.toml" => text.replace(&format!("tag = \"v{CURRENT}\""), "tag = \"v0.0.9\""),
+            "web/package.json" => text.replace(&runtime_url(), "^0.0.9"),
+            "android/app/build.gradle.kts" => text
+                .replace("com.github.shreypdev.undra:", "dev.undra:")
+                .replace(&format!(":v{CURRENT}\""), ":0.0.9\""),
+            "android/settings.gradle.kts" => text.replace(JITPACK, ""),
+            "ios/Lockstep.xcodeproj/project.pbxproj" => text
+                .replace(
+                    &format!("minimumVersion = {CURRENT};"),
+                    "minimumVersion = 0.0.9;",
+                )
+                .replace(
+                    "repositoryURL = \"https://github.com/shreypdev/undra\";",
+                    "repositoryURL = \"https://github.com/shreypdev/undra-swift\";",
+                ),
+            ".github/workflows/undra.yml" => text.replace(
+                &format!("UNDRA_VERSION: \"{CURRENT}\""),
+                "UNDRA_VERSION: \"0.0.9\"",
+            ),
+            _ => unreachable!(),
+        }
+    };
     let pinned = [
         "undra.toml",
         "core/Cargo.toml",
         "web/package.json",
         "android/app/build.gradle.kts",
+        "android/settings.gradle.kts",
         "ios/Lockstep.xcodeproj/project.pbxproj",
         ".github/workflows/undra.yml",
     ];
     for file in pinned {
-        let aged = fresh[file]
-            .replace(&format!("tag = \"v{CURRENT}\""), "tag = \"v0.0.9\"")
-            .replace(&format!("version = \"{line}\"\n"), "version = \"0.0\"\n")
-            .replace(&format!("\"^{line}.0\""), "\"^0.0.9\"")
-            .replace(&format!(":{line}.0\""), ":0.0.9\"")
-            .replace(
-                &format!("minimumVersion = {line}.0;"),
-                "minimumVersion = 0.0.9;",
-            )
-            .replace(
-                &format!("UNDRA_VERSION: \"{CURRENT}\""),
-                "UNDRA_VERSION: \"0.0.9\"",
-            );
+        let aged = age(file, &fresh[file]);
         assert_ne!(
             aged,
             fresh[file],
@@ -264,7 +309,6 @@ fn an_upgraded_project_is_the_project_init_would_have_made() {
 fn a_commit_pin_becomes_the_release_tag_and_the_rest_of_the_line_survives() {
     let (_dir, root) = project("pinned-by-rev");
     let (stdout, _) = upgrade(&root, &["--no-bindgen"]);
-    let line = CURRENT.rsplit_once('.').unwrap().0;
     let cargo = std::fs::read_to_string(root.join("core/Cargo.toml")).unwrap();
     assert!(
         cargo.contains(&format!("undra = {{ git = \"https://github.com/shreypdev/undra\", tag = \"v{CURRENT}\", features = [\"extra\"] }} # pinned\n")),
@@ -277,7 +321,7 @@ fn a_commit_pin_becomes_the_release_tag_and_the_rest_of_the_line_survives() {
     );
     let web = std::fs::read_to_string(root.join("web/package.json")).unwrap();
     assert!(
-        web.contains(&format!("\"@undra/runtime\": \"^{line}.0\""))
+        web.contains(&format!("\"@undra/runtime\": \"{}\"", runtime_url()))
             && web.contains("\"react\": \"^19.0.0\""),
         "{web}"
     );
@@ -432,8 +476,7 @@ fn a_gradle_version_variable_is_reported_and_left() {
     assert!(after.contains("dev.undra:runtime:$undraVersion"), "{after}");
     assert!(
         after.contains(&format!(
-            "dev.undra:android-adapters:{}.0",
-            CURRENT.rsplit_once('.').unwrap().0
+            "com.github.shreypdev.undra:android-adapters:v{CURRENT}"
         )),
         "{after}"
     );
@@ -544,7 +587,7 @@ fn upgrade_regenerates_the_bindings_for_real() {
     let toml = std::fs::read_to_string(root.join("undra.toml")).unwrap();
     std::fs::write(
         root.join("undra.toml"),
-        toml.replace("version = \"0.1\"", "version = \"0.0\""),
+        toml.replace(&format!("version = \"{CURRENT}\""), "version = \"0.0\""),
     )
     .unwrap();
     let out = run_ok(

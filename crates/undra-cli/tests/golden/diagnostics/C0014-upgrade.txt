@@ -1,4 +1,4 @@
 error[undra::C0014]: core/Cargo.toml pins Undra at tag v999.0.0, newer than this undra (<version>)
   = note: `undra upgrade` moves a project forward only, and a CLI older than the project's runtimes would generate bindings they do not match (ahead is <dir>/ahead)
-  = help: update this `undra` first (`curl -fsSL https://shreypdev.github.io/undra/install.sh | sh`, `brew upgrade undra` or `npm update -g @undra/cli`) and run `undra upgrade` again
+  = help: update this `undra` first (`brew upgrade undra`, `curl -fsSL https://shreypdev.github.io/undra/install.sh | sh` or `cargo install --locked --force --git https://github.com/shreypdev/undra undra-cli`, whichever installed it) and run `undra upgrade` again
   = docs: https://shreypdev.github.io/undra/docs/errors.html#C0014

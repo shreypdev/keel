@@ -65,12 +65,6 @@ impl Semver {
             pre,
         })
     }
-
-    /// `major.minor`: the release line the package registries are asked for.
-    #[must_use]
-    pub fn line(&self) -> String {
-        format!("{}.{}", self.major, self.minor)
-    }
 }
 
 impl fmt::Display for Semver {
@@ -143,7 +137,6 @@ mod tests {
     fn versions_print_as_they_were_written_in_full() {
         assert_eq!(v("0.1").to_string(), "0.1.0");
         assert_eq!(v("1.0.0-rc.1").to_string(), "1.0.0-rc.1");
-        assert_eq!(v("1.2.3").line(), "1.2");
     }
 
     #[test]

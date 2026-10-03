@@ -2,7 +2,7 @@
 //
 // A plain JVM library (the bindings use no Android API). The Android project includes it
 // as a module and depends on it; the runtime comes from a composite build of the Undra
-// checkout or from Maven Central.
+// checkout or from the project's Undra release (ADR-063).
 plugins {
     id("org.jetbrains.kotlin.jvm")
 }

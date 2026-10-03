@@ -53,6 +53,7 @@ mod commands;
 pub mod config;
 mod detect;
 mod devtools;
+mod dist;
 pub mod error;
 mod fsutil;
 mod lint;

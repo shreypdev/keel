@@ -48,7 +48,7 @@ import kotlinx.coroutines.flow.StateFlow
  * the files `undra build --release` writes next to the app (`build/symbols`).
  *
  * **Background drains** (opt-in, ADR-046): the offline queue can be replayed while the app is in the background. Add
- * `implementation("dev.undra:android-work:@@KOTLIN_RUNTIME_VERSION@@")` to `app/build.gradle.kts`, then uncomment the two lines
+ * `implementation("@@UNDRA_MAVEN_GROUP@@:android-work:@@KOTLIN_RUNTIME_VERSION@@")` to `app/build.gradle.kts`, then uncomment the two lines
  * marked `android-work` below: [UndraWork.configure] says how a process WorkManager starts on its own loads the core, and
  * `onBackgroundWorkPending` asks WorkManager for a window, with a network constraint, when the app goes to the background
  * with work pending.
