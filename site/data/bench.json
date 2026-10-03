@@ -81,14 +81,14 @@
     {
       "id": "android-size",
       "operation": "Android core, arm64-v8a, hello world",
-      "value": 978.6,
+      "value": 905.5,
       "unit": "KB",
       "budget": 1.2,
       "budgetUnit": "MB",
-      "gate": null,
-      "source": "https://github.com/shreypdev/undra/blob/main/bench/results/android-size.jsonl",
+      "gate": "scripts/native-size.sh: ≤ 1.2 MB and ≤ 5% over the record",
+      "source": "https://github.com/shreypdev/undra/blob/main/bench/results/native-size.jsonl",
       "measured": {
-        "file": "bench/results/android-size.jsonl",
+        "file": "bench/results/native-size.jsonl",
         "artifact": "android/hello-arm64-v8a",
         "field": "bytes"
       }

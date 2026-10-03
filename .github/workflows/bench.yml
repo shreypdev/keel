@@ -57,6 +57,14 @@ name: Bench
 # and a run that cannot measure them fails. A change that
 # grows one on purpose re-records with `scripts/wasm-size.sh --record` in the same commit; CI never
 # records. Sizes do not depend on the runner's speed, so there is no scale and no baseline here.
+#
+# Native size (ADR-052, amendment "native size gates"): scripts/native-size.sh builds the same template with
+# `undra build --release` (the size-tuned `release-mobile` profile of the generated shim, which keeps `panic = "unwind"`)
+# and fails when the hello-world core is over its `[size."android/hello-arm64-v8a"]`, `[size."android/hello-x86_64"]` or
+# `[size."ios/hello-arm64"]` table in bench/budgets.toml: the design's 1.2 MB per Android ABI and 900 KB added to an iOS
+# app, or 5% over the record, whichever is lower. The Android libraries are measured in the `size` job (NDK r27 and
+# cargo-ndk, the versions the record was measured with); the iOS slice needs Apple's linker, so it has a macOS job of its own,
+# `size-ios`. A change that grows one on purpose re-records with `scripts/native-size.sh --record` in the same commit.
 
 on:
   push:
@@ -149,17 +157,20 @@ jobs:
           path: bench-results
           if-no-files-found: ignore
 
+  # The job's name keeps saying "Web size" (a check may be required by that name); it also gates the Android cores, in the
+  # two steps after the web ones.
   size:
     name: Web size (hello-world wasm and JS runtime, gzip -9)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       # The Rust that CI pins (main pins 1.99.0 in every workflow; the deliberate bump re-records the
-      # size with `scripts/wasm-size.sh --record` in the same commit, since codegen moves the bytes).
+      # size with `scripts/wasm-size.sh --record` and `scripts/native-size.sh --record` in the same commit, since codegen
+      # moves the bytes).
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown, aarch64-linux-android, x86_64-linux-android
       - uses: Swatinem/rust-cache@v2
         with:
           # The template's build lives in target/wasm-size/target; a key of its own keeps it apart
@@ -191,4 +202,45 @@ jobs:
         with:
           name: web-size
           path: bench-results/web-size.jsonl
+          if-no-files-found: ignore
+      # cargo-ndk is what `undra build --platform android` runs; the NDK is the version the record was measured with (the image
+      # carries others; the Android cross-build job of ci.yml installs the same one).
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+      - name: The NDK r27 (the Android cores are linked with it)
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" "ndk;27.2.12479018" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: Native size gate (Android, hello-world core per ABI, bytes as shipped)
+        run: bash scripts/native-size.sh --platform android
+      - name: The JSON behind the Android numbers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-size-android
+          path: bench-results/native-size.jsonl
+          if-no-files-found: ignore
+
+  size-ios:
+    name: iOS size (hello-world core, device slice linked and stripped)
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: native-size-ios
+      - name: Native size gate (iOS)
+        run: bash scripts/native-size.sh --platform ios
+      - name: The JSON behind the iOS number
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-size-ios
+          path: bench-results/native-size.jsonl
           if-no-files-found: ignore

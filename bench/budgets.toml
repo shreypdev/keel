@@ -1,5 +1,6 @@
 # Host budgets for the budgets test (`cargo test -p undra-bench --test budgets --release`), and at the
-# end the size gates of shipped artefacts that `scripts/wasm-size.sh` enforces (ADR-052).
+# end the size gates of shipped artefacts that `scripts/wasm-size.sh` (web) and `scripts/native-size.sh`
+# (the iOS and Android cores) enforce (ADR-052).
 #
 # WHAT THESE ARE. Regression guards for a host machine, not the blueprint's device targets
 # (docs/blueprint.html section 14 is per device: A15 iPhone, mid-range 2022 Android, Chromium;
@@ -826,11 +827,14 @@ max = 2.0
 measured = 1.34
 
 # ---------------------------------------------------------------------------------------------
-# Sizes of shipped artefacts (ADR-052): measured by `scripts/wasm-size.sh`, not by the budgets test,
-# in bytes after gzip (zlib's deflate at level 9; KB below means 1,000 bytes). The budgets test only
-# checks that each table is consistent with itself and with its record, bench/results/web-size.jsonl.
-#   budget_gzip_bytes    the published budget: never more than this
+# Sizes of shipped artefacts (ADR-052): measured by `scripts/wasm-size.sh` (the web) and
+# `scripts/native-size.sh` (the iOS and Android cores), not by the budgets test. The web artefacts are in
+# bytes after gzip (zlib's deflate at level 9), the native ones in the bytes of the file as it ships;
+# KB below means 1,000 bytes. The budgets test only checks that each table is consistent with itself and
+# with its record (bench/results/web-size.jsonl, bench/results/native-size.jsonl).
+#   budget_gzip_bytes    the published budget: never more than this (a native table says budget_bytes)
 #   measured_gzip_bytes  the record, written with the JSON by `scripts/wasm-size.sh --record`
+#                        (a native table says measured_bytes, written by `scripts/native-size.sh --record`)
 #   tolerance            never more than this fraction over the record. A change that grows the
 #                        artefact more than that re-records it in the same commit, where review sees
 #                        it; a toolchain update that does the same is re-recorded after a look at why.
@@ -909,6 +913,33 @@ tolerance = 0.05
 [size."web/all-features-runtime-js"]
 budget_gzip_bytes = 42400
 measured_gzip_bytes = 39922
+tolerance = 0.05
+
+# The native cores (ADR-052, amendment "native size gates", 2026-10-02): the hello-world core, the `undra init` template
+# (a store with a keyed list and two computeds, a record, an enum, an error, a function; no query) built by `undra build
+# --release`, which is the `release-mobile` profile of the generated shim (`release` with opt-level "s", the call-path crates
+# undra-wire, undra-signals, undra-runtime and undra-ffi at 3; panic stays "unwind", R6), by `scripts/native-size.sh`. The budget is the design's (docs/blueprint.html, section 14): 1.2 MB per Android
+# ABI, 900 KB added to an iOS app; the gate is the record plus 5%. Before the profile the same template was 987,720 bytes
+# for arm64-v8a and 1,054,336 for x86_64 (main at b909739), and the iOS slice added 859,845 (95% of its 900 KB). To re-measure (a minute
+# or two):
+#   scripts/native-size.sh                     gate what this machine can build (--platform android | ios)
+#   scripts/native-size.sh --record            ... and re-record bench/results/native-size.jsonl and these tables
+# KB is 1,000 bytes. Android: the bytes of the stripped, 16 KB aligned lib<ns>.so that Gradle packages (NDK r27, cargo-ndk).
+# iOS: the sections of the device slice linked as an app's link keeps them (-dead_strip, strip -x); the .a file is no measure
+# (it grows at opt-level "z" while the code shrinks), see the script's header.
+[size."android/hello-arm64-v8a"]
+budget_bytes = 1200000
+measured_bytes = 905520
+tolerance = 0.05
+
+[size."android/hello-x86_64"]
+budget_bytes = 1200000
+measured_bytes = 971464
+tolerance = 0.05
+
+[size."ios/hello-arm64"]
+budget_bytes = 900000
+measured_bytes = 793517
 tolerance = 0.05
 
 # ---------------------------------------------------------------------------------------------
