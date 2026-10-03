@@ -1,0 +1,20 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["run.sh"])
+
+bzl_library(
+    name = "actions",
+    srcs = ["actions.bzl"],
+)
+
+bzl_library(
+    name = "cargo_vendor",
+    srcs = ["cargo_vendor.bzl"],
+)
+
+bzl_library(
+    name = "source",
+    srcs = ["source.bzl"],
+)

@@ -354,6 +354,11 @@ pub struct BindgenArgs {
     #[arg(long, value_name = "FILE")]
     pub schema: Option<PathBuf>,
 
+    /// Read the schema from this host library of the core, built already (`undra build --platform host`, or what a build
+    /// system such as Bazel made), instead of building one. The project's `[core] namespace` names its entry point.
+    #[arg(long, value_name = "FILE", conflicts_with = "schema")]
+    pub library: Option<PathBuf>,
+
     /// Write below this directory (default: `[paths] generated` of undra.toml, else `generated`).
     #[arg(long, value_name = "DIR")]
     pub out: Option<PathBuf>,

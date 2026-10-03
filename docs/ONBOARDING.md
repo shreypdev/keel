@@ -190,6 +190,17 @@ mkdir -p ../.tools/lib && curl -sSfLo ../.tools/lib/kotlinx-coroutines-core-jvm-
   https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.6.4/kotlinx-coroutines-core-jvm-1.6.4.jar
 ```
 
+#### Bazelisk (contributors)
+
+Only the Bazel rules (`bazel/`, ADR-061) and their example workspace (`examples/bazel`) use Bazel; an app never needs it unless it
+builds with it. Bazelisk reads the Bazel version from `.bazelversion` and downloads it; Bazel then fetches the pinned toolchains
+the rules need (Rust 1.99.0 from `rules_rust`, a JDK, Node, binaryen, the crates), once, into its own cache. Nothing it fetches
+touches `rustup`, Homebrew or `~/.cargo`. The example turns off the telemetry of the aspect rules (`DO_NOT_TRACK=1` in its `.bazelrc`).
+
+```bash
+brew install bazelisk                   # or: npm i -g @bazel/bazelisk
+```
+
 ### The machine
 
 #### Disk space
@@ -224,7 +235,7 @@ undra doctor --fix        # the fixes as one block you can read and paste
 
 ## 2. Run the suites
 
-Every suite is local; nothing needs the network after install.
+Every suite is local; nothing needs the network after install (the Bazel suite fetches its pinned toolchains on its first run).
 
 | Suite | Command | Expect |
 |---|---|---|
@@ -254,6 +265,7 @@ Every suite is local; nothing needs the network after install.
 | The debugger path into Rust (ADR-046): LLDB in batch mode stops at `breakpoint set -f lab.rs -l <line>` in a debug core, on the host and in a simulator process | `UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test debugging -- --test-threads=1` (run it from a login session: LLDB needs Developer Tools access) | 3 pass |
 | Distribution: npm packages (build, pack, `npm install -g`, run) | `bash packaging/npm/test.sh` | all checks pass |
 | Distribution: the curl installer against a served release (checksums, tampering, platforms) | `bash packaging/test-install.sh` | all checks pass |
+| Bazel rules and example (ADR-061): the core for the host and the web, the bindings from the host library, the Kotlin (JNI) and TypeScript (Node, wasm) consumers against the real core, ktlint over the generated Kotlin with and without the exclusions `undra bindgen` writes, and on macOS the Swift consumer; `bazel build //:mobile_ios` builds the XCFramework | `cd examples/bazel && bazel test //...` (first run downloads the toolchains: minutes; `--jobs=4` is in its `.bazelrc`); the rules' own unit tests: `cd bazel && bazel test //tests/...` | the example: 4 pass on macOS (Kotlin, ktlint, TypeScript, Swift), 3 on Linux; the rules' tests: 2 pass |
 | Benchmark budget gate | `cargo test -p undra-bench --test budgets --release` | pass |
 | Benchmarks (numbers for humans) | `cargo bench -p undra-bench` | see `bench/RESULTS.md` |
 | Device bench: the blueprint rows through the generated binding and the mirror, on a simulator, emulator, browser or phone | `scripts/bench-device.sh --device ios`, `--device android` (boots the `undra` AVD if nothing is attached; `--target <serial>` for a phone), `--device web`; add `--quick` to check the plumbing in seconds | writes `bench/results/device/<date>-<target>.json` and the device tables of `bench/RESULTS.md`; needs the iOS simulator + Xcode, the Android SDK + NDK, or Playwright's Chromium (`cd examples/playground/web && npx playwright install chromium`) |

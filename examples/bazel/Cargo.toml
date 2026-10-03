@@ -1,0 +1,6 @@
+# The Rust workspace of the Bazel example: the core, and nothing else. The Undra crates are not on crates.io yet, so
+# `undra` resolves to this checkout through `.cargo/config.toml` (and, under Bazel, through the same patch written by the
+# rules, pointing at the checkout the `undra` module extension names).
+[workspace]
+members = ["core"]
+resolver = "3"

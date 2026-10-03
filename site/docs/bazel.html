@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bazel · Undra docs</title>
+<meta name="description" content="Build an Undra core for every platform, generate its bindings and compile the code that uses them as Bazel targets: hermetic, offline and cached.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/bazel.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Bazel · Undra docs">
+<meta property="og:description" content="Build an Undra core for every platform, generate its bindings and compile the code that uses them as Bazel targets: hermetic, offline and cached.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/bazel.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Bazel · Undra docs">
+<meta name="twitter:description" content="Build an Undra core for every platform, generate its bindings and compile the code that uses them as Bazel targets: hermetic, offline and cached.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/bazel.html#article","headline":"Bazel · Undra docs","description":"Build an Undra core for every platform, generate its bindings and compile the code that uses them as Bazel targets: hermetic, offline and cached.","url":"https://shreypdev.github.io/undra/docs/bazel.html","inLanguage":"en","dateModified":"2026-10-02","datePublished":"2026-10-02","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Bazel","item":"https://shreypdev.github.io/undra/docs/bazel.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Core</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html">Objects and identity</a></li><li><a href="callbacks.html">Host callbacks</a></li><li><a href="types.html">Newtypes, generics and decimals</a></li><li><a href="generics.html">Generic functions, objects and stores</a></li></ul></div><div class="side-group"><p class="side-title">Data and live data</p><ul><li><a href="paging.html">Paging and lazy lists</a></li><li><a href="polling.html">Polling</a></li><li><a href="realtime.html">WebSocket &amp; server-sent events</a></li><li><a href="db.html">Local database</a></li></ul></div><div class="side-group"><p class="side-title">Test, ship, operate</p><ul><li><a href="testing.html">Testing your app</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="reviewing-generated-code.html">Reviewing generated code</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="production.html">Operating in production</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="bazel.html" aria-current="page">Bazel</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/network-stack.html">Your network stack</a></li></ul></div><div class="side-group"><p class="side-title">Adopting Undra</p><ul><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Core</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html">Objects and identity</a></li><li><a href="callbacks.html">Host callbacks</a></li><li><a href="types.html">Newtypes, generics and decimals</a></li><li><a href="generics.html">Generic functions, objects and stores</a></li></ul></div><div class="side-group"><p class="side-title">Data and live data</p><ul><li><a href="paging.html">Paging and lazy lists</a></li><li><a href="polling.html">Polling</a></li><li><a href="realtime.html">WebSocket &amp; server-sent events</a></li><li><a href="db.html">Local database</a></li></ul></div><div class="side-group"><p class="side-title">Test, ship, operate</p><ul><li><a href="testing.html">Testing your app</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="reviewing-generated-code.html">Reviewing generated code</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="production.html">Operating in production</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="bazel.html" aria-current="page">Bazel</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/network-stack.html">Your network stack</a></li></ul></div><div class="side-group"><p class="side-title">Adopting Undra</p><ul><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1>Bazel</h1>
+    <p class="lede">Undra's build is a command line, and a Bazel repository can call it as one: the rules run <code>undra build</code> and <code>undra bindgen</code> in hermetic, offline actions, so the core, its bindings and the code that uses them are targets in your graph.</p>
+<h2 id="what-you-get">What you get<a class="anchor" href="#what-you-get" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>Rule</th><th>Produces</th><th>With</th></tr></thead><tbody><tr><td><code>undra_core</code></td><td>per platform: <code>lib&lt;ns&gt;.dylib</code> or <code>.so</code> (host), <code>&lt;ns&gt;.wasm</code> (web), the XCFramework (iOS), <code>jniLibs/&lt;abi&gt;/</code> (Android), and the symbol files</td><td><code>undra build</code>, the profiles of every other build</td></tr><tr><td><code>undra_bindings</code></td><td>the Swift package, the Gradle module and the npm package, as outputs, never committed, never stale</td><td><code>undra bindgen --library</code>, read from the host build</td></tr><tr><td><code>undra_kt_jvm_library</code></td><td>the Kotlin bindings over the Kotlin runtime</td><td><code>rules_kotlin</code></td></tr><tr><td><code>undra_ts_library</code> (<code>ts.bzl</code>)</td><td>the TypeScript bindings, type-checked and compiled against the runtime, linked into <code>node_modules</code></td><td><code>aspect_rules_ts</code>, <code>aspect_rules_js</code></td></tr><tr><td><code>undra_swift_library</code></td><td>the Swift bindings and the C module of the core's entry over the Swift runtime</td><td><code>rules_swift</code> (macOS)</td></tr><tr><td><code>undra_android_library</code> (<code>android.bzl</code>)</td><td>the Kotlin bindings as an Android library</td><td><code>rules_kotlin</code>'s <code>kt_android_library</code>, the Android SDK</td></tr></tbody></table></div>
+<h2 id="set-up">Set up<a class="anchor" href="#set-up" aria-label="Link to this section">#</a></h2>
+<p>Pin Bazel in <code>.bazelversion</code> (8.8.1 is what the rules are tested with) and put the rules and the toolchain in <code>MODULE.bazel</code>. The core is an ordinary Cargo crate that depends on <code>undra</code>; <code>undra.toml</code> stays the project file.</p>
+<p>If you use <code>undra_ts_library</code>, add <code>common --repo_env=DO_NOT_TRACK=1</code> to your <code>.bazelrc</code>. The TypeScript rules it loads (<code>aspect_rules_js</code>) report which rulesets and versions your build uses to Aspect unless that variable is set, and only your repository can set it: a module cannot do it for you. The other rules never load them.</p>
+<details class="reveal-code"><summary>Show MODULE.bazel and BUILD.bazel</summary>
+<div class="code"><div class="code-bar"><span>MODULE.bazel</span></div><pre><code data-lang="python">bazel_dep(name = "undra_rules", version = "0.1.0")
+bazel_dep(name = "rules_rust", version = "0.74.0")
+
+# The compiler Undra's goldens and size gate are recorded on, and the targets the cores are built for.
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2024",
+    extra_target_triples = ["wasm32-unknown-unknown"],
+    versions = ["1.99.0"],
+    sha256s = {...},  # static.rust-lang.org's .sha256 files: see examples/bazel/MODULE.bazel
+)
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
+
+# Where Undra is, and the crates its builds may use (by the checksum Cargo.lock records).
+undra = use_extension("@undra_rules//:extensions.bzl", "undra")
+undra.source(path = "../undra")  # a checkout of the Undra repository, or urls = [..]
+undra.vendor(lockfiles = ["//:Cargo.lock"])
+use_repo(undra, "undra", "undra_binaryen", "undra_vendor")</code></pre></div>
+<div class="code"><div class="code-bar"><span>BUILD.bazel</span></div><pre><code data-lang="python">load("@undra_rules//undra:defs.bzl", "undra_bindings", "undra_core", "undra_kt_jvm_library")
+load("@undra_rules//undra:ts.bzl", "undra_ts_library")  # its own file: see the .bazelrc line above
+
+undra_core(
+    name = "core",
+    namespace = "hello_core",             # [core] namespace of undra.toml
+    srcs = glob(["core/**"]) + ["Cargo.toml"],
+    platforms = ["host", "web"],          # core_host, core_web; "ios" and "android" too
+    wasm_opt = "@undra_binaryen//:wasm_opt",
+)
+
+undra_bindings(name = "bindings", core = ":core_host")      # the generated trees, as outputs
+
+undra_kt_jvm_library(name = "hello", bindings = ":bindings")
+undra_ts_library(name = "hello_ts", bindings = ":bindings", package = "@acme/hello")
+
+# A JVM test loads the host library by its path: jvm_flags = ["-Dundra.native.hello_core.path=$(rootpath :core_host)"]</code></pre></div>
+</details>
+<p><code>bazel test //...</code> in <a href="https://github.com/shreypdev/undra/tree/main/examples/bazel" rel="noopener">examples/bazel</a> builds the to-do core for the host and the web, generates the bindings, and runs Kotlin tests against the real core through JNI, TypeScript tests against the wasm module under Node, and, on macOS, a Swift test that loads it in process. CI runs it on Linux for every change, and the Swift test and the iOS core on macOS.</p>
+<h2 id="hermetic">Why it is hermetic<a class="anchor" href="#hermetic" aria-label="Link to this section">#</a></h2>
+<p>The rules call the CLI rather than copy its build: the shim, the release profiles, the <code>wasm-opt</code> pipeline, the path remapping and the symbol files stay in one place, so the web size gate and the schema hash are the CLI's. What makes an action that runs Cargo safe to cache:</p>
+<ul><li><strong>The compiler is Bazel's.</strong> <code>rustc</code>, <code>cargo</code> and each target's standard library come from your <code>rules_rust</code> toolchain, pinned by checksum. No <code>rustup</code>.</li><li><strong>The crates are the lock file's.</strong> <code>undra_vendor</code> downloads each crates.io package once, by the checksum <code>Cargo.lock</code> records, and an action unpacks them into a Cargo directory source with the network off.</li><li><strong>The CLI is built the same way,</strong> from the checkout the core is built against.</li><li><strong>The build sees only what the target declares.</strong> The action copies <code>undra.toml</code>, <code>srcs</code> and <code>workspace</code> into a private directory and builds there, with any spawn strategy, sandboxed or not; a file missing from <code>srcs</code> is a build error, not a silent read of your tree.</li><li><strong>The build directory is named by the target,</strong> because Cargo and <code>undra build</code> put the build's path into symbol names: the same target builds in the same place in every checkout, so the same inputs give the same bytes (two clones on one Mac produced byte-identical cores).</li></ul>
+<p>The C linker, and for iOS and Android Xcode, the NDK and <code>cargo-ndk</code>, are the machine's: no Bazel rule distributes them for Rust.</p>
+<h2 id="platforms">Platforms<a class="anchor" href="#platforms" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>Platform</th><th>Needs</th><th>Where it is built</th></tr></thead><tbody><tr><td><code>host</code>, <code>web</code></td><td>nothing outside the rules</td><td>Linux and macOS, in CI on every change</td></tr><tr><td><code>ios</code></td><td>Xcode, and <code>apple_support</code> first in your <code>MODULE.bazel</code></td><td>macOS, in CI on every change; the target is <code>manual</code></td></tr><tr><td><code>android</code></td><td>the NDK and <code>cargo-ndk</code> on the machine, and a C++ toolchain registered for the Android platforms (<code>rules_android_ndk</code>), which the rules do not set up</td><td>declared, not built anywhere yet: without that toolchain, analysis stops at <code>Unable to find a CC toolchain</code>, even with the NDK installed</td></tr></tbody></table></div>
+<p><code>undra_android_library</code> needs the Android SDK only (<code>rules_android</code> reads <code>ANDROID_HOME</code>), not the NDK. The example's (<code>bazel build //android:hello --config=android</code>) was built by hand on macOS; CI does not build it, because <code>rules_android</code> then downloads its own tools, one of them an archive without a checksum.</p>
+<h2 id="lint">Generated code and your linters<a class="anchor" href="#lint" aria-label="Link to this section">#</a></h2>
+<p>A repository that lints everything reports the bindings, because they are the output of a generator. <code>undra bindgen</code> now writes the exclusions beside each tree and lists them in its manifest, so <code>--check</code> keeps them honest:</p>
+<div class="table-wrap"><table><thead><tr><th>Tree</th><th>File</th><th>Read by</th></tr></thead><tbody><tr><td>Kotlin</td><td><code>.editorconfig</code>, and <code>@file:Suppress("ALL", "ktlint")</code> in every file</td><td>ktlint 1.x; detekt and IntelliJ read the annotation too</td></tr><tr><td>Swift</td><td><code>.swiftlint.yml</code>, an <code>excluded:</code> list to merge into yours</td><td>SwiftLint</td></tr><tr><td>TypeScript</td><td><code>.eslintrc.json</code>, and <code>eslint.config.undra.mjs</code> to spread into a flat config</td><td>ESLint 8 and 9</td></tr></tbody></table></div>
+<p>ktlint 1.8 reports 90 findings on the example's generated Kotlin without them and none with either one; <code>bazel test //kotlin:lint_test</code> in the example runs that comparison. The annotation does not silence the Kotlin compiler: its warnings about the generated code still show. The detekt, IntelliJ, SwiftLint and ESLint readings follow each tool's documentation and are not run in CI.</p>
+<h2 id="good-to-know">Good to know<a class="anchor" href="#good-to-know" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Bazel caches a core as a whole.</strong> A change to the core rebuilds its dependencies inside the action (seconds for a small core); a remote cache makes that cost the author's alone.</li><li><strong>Swift needs its files listed.</strong> <code>rules_swift</code> compiles files, not a directory, so <code>undra_bindings(swift_files = [..])</code> names them; a wrong list fails the build and prints the right one.</li><li><strong>Telemetry.</strong> Only <code>ts.bzl</code> loads <code>aspect_rules_js</code>, whose telemetry is on unless your <code>.bazelrc</code> sets <code>--repo_env=DO_NOT_TRACK=1</code> (Set up, above); the example sets it.</li><li><strong>The scratch directory.</strong> Each core builds in <code>/tmp/undra-bazel-&lt;key&gt;</code>, removed when the action ends. On Linux the sandbox's <code>/tmp</code> is private; on macOS two builds of the same target take turns, and another user's build of it goes to a directory of its own.</li><li>The decision, its alternatives and what was measured are in <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-061-bazel-support.md" rel="noopener">ADR-061</a>.</li></ul>
+
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/bazel.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="several-cores.html"><span>Previous</span><b>One core or several</b></a>
+    <a class="next" href="cookbook/index.html"><span>Next</span><b>Cookbook, all recipes</b></a>
+  </nav>
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#what-you-get">What you get</a></li><li><a href="#set-up">Set up</a></li><li><a href="#hermetic">Why it is hermetic</a></li><li><a href="#platforms">Platforms</a></li><li><a href="#lint">Generated code and your linters</a></li><li><a href="#good-to-know">Good to know</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose, React and React Native.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

@@ -23,6 +23,11 @@ const GOLDEN_FILES: &[&str] = &[
     "ts/.gitattributes",
     "ts/package.json",
     "ts/src/stores.ts",
+    // The lint exclusions beside each tree (ADR-061).
+    "kotlin/.editorconfig",
+    "swift/.swiftlint.yml",
+    "ts/.eslintrc.json",
+    "ts/eslint.config.undra.mjs",
     "ts/tsconfig.json",
 ];
 

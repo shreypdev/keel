@@ -134,8 +134,13 @@ class NativeShapeTests : Suite() {
                 val byPath = NativeLibrary.load(missing)
                 assertTrue(byPath is UnsatisfiedLinkError, "by path: $byPath")
                 assertTrue(byPath!!.message!!.contains(file), "the property's file is what was tried: ${byPath.message}")
-                System.setProperty(property, "relative/lib$missing.so")
-                assertTrue(NativeLibrary.load(missing) is UnsatisfiedLinkError, "a relative path is refused, not thrown")
+                // A relative path (Bazel's `$(rootpath ..)` in a test's jvm_flags) is taken from the working directory.
+                val relative = "relative/lib$missing.so"
+                System.setProperty(property, relative)
+                val byRelative = NativeLibrary.load(missing)
+                assertTrue(byRelative is UnsatisfiedLinkError, "a missing relative path is reported, not thrown: $byRelative")
+                val resolved = java.io.File(relative).absolutePath
+                assertTrue(byRelative!!.message!!.contains(resolved), "it was tried from the working directory: ${byRelative.message}")
             } finally {
                 System.clearProperty(property)
             }

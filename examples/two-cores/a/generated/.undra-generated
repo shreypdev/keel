@@ -1,3 +1,4 @@
+kotlin/.editorconfig
 kotlin/.gitattributes
 kotlin/.gitignore
 kotlin/build.gradle.kts
@@ -12,6 +13,7 @@ kotlin/src/main/kotlin/dev/undra/twocores/a/Stores.kt
 kotlin/src/main/kotlin/dev/undra/twocores/a/Types.kt
 kotlin/src/main/resources/META-INF/proguard/undra-playground_a.pro
 swift/.gitattributes
+swift/.swiftlint.yml
 swift/Package.swift
 swift/Sources/PlaygroundA/Generated/Callbacks.swift
 swift/Sources/PlaygroundA/Generated/Core.swift
@@ -25,7 +27,9 @@ swift/Sources/PlaygroundA/Generated/Types.swift
 swift/Sources/PlaygroundACoreFFI/include/module.modulemap
 swift/Sources/PlaygroundACoreFFI/include/playground_a_undra.h
 swift/Sources/PlaygroundACoreFFI/playground_a_undra.c
+ts/.eslintrc.json
 ts/.gitattributes
+ts/eslint.config.undra.mjs
 ts/package.json
 ts/src/callbacks.ts
 ts/src/core.ts
