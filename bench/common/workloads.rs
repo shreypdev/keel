@@ -1330,6 +1330,27 @@ pub fn snapshot() -> Vec<Workload> {
                 rt.restore(black_box(&older)).expect("restore");
             })
         }),
+        // The part of a cold start that is not the restore (RESULTS.md, Finding 8): the hash of
+        // the schema this binary registered, which `Runtime::new` computes before anything else.
+        // A row of its own, so that the canonical form going back through a clone of the schema
+        // and `serde` (1.84x) fails the baseline gates here and not as a quarter of the
+        // cold-start rows. (The clone alone is 1.47x, just inside the gate.)
+        Workload::new("snapshot/cold_start_schema_hash", || {
+            let schema = undra::meta::collect_schema("undra-core");
+            let (rt, _host) = runtime();
+            assert_eq!(
+                schema.hash(),
+                rt.schema_hash(),
+                "the schema a runtime hashes at start"
+            );
+            assert!(
+                schema.canonical_json().len() > 20_000,
+                "the harness registers tens of kilobytes of schema"
+            );
+            plain(move || {
+                black_box(schema.hash());
+            })
+        }),
         Workload::new("snapshot/cold_start_restore_100kb", || cold_start(0)),
         Workload::new("snapshot/cold_start_restore_100kb_core_thread", || {
             cold_start(1)

@@ -14,6 +14,7 @@ mod closure_json;
 mod def;
 mod meta;
 mod registry;
+mod schema_json;
 mod sort;
 mod type_ref;
 mod validate;

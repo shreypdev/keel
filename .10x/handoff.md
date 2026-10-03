@@ -53,7 +53,12 @@ commit; its own CI runs on those heads are the proof to look at first in a new s
 - **On hold by the founder:** the Android emulator CI job for `android-adapters`, `android-work` and
   `undra-compose`. Not started. Ask him before starting it. (The "Android emulator (API 34, x86_64)" job in
   `two-cores.yml` is older and unrelated.)
-- A separate session is bisecting a cold-start restore slowdown (two rows 1.7–1.8x the machine baseline).
+- `cold-restore-regression` (PR #1, reviewed, re-verified CLOSED): the two cold-start rows were 1.8x the machine
+  baseline because the bench binary's schema grew 1.79x and `Runtime::new` hashes it; `undra-meta`'s `schema_json`
+  writes the canonical and exchange JSON straight from the schema (same bytes, serde's serializer out of every core:
+  hello web 116,224 -> 111,355 B gz), rows back at 1.18x / 1.10x, baseline not re-recorded, new row
+  `snapshot/cold_start_schema_hash`. Open from its review: R1 (the closure collector and reader keep a `TypeRef`
+  catch-all), and a native core hashing its schema twice per launch (`.10x/decisions/sde/cold-restore-regression.md`).
 - Lessons that cost a CI cycle each today, for every brief: no absolute time bound in a test (measure against a
   reference armed beside the thing, or count events); wait for what is in flight to land before changing a fake;
   commit by path; never push while a run is in flight on the branch; stress loops must not leave `yes` burners
