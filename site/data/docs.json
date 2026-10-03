@@ -24,7 +24,8 @@
       { "file": "updates.html", "title": "Shipping an update" },
       { "file": "web.html", "title": "Workers & crash recovery" },
       { "file": "production.html", "title": "Operating in production" },
-      { "file": "several-cores.html", "title": "One core or several" }
+      { "file": "several-cores.html", "title": "One core or several" },
+      { "file": "bazel.html", "title": "Bazel" }
     ] },
     { "title": "Cookbook", "pages": [
       { "file": "cookbook/index.html", "title": "All recipes", "pager": "Cookbook, all recipes" },

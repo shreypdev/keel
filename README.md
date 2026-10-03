@@ -185,6 +185,9 @@ Then open `web/` (`npm install && npm run dev`), `ios/` (Xcode) or `android/` (G
 each shell is a plain native project wired to your core, and each builds the core itself (a Gradle
 task, an Xcode build phase, a Vite plugin: there is no manual `undra build`). `undra build --platform
 ios,android,web` is the explicit form: an XCFramework, 16 KB-aligned `.so`s and a `wasm-opt`'d module.
+Building with Bazel? [`bazel/`](bazel/) has the rules (`undra_core`, `undra_bindings`, and the Swift, Kotlin and
+TypeScript libraries over the bindings), hermetic and offline, and [`examples/bazel`](examples/bazel/README.md) a workspace
+that `bazel test`s a core on the JVM, Node and (on macOS) Swift; the [guide](https://shreypdev.github.io/undra/docs/bazel.html) has the setup.
 `undra doctor` tells you exactly what your machine is missing, with the command that fixes it
 (`undra doctor --fix` prints them all). `undra init` also writes a CI workflow, and `undra upgrade`
 moves a project to a newer Undra in one step.
