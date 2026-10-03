@@ -1309,9 +1309,11 @@ fn shipped_artefacts_do_not_grow_and_no_symbols_writes_none() {
             size(&app)
         };
         // The same code, so the same size, up to what LLVM's output with line tables costs at a
-        // size-optimising profile (`release-mobile`, ADR-052's amendment of 2026-10-02): the sign of
-        // a few bytes of function alignment, measured +16 in one run and -2,324 in another, over
-        // 2.3 MB. Strict `<=` held at opt-level 3 and fails here on the sign: a thousandth.
+        // size-optimising profile (`release-mobile`, ADR-052's amendment of 2026-10-02): a few bytes
+        // of function alignment either way, measured +16 (2,340,344 without symbols, 2,340,360 with)
+        // and -8 (2,340,336 and 2,340,328, the review's run) over 2.3 MB. Strict `<=` held at
+        // opt-level 3 and fails here on the sign: a thousandth, two orders above what was measured and
+        // far below what a symbol table or debug info left in the app would add.
         let without = linked(plain, "plain");
         before_after(
             "ios app (linked, stripped)",
