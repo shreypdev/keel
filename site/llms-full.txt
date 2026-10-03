@@ -1467,10 +1467,10 @@ undra schema diff --against origin/main         # what changed since the base
 text
 
 ```
-Public API: origin/main:schema.json (schema 0x4d503c0c6414f9bc) -> schema.json (schema 0x80139ec7aef5a2c4)
+Public API: origin/main:schema.json (schema 0x4d503c0c6414f9bc) -> schema.json (schema 0x53c10651c39d0ca4)
 
 breaking  case Filter.Archived: added (an exhaustive `switch` or `when` over it stops compiling)
-additive  field Todo.due: added (Option<Timestamp>, with a default)
+breaking  field Todo.due: added (Option<Timestamp>, with a default): Swift and Kotlin initializers default it, but a TypeScript object literal that builds a `Todo` must name it
 breaking  field Todo.priority: added without a default (u8): everything that builds a `Todo` must supply it
 breaking  method Todos.add: parameter `tags: Vec<String>` added
 additive  method Todos.clear: added (fn clear())
@@ -1478,35 +1478,39 @@ breaking  method Todos.toggle: removed (was fn toggle(id: u32))
 additive  signal Todos.open_count: added (u32, computed)
 additive  function import_all: added (async fn import_all(items: Vec<Todo>) -> u32)
 breaking  method Notifier.dismiss: added (fn dismiss()); the app implements it, so its implementation must add it
+additive  port Presence: added (an event port: the app sends its events when it has them, and implements nothing)
 additive  callback Cancel: added
 breaking  mutation add_todo: removed (was async fn add_todo(title: String) -> Result<Todo, TodoError>)
 additive  query todo: stale time changed from none to 30000 ms
 
-6 breaking, 6 additive.
+7 breaking, 6 additive.
 ```
 
 The old side is the file as committed at the ref (`git show`; nothing is built), the new side is the file in the working tree; name another file after the ref, or give two files and no ref. The order is fixed, so the same two schemas print the same text, and doc comments and wire ids are not compared. The command exits with status 0 whatever it finds, so run it freely; add `--exit-code` to make a breaking line exit 1 in CI.
 
-The size of a review is the point. The twelve changes above, on a to-do core small enough to read, change 506 lines of generated code (160 of Swift, 170 of Kotlin, 176 of TypeScript), 60 lines of `schema.json` and print 12 lines of diff. `schema export` writes every type and every small definition on one line, so the playground's whole schema is about 3,300 lines and a field that became optional is one changed line.
+Nothing is built, so the report is only as current as the file. The bindings beside it say which schema they were generated from, and the command compares: when `schema.json` disagrees with the bindings in the working tree (an API change nobody exported) or at the ref, it prints a warning that names both hashes, and a stale working-tree file fails `--exit-code` too.
+
+The size of a review is the point. The thirteen changes above, on a to-do core small enough to read, change 581 lines of generated code (183 of Swift, 193 of Kotlin, 205 of TypeScript), 77 lines of `schema.json` and print 13 lines of diff. `schema export` writes every type and every small definition on one line, so the playground's whole schema is about 3,300 lines and a field that became optional is one changed line.
 
 The pull request template asks for this output when a core's API changes: paste it, and justify every `breaking` line.
 
 ## What breaking means
 
-A line is **breaking** when code an app wrote against the old bindings can stop compiling or change what it means against the new ones, and **additive** when it cannot. A removed or changed signature is breaking; an added function, method, store, object or record, or an added field with a default, is additive. Items are matched by name.
+A line is **breaking** when code an app wrote against the old bindings can stop compiling or change what it means against the new ones, and **additive** when it cannot. A removed or changed signature is breaking; an added function, method, store, object or record is additive. An added record field is breaking even with a default: a TypeScript record is an interface, and an object literal that builds one must name every field (Swift and Kotlin default an appended field of a primitive, string, time, optional or collection type). Items are matched by name.
 
 | Item | Additive | Breaking |
 | --- | --- | --- |
 | Any item | added | removed |
-| Record field | added with `#[undra(default)]`; a default gained | added without one; removed; retyped; reordered; a default lost |
+| Record field | a default gained | added, with or without `#[undra(default)]`; removed; retyped; reordered; a default lost |
 | Enum or error case | message changed | added (an exhaustive `switch` or `when` stops compiling); removed; payload or index changed |
-| Method, constructor, function | added | removed; a parameter added, removed, renamed, retyped or reordered; return type, `async` or `Ctx` changed |
-| Store signal | added; `no_coalesce` or `default` changed | removed; type, `computed` or `key` changed |
+| Method, constructor, function | added; `Ctx` taken or not (no generated signature shows it) | removed; a parameter added, removed, renamed, retyped or reordered; return type or `async` changed |
+| Store signal | added; `no_coalesce`, `default`, `computed` or `key` changed (every signal is a read-only property) | removed; type changed |
 | Query or mutation | added; cache key, stale time, `persist`, `idempotent`, polling changed | removed; parameters, return type or paging changed |
-| Port (the app implements it) | a standard port added | any other port added; a method added, removed or changed; removed |
-| Callback (the app implements it) | added | a method added, removed or changed; removed |
+| Port (the app implements it) | a standard port added | an opt-in standard port added (a web app registers its adapter); any other port added; a method added, removed or changed; removed |
+| Event port (the app sends it) | added; a method added | a method removed or changed; removed |
+| Callback (the app implements it) | added | a method added, removed or changed; `background` changed (the calls move on or off the main thread); removed |
 
-"Additive" means compatible, so it includes behaviour that no signature shows, like a query's stale time. The labels are conservative: a TypeScript object literal that builds a record by hand must name a new defaulted field, and the compiler reports it. The full rules are [SPEC 2.6](https://github.com/shreypdev/undra/blob/main/docs/SPEC.md).
+"Additive" means compatible, so it includes behaviour that no signature shows, like a query's stale time. A line holds for all three languages: what breaks in any one of them is breaking. The full rules are [SPEC 2.6](https://github.com/shreypdev/undra/blob/main/docs/SPEC.md).
 
 ## Keeping it honest in CI
 
@@ -2171,6 +2175,7 @@ bash
 
 ```bash
 undra schema export -o schema.json               # write the core's API as a file; commit it
+undra schema export --check                      # fail when schema.json is not the core's schema (CI)
 undra schema diff --against origin/main          # what changed since the base, each line breaking or additive
 undra schema diff --against origin/main --exit-code   # ... and exit 1 when a line is breaking (CI)
 undra schema diff old.json new.json              # two schema files
@@ -2182,11 +2187,12 @@ The schema is the API: the generated Swift, Kotlin and TypeScript are an artifac
 | --- | --- |
 | `diff <old> <new>` | two schema JSON files, old then new (any form `undra bindgen --schema` reads) |
 | `diff --against <ref> [file]` | the file as committed at a git ref (`git show`; nothing is built) against the file in the working tree; the file is `schema.json` in the project directory unless named |
-| `diff --exit-code` | exit with status 1 when any line is breaking; without it the exit status is 0 whatever the diff says |
+| `diff --exit-code` | exit with status 1 when any line is breaking, or when the schema file disagrees with the bindings beside it; without it the exit status is 0 whatever the diff says |
 | `export -o <file>` | write the schema to a file (default: standard output) |
 | `export --docs`, `--release` | keep the doc comments; extract from a release build |
+| `export --check` | write nothing; exit with an error when the file (`-o`, or `schema.json` in the project directory) is not what the export would write |
 
-Errors are the usual ones: `C0009` for a ref that does not have the file (it says to commit one with `schema export`) or a file outside a repository, `C0002` for a file that is not a schema, `C0003` without `git`.
+`diff --against` builds nothing, so it checks the file instead: the generated bindings carry the hash of the schema they were made from, and when `schema.json` disagrees with them, in the working tree or at the ref, a warning names both hashes. Errors are the usual ones: `C0009` for a ref that does not have the file (it says to commit one with `schema export`) or a file outside a repository, `C0002` for a file that is not a schema, `C0003` without `git`, and `C0007` from `export --check` for a file that is not the core's schema.
 
 ## undra build
 

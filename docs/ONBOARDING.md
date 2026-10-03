@@ -461,5 +461,6 @@ exactly what the schema generates. Review the schema instead:
 change, each marked `breaking` or `additive` (the rules are `docs/SPEC.md` 2.6; add
 `--exit-code` to make a breaking line fail a CI step). The pull request template asks for that
 output when a core's API changes. `undra schema export -o schema.json` writes the file the
-command reads; commit it next to `generated/`. ADR-062 has the reasoning, and
+command reads; commit it next to `generated/`, and run `undra schema export --check` in CI so it
+stays the core's schema (`--against` also warns when the file disagrees with the bindings). ADR-062 has the reasoning, and
 `node scripts/generated-weight.mjs` measures what the lines of a generated tree are.

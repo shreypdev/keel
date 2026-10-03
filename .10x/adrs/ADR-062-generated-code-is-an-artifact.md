@@ -86,7 +86,7 @@ this ADR adds are exactly the ones such a fragment would want to ignore, and not
 ```text
 undra schema diff <OLD> <NEW> [--exit-code]                 two schema JSON files
 undra schema diff --against <REF> [FILE] [--exit-code]      FILE as committed at the git ref, against FILE in the working tree
-undra schema export [-o FILE] [--docs] [--release]          the core's schema as the file the two above read
+undra schema export [-o FILE] [--docs] [--release] [--check]   the core's schema as the file the two above read
 ```
 
 `OLD`, `NEW` and `FILE` are schema JSON in any form `undra bindgen --schema` reads (the whole schema, the canonical form). `FILE`
@@ -101,8 +101,8 @@ the four-part shape of R8.
 compile of the core and every dependency per run, depends on the toolchain of the ref, and cannot be tested without building; a
 committed snapshot is hermetic, fast and itself reviewable (it is the API as text). The cost is that a project keeps a
 `schema.json`: `undra schema export -o schema.json` writes it from the built core (without doc comments unless `--docs`, so a doc
-fix is not an API change), and a CI step `undra schema export -o schema.json && git diff --exit-code schema.json` keeps it as
-honest as `undra bindgen --check` keeps the bindings.
+fix is not an API change), and a CI step `undra schema export --check` keeps it as honest as `undra bindgen --check` keeps the
+bindings (amended in review: see the end; the first text had `export -o schema.json && git diff --exit-code schema.json`).
 
 `schema export` writes the exchange form of SPEC 2.3 with every type on one line (the compact form SPEC 2.1 gives) and every small
 definition that holds nothing nested (a field, a parameter, a signal, a case without a payload) on one line of at most 140 columns,
@@ -116,40 +116,41 @@ queries; by name within a group; members in the order their definition lists the
 Public API: old.json (schema 0x3c17cd5f59bb6f68) -> new.json (schema 0x91d2b6e0aa51f3c4)
 
 breaking  field Todo.title: type changed from String to Option<String>
-additive  field Todo.due: added (due: Option<Timestamp>, with a default)
+breaking  field Todo.due: added (Option<Timestamp>, with a default): Swift and Kotlin initializers default it, but a TypeScript object literal that builds a `Todo` must name it
 breaking  method Todos.add: parameter `tags: Vec<String>` added
 additive  function archive: added (fn archive(id: TodoId) -> Result<(), TodoError>)
 breaking  case Status.Archived: added (an exhaustive switch or when stops compiling)
 
-2 breaking, 3 additive.
+4 breaking, 1 additive.
 ```
 
 The text is for people and is not a stable format; the order is (tests pin it). It is on stdout; progress and warnings stay on stderr.
 
 **2.3 The compatibility rules (SPEC 2.6).** The question a line answers is: *does code an app wrote against the old schema's
-bindings still compile and mean the same against the new ones?* A **removed or changed signature is breaking; an added function,
-method, store, object, record or an added field the initializer defaults is additive.** In full:
+bindings still compile and mean the same against the new ones?*, in each of Swift, Kotlin and TypeScript. A **removed or changed
+signature is breaking; an added function, method, store, object or record is additive; an added record field is breaking even with
+a default**, because a TypeScript record is an interface whose object literals name every member (amended in review). In full:
 
 | Item | Additive | Breaking |
 |---|---|---|
 | record, enum, error, object, store, function, query, mutation, callback | added | removed |
 | record | | becomes or stops being a newtype |
-| record field | added with `#[undra(default)]`; `default` gained | added without it (every construction site must supply it); removed; type changed; fields reordered; `default` lost |
+| record field | `default` gained; `default` lost on a field of a record or enum type (no initializer spelled it) | added, with or without `#[undra(default)]` (a TypeScript object literal names every field; Swift and Kotlin default only an appended field of a primitive, string, time, optional or collection type); removed; type changed; fields reordered; `default` lost on any other field |
 | enum case | message of an error case changed | added (an exhaustive `switch` / `when` stops compiling); removed; payload changed; index changed (the wire value moved) |
 | enum | | error flag changed |
 | object, store | | store added to or removed from an object |
-| constructor, method (an object's or a port's or a callback's) | added to an **object** | removed; added to a **port** or a **callback** (the app implements it); parameter added, removed, renamed, retyped or reordered; return type, `async`, `ctx`, generic label changed |
-| store signal | added; `no_coalesce`, `default` changed; signals reordered | removed; type, `computed` or `key` changed |
+| constructor, method (an object's or a port's or a callback's) | added to an **object** or an **event port** (the app calls it); `ctx` taken or not (no generated signature shows it) | removed; added to a sync or async **port** or a **callback** (the app implements it); parameter added, removed, renamed, retyped or reordered; return type, `async`, generic label changed |
+| store signal | added; `no_coalesce`, `default`, `computed`, `key` changed (no generated declaration shows them); signals reordered | removed; type changed |
 | function | added | removed; any of the method changes above |
 | query, mutation | added; `key`, `stale`, `persist`, `idempotent`, `interval`, `poll_in_background` changed | removed; kind, parameters or return changed; `infinite` added, removed or retyped |
-| port | a standard port added (the runtimes ship it) | any other port added (the app must supply an adapter); removed; kind changed |
-| port, callback | `background`, `coalesce` changed | |
+| port | a standard port of SPEC 8 added (the runtimes ship and register it); an **event** port added (the app sends, implements nothing) | an opt-in standard port of SPEC 8.1 added (a web app registers its adapter); any other port added (the app must supply an adapter); removed; kind changed |
+| callback | a method's `coalesce` changed | `background` changed (the calls move on or off the main thread; Swift's protocol gains or loses `@MainActor`) |
 
 "Additive" means *compatible*: it includes a behavioural change that no signature shows (a query's stale time). Ids are not
 compared (every id but a signal's position derives from a name, SPEC 1.1). Documentation is not compared. When two schemas have
 different hashes and the rules find nothing, the command says so rather than "unchanged". A rule can be wrong for an app that
-uses only part of the API; the labels are conservative (a TypeScript object literal that builds a record by hand must name a new
-defaulted field, which the compiler reports), and `--exit-code` is a gate a team chooses to run, not a proof.
+uses only part of the API; the labels are conservative (what breaks in any one of the three languages is breaking), and
+`--exit-code` is a gate a team chooses to run, not a proof.
 
 ### 3. The review rule
 
@@ -206,8 +207,9 @@ Kotlin, 176 TypeScript), `schema.json` by **60**, and `undra schema diff` prints
 * `undra-cli` gains the `schema` command (`diff`, `export`), `undra-bindgen` the `provenance` module; no new dependency, no unsafe.
 * A project that has no committed schema file gets nothing from `--against` until it runs `undra schema export -o schema.json` once;
   the error says so.
-* Follow-ups, none blocking: the runtime helpers of section 4 (one piece, three runtimes); `schema export --check`; a GitHub Action
-  that posts the diff as a comment; lint exclusions (the Bazel piece).
+* Follow-ups, none blocking: the runtime helpers of section 4 (one piece, three runtimes); a GitHub Action that posts the diff as a
+  comment; lint exclusions (the Bazel piece); a committed `schema.json` for the repository's own examples with the CI steps of the
+  docs page (R10).
 
 ## Implementation note (2026-10-02, `wt/generated-weight`)
 
@@ -235,3 +237,27 @@ What differs from the text above, and what was measured while building it:
   `node --test scripts/generated-weight.test.mjs` to the job that runs `bench-device-report.test.mjs`.
 * **Not done**: committing a `schema.json` for the repository's own examples (R10 would say we should; it needs a CI step that keeps it
   current, which is `ci.yml`'s); the `bazel` piece's lint exclusions; any of the padding candidates of section 4.
+
+## Amendment (2026-10-02, adversarial review)
+
+The review (`.10x/reviews/2026-10-02-generated-weight-review.md`) checked each rule of 2.3 against what the three generators emit
+and changed the ones that were wrong; SPEC 2.6 and `schema_diff.rs` changed with them, each with a test.
+
+* **A field added is breaking even with `#[undra(default)]`.** The TypeScript generator writes a record as an interface whose every
+  member is required, so an object literal typed as the record stops compiling; the first text called the line additive and the
+  labels "conservative" while saying so. Swift and Kotlin default only a defaulted field of a primitive, string, time, UUID, decimal,
+  optional or collection type (never a record or an enum: `default_value` in both generators), and a defaulted field inserted before
+  an existing one shifts Kotlin's positional arguments and `componentN`. The line says which applies; a CLI test generates all three
+  languages and checks the rule against them. Losing a default no initializer spelled is additive.
+* **A callback's `background` changed is breaking**: Swift spells it as the protocol's isolation (`@MainActor` or not), and a call
+  that arrives on another thread changes what an implementation that touches the UI may do, in every language.
+* **False breaks removed**: an event port, and a method added to one, is additive (the app calls `<Port>Events`, implements nothing);
+  `ctx` and a signal's `computed` and `key` are additive (no generator reads `takes_ctx`; every signal is a read-only property).
+* **Standard means `stdlib::covered`** (name, id and shape, SPEC 10.5), not the name alone; an **opt-in** standard port (SPEC 8.1)
+  added is breaking, since a web app must pass its adapter in `LoadOptions.ports`.
+* **A stale schema file is caught.** `--against` builds nothing, so a `schema.json` nobody exported after an API change made the
+  report say "No changes". It now reads the schema hash the project's bindings carry (`provenance::schema_hash_in`, the inverse of
+  the header sentence) in the working tree and at the ref, and warns at either end where the file disagrees; a stale working-tree
+  file fails `--exit-code`. `undra schema export --check` (a follow-up in the first text) is the CI gate of the file, failing with `C0007`.
+* The CLI fixture gains an event port: thirteen changes, 7 breaking and 6 additive; the bindings change by 581 lines (183 Swift, 193
+  Kotlin, 205 TypeScript), `schema.json` by 77, and the diff prints 13.
