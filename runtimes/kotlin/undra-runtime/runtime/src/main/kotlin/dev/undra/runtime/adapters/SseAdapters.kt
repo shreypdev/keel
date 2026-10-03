@@ -1,5 +1,6 @@
 package dev.undra.runtime.adapters
 
+import dev.undra.runtime.UndraEmbeddingApi
 import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
@@ -225,11 +226,17 @@ private suspend fun <T> CompletableFuture<T>.awaitCancellable(): T =
  * An [SseStream] over a response body: a reader thread decodes the bytes as UTF-8, parses them with [SseParser] and hands
  * the events to [events]; it reads the next chunk only while fewer events wait than the binding's buffer has room for.
  *
+ * It is what the default adapters return and what an adapter over any other HTTP client returns too (the OkHttp one does, ADR-060):
+ * check the answer, then `return SseStreamReader(body, lastEventId) { cancelTheCall() }`. It is part of the embedding API: it may
+ * change between releases.
+ *
  * @param body the response body.
  * @param lastEventId the `Last-Event-ID` the request sent: the parser's last event id to begin with.
- * @param abort releases the connection; it must make a read that is blocked fail (or end).
+ * @param abort releases the connection; it must make a read that is blocked fail (or end). It is called from the reader thread when
+ *   the body ended or failed, and from [close].
  */
-internal class SseStreamReader(
+@UndraEmbeddingApi
+public class SseStreamReader(
     private val body: InputStream,
     private val lastEventId: String?,
     private val abort: () -> Unit,

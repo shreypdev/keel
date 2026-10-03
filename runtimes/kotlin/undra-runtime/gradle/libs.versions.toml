@@ -18,6 +18,10 @@ compose-bom = "2024.10.01"
 # The optional :android-work module (ADR-046): WorkManager runs the core's background tasks in a window the OS grants.
 # 2.10 builds against API 35 and AGP 8.7, which is what this project's toolchain pins; a newer line may ask for more.
 androidx-work = "2.10.5"
+# The optional :okhttp-adapters module (ADR-060): the app's own OkHttpClient behind the Http, WebSocket and Sse ports. 4.12.0 is the
+# last 4.x (Kotlin stdlib 1.8, Okio 3.6): the line most apps are on. 5.x is newer than this Kotlin (2.0.21) reads, so the module cannot
+# be built against it; its unit tests were run once against 5.3.2 (okhttp-adapters/README.md). The other modules carry no OkHttp.
+okhttp = "4.12.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -36,6 +40,7 @@ androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4
 androidx-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "androidx-work" }
 androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "androidx-work" }
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
