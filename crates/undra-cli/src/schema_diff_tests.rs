@@ -630,6 +630,35 @@ fn an_error_message_changing_is_additive() {
     );
 }
 
+#[test]
+fn a_case_fields_default_is_reported_and_additive() {
+    // The default of a case's field moves the hash (SPEC 2.3) and only a migration reads it: no
+    // generator spells a default in a case's payload. It is a line, not an unexplained hash change.
+    let at = |default: bool| {
+        with_enum(
+            false,
+            vec![variant(
+                "Done",
+                0,
+                vec![field("at", TypeRef::Timestamp, default)],
+                false,
+            )],
+        )
+    };
+    assert_eq!(
+        lines(&at(false), &at(true)),
+        [
+            "additive  case Status.Done: field `at` gained a default (only a migration reads it; no generated case spells one)"
+        ]
+    );
+    assert_eq!(
+        lines(&at(true), &at(false)),
+        [
+            "additive  case Status.Done: field `at` lost its default (only a migration reads it; no generated case spells one)"
+        ]
+    );
+}
+
 // ----- functions, methods, parameters -------------------------------------------------------------
 
 #[test]

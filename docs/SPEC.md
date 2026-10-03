@@ -193,7 +193,7 @@ The generated code is an artifact of the schema, so the schema is what is versio
 | record, enum, error, object, store, function, query, mutation, callback | added | removed |
 | record | | becomes or stops being a newtype |
 | record field | `default` gained; `default` lost on a field of a record or enum type (no generated initializer spelled it) | added, with or without `#[undra(default)]` (a TypeScript object literal that builds the record must name it; without a default, or of a record or enum type, every Swift and Kotlin initializer call must supply it; inserted before an existing field, it shifts Kotlin's positional arguments and destructuring); removed; type changed; fields reordered; `default` lost on any other field |
-| enum case | `#[error("..")]` message changed | added (an exhaustive `switch` / `when` stops compiling); removed; payload changed; index changed (the wire value moved) |
+| enum case | `#[error("..")]` message changed; a payload field's `default` changed (only a migration reads it: no generated case spells a default) | added (an exhaustive `switch` / `when` stops compiling); removed; payload changed; index changed (the wire value moved) |
 | enum | | error flag changed |
 | object or store | | a store added to or removed from an object |
 | constructor, method (of an object, a port or a callback), function | added to an **object** or an **event port** (the app calls it); added function; `Ctx` taken or no longer taken (not a wire parameter: no generated signature shows it) | removed; added to a sync or async **port** or a **callback** (the app implements it); a parameter added, removed, renamed, retyped or reordered; return type, `async` or generic label changed |

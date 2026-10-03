@@ -748,6 +748,26 @@ fn case(out: &mut Out, path: &str, old: &VariantDef, new: &VariantDef) {
             path,
             format!("payload changed from {} to {}", payload(old), payload(new)),
         );
+    } else {
+        // The same payload: a field's default is all that can differ, and no generator spells one
+        // in a case (only a migration reads it, SPEC 5.9), but it moves the hash, so it is a line.
+        for (o, n) in old.fields.iter().zip(&new.fields) {
+            if o.default != n.default {
+                out.additive(
+                    "case",
+                    path,
+                    format!(
+                        "field `{}` {} (only a migration reads it; no generated case spells one)",
+                        n.name,
+                        if n.default {
+                            "gained a default"
+                        } else {
+                            "lost its default"
+                        }
+                    ),
+                );
+            }
+        }
     }
     if old.message != new.message {
         out.additive("case", path, "message changed");
