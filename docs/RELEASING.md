@@ -59,6 +59,13 @@ branches and tags* to the tag pattern `v*` and move the secret into it (`gh secr
 release`); add a tag ruleset (Settings, Rules, Rulesets: tags matching `v*`, restrict creation, update and
 deletion, bypass: you). The workflow already refuses a `v*` tag whose commit is not on `main`.
 
+Recommended before announcing: reserve the npm scope `@undra` (npmjs.com, *Add Organization*, the free plan for
+public packages; nothing is published). Nothing of Undra's is on the registry, but `@undra/react-native`,
+`@undra/testkit` and every generated bindings package name `@undra/runtime` by a range, and npm installs a missing
+peer from the registry: an app that installs one of them without the runtime's URL, or a `npm install` inside
+`generated/ts`, would fetch whatever someone else published as `@undra/runtime`. Verify:
+`npm view @undra/runtime` still answers 404 and `npm org ls undra` lists you.
+
 ### 4. Rehearse with a release candidate (recommended)
 
 A prerelease exercises every channel that only a real tag can (SwiftPM against github.com, JitPack's build, the
@@ -74,9 +81,12 @@ gh run watch
 
 What it publishes: a GitHub **prerelease** `v1.0.0-rc.1` with the four CLI tarballs, the three npm tarballs and
 `checksums.txt`; nothing else. The tap is left alone, the installer's "latest" ignores prereleases, no post, no
-formula, no registry. Then run steps 8 and 9 with `1.0.0-rc.1` for `1.0.0` (install the CLI with
+formula, no registry. Then run steps 8 and 9 with `1.0.0-rc.1` for `1.0.0`, without step 9's two `brew` lines
+(the tap has no formula for a prerelease; install the CLI with
 `curl -fsSL https://shreypdev.github.io/undra/install.sh | UNDRA_VERSION=1.0.0-rc.1 sh`): a project made by
-that CLI pins `v1.0.0-rc.1` everywhere. A failure here costs a `1.0.0-rc.2`, not a broken `1.0.0`. The
+that CLI pins `v1.0.0-rc.1` everywhere. A project of `1.0.0` never resolves to a prerelease tag: SwiftPM's
+`from: "1.0.0"` ignores `v1.0.1-rc.1` and `v1.1.0-rc.1` (checked with a local tagged clone), and Cargo, JitPack and
+the npm URLs name one tag each. A failure here costs a `1.0.0-rc.2`, not a broken `1.0.0`. The
 prerelease and its tag can stay; nothing points at them.
 
 The same rehearsal without any account runs on one machine: `bash packaging/rehearse-launch.sh` (a copy of the
@@ -139,6 +149,20 @@ The log ends with `Published: runtime testkit android-adapters android-work undr
 (com.github.shreypdev.undra, v1.0.0)` (`runtimes/kotlin/undra-runtime/scripts/jitpack-install.sh`) and JitPack's
 list of build artifacts. The same is at https://jitpack.io/#shreypdev/undra, the tag's row and its log icon. Check
 one Android module too: the same `curl` for `android-adapters/v1.0.0/android-adapters-v1.0.0.pom` prints 200.
+
+JitPack builds and serves these bytes; nothing signs them. Record what it serves, so a later change shows, and add
+it to the release notes (`gh release edit v1.0.0 --notes-file ...`, appended to the generated notes):
+
+```sh
+for m in runtime testkit android-adapters android-work undra-compose okhttp-adapters; do
+  ext=aar; case $m in runtime | testkit) ext=jar ;; esac
+  printf '%s  %s\n' "$(curl -fsSL "https://jitpack.io/com/github/shreypdev/undra/$m/v1.0.0/$m-v1.0.0.$ext" | shasum -a 256 | cut -d' ' -f1)" "$m-v1.0.0.$ext"
+done
+```
+
+An app that wants to hold JitPack to those bytes commits Gradle's dependency verification
+(`./gradlew --write-verification-metadata sha256 :app:assembleDebug`, `gradle/verification-metadata.xml`): a changed
+artifact then fails its build (ADR-063, section 4).
 
 ### 9. Check each channel from a clean machine
 

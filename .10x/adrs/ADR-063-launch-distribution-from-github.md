@@ -45,8 +45,12 @@ account, no token on the consumer's side, no second repository.
   packages (`@undra/runtime`, `@undra/react-native`, `@undra/testkit`), their lock files and the peer ranges by which the latter two
   name the runtime. The CLI's pins come from `CARGO_PKG_VERSION` (nothing to edit); the Swift package has no version (SwiftPM reads
   the tag); the Kotlin artifacts take theirs from the tag (JitPack's `VERSION`, below), so no Gradle file carries a release
-  number. `--check` covers every file the script writes, and the release workflow's first job runs it. A test runs the script on a
-  copy of the repository with a throwaway version (`scripts/bump-version.test.sh`).
+  number. The script also owns the version the TypeScript and Kotlin runtimes report in their `Hello` (`RUNTIME_VERSION`,
+  `UNDRA_RUNTIME_VERSION`; review of 2026-10-03). `--check` covers every file the script writes, and the release workflow's first
+  job runs it. A test runs the script on a copy of the repository with a throwaway version (`scripts/bump-version.test.sh`).
+* The generated `package.json` asks for `@undra/runtime` `^<[undra] version>` in a released project (`Generator::ts_runtime_range`),
+  like its Swift package and Kotlin module; an `undra` of another release than the project's says so when it generates
+  (R7), and `undra bindgen --check`'s C0007 names both releases.
 
 ### 2. Rust: the repository's tag (unchanged)
 
@@ -65,7 +69,8 @@ test (`crates/undra-cli/tests/swift_manifests.rs`) keeps the two manifests' prod
 **Clone size.** SwiftPM clones the whole repository once per machine (then checks out the tag): measured on 2026-10-03, a bare
 clone of the full history is **47 MiB** (1,805 commits) and a checkout 45.5 MiB (3,697 files; `examples/` 14.2 MiB, of which the
 playground's proof screenshots are about 5 MiB, `crates/` 11.0 MiB, `runtimes/` 7.3 MiB). That is the price of one repository;
-revisit (a mirror filled by the release, below) if a clone passes about 150 MiB or a user reports it.
+revisit (a mirror filled by the release, below) if a clone passes about 150 MiB or a user reports it. SwiftPM mirrors every ref
+GitHub advertises, the pull requests' heads included: GitHub reports the repository at 51,064 KB (2026-10-03).
 
 ### 4. Kotlin and Android: JitPack builds the Gradle modules from the tag
 
@@ -86,6 +91,12 @@ and version JitPack asks for (`$GROUP.$ARTIFACT`, `$VERSION`: `com.github.shreyp
 module, when one of the six is missing (an Android SDK JitPack did not provide). Every module applies `maven-publish`. In the
 repository the build keeps its development identity (`dev.undra`, `0.1.0-SNAPSHOT`), which the checkout's composite builds
 substitute and which is already the Maven Central name.
+
+**Trust.** JitPack builds the tag on its machines and serves what it built; nothing is signed by this repository, so an app
+trusts JitPack's build and storage as well as the tag. `includeGroup` keeps JitPack from answering for any other group. The
+launch checklist records the sha256 of what JitPack serves in the release notes, and an app that wants to hold JitPack to those
+bytes commits Gradle's dependency verification (`./gradlew --write-verification-metadata sha256 ...`): a changed artifact then
+fails its build. Maven Central (signed artifacts) removes the third party.
 
 The CLI writes these coordinates from **one constant**, `dist::MAVEN` (group, version prefix, repository). Moving to Maven Central
 later is that one line (`group: "dev.undra"`, no prefix, no extra repository), and `undra upgrade` already moves any Undra
@@ -118,8 +129,12 @@ Three environment variables replace the GitHub addresses in what `undra init`, `
 rehearsal against a local copy (`packaging/rehearse-launch.sh`) or a company mirror: `UNDRA_DIST_GIT_URL` (the repository: the
 crates and the Swift package), `UNDRA_DIST_RELEASE_URL` (where `v<version>/<asset>` is downloaded) and `UNDRA_DIST_MAVEN_REPO`
 (the Maven repository of the Kotlin artifacts). Each must be an `https://`, `http://` or `file://` URL (`ssh://` too for the git
-one) without spaces or quotes; anything else stops the command with `C0009`, naming the variable, why and how to fix it. They are
-not stored in the project: a command run without them writes GitHub's addresses.
+one) without spaces or quotes; anything else stops the command with `C0009`, naming the variable, why and how to fix it. A command
+that reads one says so (a warning per variable, before it writes anything). They are not stored in the project as such; what they
+replaced is written into its files, and `undra bindgen` in a project names the repository its core's `undra` dependency comes
+from (`core/Cargo.toml`), not the environment's, so a project made against a mirror stays on it and `undra bindgen --check` does
+not depend on the shell it runs in (review of 2026-10-03). `undra upgrade` of such a project needs the variable again (without it
+the mirror's dependency is a fork it does not move).
 
 ## Alternatives considered
 
@@ -149,6 +164,9 @@ not stored in the project: a command run without them writes GitHub's addresses.
   it.
 * SwiftPM clones the whole repository (47 MiB), once per machine.
 * A tag is now what every channel serves: it must never move (it never could: the crates were already pinned by tag).
+* The npm scope `@undra` stays unregistered by this decision, while `@undra/react-native`, `@undra/testkit` and the generated
+  packages name `@undra/runtime` by a range and npm installs a missing peer from the registry: whoever registers the scope could
+  answer for it. The launch checklist recommends reserving the scope (an organisation, nothing published).
 
 ### Neutral
 

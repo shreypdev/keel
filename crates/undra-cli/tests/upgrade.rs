@@ -28,7 +28,10 @@ const ASSETS: &str = "https://github.com/shreypdev/undra/releases/download";
 /// (`1.0.0-rc.1`) prints it as it is, so the version pull request of either stays green.
 fn first_notes_release() -> String {
     let text = include_str!("../src/migrations.rs");
-    let at = text.find("version: \"").expect("the first migration's version") + "version: \"".len();
+    let at = text
+        .find("version: \"")
+        .expect("the first migration's version")
+        + "version: \"".len();
     text[at..at + text[at..].find('"').unwrap()].to_owned()
 }
 
