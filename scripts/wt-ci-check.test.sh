@@ -31,6 +31,12 @@ expect "pr: a failed roll-up is RED" 1 "RED CI is FAILURE" "$CHECK" pr-verdict "
 expect "pr: a pending roll-up is RUNNING" 1 "RUNNING Bench is IN_PROGRESS" "$CHECK" pr-verdict "$DATA/pr-one-red-one-running.json" "${required[@]}"
 expect "pr: no checks at all: MISSING" 1 "MISSING no \"All green\" check of CI" "$CHECK" pr-verdict "$DATA/pr-none.json" "${required[@]}"
 
+# The single gate: one workflow whose last job, "All green", needs every called workflow. A called workflow's own
+# roll-up ("Site / Complete") passing early is not the gate.
+expect "gate: All green passed" 0 "ok Gate" "$CHECK" pr-verdict "$DATA/pr-gate-green.json" Gate
+expect "gate: a called workflow finished first, the gate has not reported: MISSING" 1 "MISSING" "$CHECK" pr-verdict "$DATA/pr-gate-running.json" Gate
+expect "gate: a failed called workflow fails it" 1 "RED Gate is FAILURE" "$CHECK" pr-verdict "$DATA/pr-gate-red.json" Gate
+
 site_yml="$HERE/../.github/workflows/site.yml"
 expect "a change under site/ needs the Site workflow" 0 "yes" bash -c "printf 'docs/x.md\nsite/index.html\n' | '$CHECK' site-needed '$site_yml'"
 expect "a change to the scenarios needs the Site workflow (the cards read them)" 0 "yes" bash -c "printf 'contract-tests/scenarios.md\n' | '$CHECK' site-needed '$site_yml'"

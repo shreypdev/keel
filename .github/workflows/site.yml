@@ -23,8 +23,9 @@ on:
       - "contract-tests/scenarios.md"
       - "README.md"
       - ".github/workflows/site.yml"
-  pull_request:
-  merge_group:
+  # Pull requests and the merge queue run this through the Gate workflow (.github/workflows/gate.yml), which calls it
+  # and ends in the one required check; it runs by itself only on main.
+  workflow_call:
 
   workflow_dispatch:
 
@@ -144,11 +145,11 @@ jobs:
         continue-on-error: true
         run: node site/scripts/indexnow.mjs
 
-  # The one check branch protection requires: green only when the build and its checks succeeded (the deploy runs on main only) (a failed, cancelled or
-  # skipped job fails it). `if: always()` so it reports after failures too; without it a failed job leaves the
-  # check "expected" forever and a pull request can never merge. Name and job id are the same in every workflow.
-  all-green:
-    name: All green
+  # This workflow's own roll-up: green only when the build and its checks (the deploy runs on main only) succeeded (a failed, cancelled or skipped job fails it;
+  # `if: always()` so it reports after failures too). The Gate workflow needs it for every workflow it calls, and
+  # ends in the one check the ruleset requires. Named "Complete" so that only the Gate's last job is called "All green".
+  complete:
+    name: Complete
     if: always()
     needs: [build]
     runs-on: ubuntu-latest

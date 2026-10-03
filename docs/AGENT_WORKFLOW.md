@@ -14,7 +14,7 @@ the integrator writes to it.
 ```text
   brief ──▶ implement in a worktree ──▶ adversarial review ──▶ fix ──▶ re-review
                                                                         │
-  push the branch ──▶ pull request, four "All green" checks on its head ──▶ merge ◀┘
+  push the branch ──▶ pull request, "All green" on its head ──▶ merge ◀┘
                                                               │
                               clean up ◀── full matrix green on main
 ```
@@ -81,18 +81,20 @@ is a full cycle. The four v1 cycles in `.10x/reviews/` are the reference for dep
 ### 4. Merge — integrator only, through a pull request
 
 **`main` is protected: nothing lands except through a pull request whose required checks are green on its exact
-head.** The required checks are the "All green" job of each gating workflow — `CI / All green`, `Bench / All
-green`, `Two cores / All green`, `Site / All green` — a roll-up that succeeds only when every job of its workflow
-succeeded (a failed, cancelled or skipped job fails it, and it always reports, so a red run never leaves a check
-"expected" forever). The workflows run on every push to a pull request's branch (and on `main`); a newer push
-cancels the run it supersedes. Site always builds and checks on a pull request (minutes); its deploy stays
-`main`-only. A piece is not done until those four are green on its head: an author whose run is red fixes the
-cause (not the test) and pushes again.
+head.** The required check is **"All green"**, the last job of the Gate workflow (`.github/workflows/gate.yml`). On a
+pull request the Gate runs CI, Bench, Two cores and Site as its own jobs (they are reusable workflows) and "All
+green" needs all four, so it cannot report before they finish and is green only when every job of every one
+succeeded. Each of the four ends in a job named "Complete" that fails on a failed, cancelled or skipped job. (They
+used to end in four jobs all named "All green"; the ruleset names a check by its name, and GitHub took the first to
+finish, Site's, as the required one: a pull request was mergeable while CI still ran. One name, one job.) A newer
+push cancels the run it supersedes. Site always builds and checks on a pull request; its deploy stays `main`-only.
+A piece is not done until "All green" is green on its head: an author whose run is red fixes the cause (not the
+test) and pushes again.
 
 The order is: the review is done, the branch contains `main` (`git merge main` in the worktree), the branch is
 pushed, and `scripts/wt.sh merge <slug>` from the primary checkout does the rest: opens the pull request if none is
 open (`scripts/wt.sh pr <slug>` opens a draft early, so CI runs from the first push), marks it ready, waits for the
-checks, requires the four "All green" on the head (`scripts/wt-ci-check.sh pr-verdict`), squash-merges (the tree
+checks, requires "All green" on the head (`scripts/wt-ci-check.sh pr-verdict`), squash-merges (the tree
 that lands is the tree CI tested), verifies that `origin/main` contains the commit GitHub made, and cleans up
 (section 5). `main`'s ruleset allows squash merges only and does not ask for "branches up to date", so the script keeps the
 rule itself: the branch contains `main`, or merging `main` into it changes nothing (a piece stacked on the one
@@ -108,7 +110,7 @@ From the primary checkout, on `main`:
 
 ```bash
 scripts/wt.sh pr my-piece       # optional, early: a draft pull request, so every push runs CI
-scripts/wt.sh merge my-piece    # the pull request, its four "All green" checks, the merge, verify, clean up (section 5)
+scripts/wt.sh merge my-piece    # the pull request, its "All green" check, the merge, verify, clean up (section 5)
 ```
 
 Then the integrator runs the **full matrix**, not just the touched crate:

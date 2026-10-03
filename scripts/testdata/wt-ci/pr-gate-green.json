@@ -1,0 +1,26 @@
+[
+ {
+  "workflow": "Gate",
+  "name": "CI / Rust (Linux)",
+  "bucket": "pass",
+  "state": "SUCCESS"
+ },
+ {
+  "workflow": "Gate",
+  "name": "CI / Complete",
+  "bucket": "pass",
+  "state": "SUCCESS"
+ },
+ {
+  "workflow": "Gate",
+  "name": "Site / Complete",
+  "bucket": "pass",
+  "state": "SUCCESS"
+ },
+ {
+  "workflow": "Gate",
+  "name": "All green",
+  "bucket": "pass",
+  "state": "SUCCESS"
+ }
+]

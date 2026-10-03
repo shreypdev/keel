@@ -1,4 +1,4 @@
-<!-- One piece per pull request (docs/AGENT_WORKFLOW.md). The four "All green" checks must pass on the head. -->
+<!-- One piece per pull request (docs/AGENT_WORKFLOW.md). The "All green" check (the Gate) must pass on the head. -->
 
 **Piece:** `wt/<slug>` — one line on what it does.
 
