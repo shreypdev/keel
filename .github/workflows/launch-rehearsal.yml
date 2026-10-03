@@ -81,7 +81,7 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          args=()
-          if [ -n "${VERSION:-}" ]; then args=(--version "$VERSION"); fi
-          bash packaging/rehearse-launch.sh --platforms web,ios,android "${args[@]}" | tee rehearsal.log
+          # (macOS's bash is 3.2: an empty array under `set -u` is an unbound variable, so no array here.)
+          if [ -n "${VERSION:-}" ]; then set -- --version "$VERSION"; fi
+          bash packaging/rehearse-launch.sh --platforms web,ios,android "$@" | tee rehearsal.log
           sed -n '/^Rehearsal of Undra/,$p' rehearsal.log >>"$GITHUB_STEP_SUMMARY"
