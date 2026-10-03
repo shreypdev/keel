@@ -12,6 +12,8 @@ examples/bazel/
   kotlin/           the JVM test (JNI against libhello_core) and the ktlint test of the generated Kotlin
   ts/               the Node test (hello_core.wasm through the compiled bindings)
   swift/            the Swift test (macOS): the core in process
+  consumer/         what an app team adds on top: its own Kotlin library over the store, a Node test importing the runtime
+  android/          the bindings as an Android library (manual: --config=android, the Android SDK)
 ```
 
 ```sh
@@ -20,6 +22,7 @@ bazel test //...                      # needs Bazelisk; .bazelversion pins Bazel
 bazel build //:core_web               # bazel-bin/core_web/hello_core.wasm: 118 KB gzipped of the 120 KB budget
 bazel build //:bindings               # the Swift, Kotlin and TypeScript trees, as outputs
 bazel build //:mobile_ios             # macOS: the XCFramework (manual target)
+bazel build //android:hello --config=android   # the bindings as an Android library (ANDROID_HOME)
 ```
 
 | Target | What it proves |
@@ -28,17 +31,20 @@ bazel build //:mobile_ios             # macOS: the XCFramework (manual target)
 | `//ts:hello_test` | the same through the TypeScript bindings (type-checked by `tsc` against the compiled runtime) and `core_web` under Node |
 | `//swift:hello_test` | the same in Swift, with the XCFramework's host twin linked (macOS only; skipped on Linux) |
 | `//kotlin:lint_test` | ktlint 1.8 reports nothing on the generated Kotlin, and 90 findings once the exclusions `undra bindgen` writes are taken away |
+| `//consumer:summary_test` | a Kotlin library an app writes over the generated store compiles and runs, the core loaded by `-Dundra.native.hello_core.path=$(rootpath //:core_host)` |
+| `//consumer:runtime_test` | a Node test that imports `@undra/runtime` beside the bindings resolves both |
 
 ## What is hermetic, and what is not
 
 The actions run the `undra` CLI of this checkout with the Rust toolchain Bazel resolved, crates.io packages downloaded by the
-checksum `Cargo.lock` records and unpacked into a Cargo directory source, and no network. The scratch directory of an action is
-named by a digest of its inputs, so a core built twice is the same file. The C linker (and Xcode for iOS, the NDK and `cargo-ndk`
-for Android) are the machine's.
+checksum `Cargo.lock` records and unpacked into a Cargo directory source, and no network. An action copies exactly the files its
+target declares into a scratch directory named by the target (`/tmp/undra-bazel-<key>`), so a core built twice, or in two
+checkouts, is the same file. The C linker (and Xcode for iOS, the NDK and `cargo-ndk` for Android) are the machine's.
 
-Android is declared (`//:mobile_android`, `--config=android`) and not built here: the core's Rust toolchain for an Android platform
-needs a C++ toolchain for it (`rules_android_ndk`), which fails to configure on a machine without an NDK, so it cannot be in a
-module every machine builds. The guide (`docs/bazel.html`) says how to add it.
+The Android core (`//:mobile_android`) is declared and does not build: the core's Rust toolchain for an Android platform needs a
+C++ toolchain for it (`rules_android_ndk`), which this example does not register, and analysis stops at "Unable to find a CC
+toolchain" even on a machine with the NDK and `cargo-ndk`. `//android:hello`, the bindings as an Android library, needs only the
+SDK and builds (by hand: CI does not run it, since `rules_android` then downloads its own tools, one archive without a checksum).
 
 ## Notes
 

@@ -1,0 +1,38 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("@rules_java//java:java_test.bzl", "java_test")
+load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
+
+# What an app team writes on top of the generated bindings: its own Kotlin, using the store.
+kt_jvm_library(
+    name = "summary",
+    srcs = ["Summary.kt"],
+    deps = ["//kotlin:hello"],
+)
+
+kt_jvm_library(
+    name = "summary_test_lib",
+    testonly = True,
+    srcs = ["SummaryTest.kt"],
+    deps = [":summary"],
+)
+
+java_test(
+    name = "summary_test",
+    data = ["//:core_host"],
+    jvm_flags = ["-Dundra.native.hello_core.path=$(rootpath //:core_host)"],
+    main_class = "com.acme.todo.SummaryTestKt",
+    use_testrunner = False,
+    runtime_deps = [":summary_test_lib"],
+)
+
+# A Node test that imports the runtime as well as the bindings.
+js_test(
+    name = "runtime_test",
+    args = ["$(rootpath //:core_web)"],
+    data = [
+        "//:core_web",
+        "//:node_modules/@bazel-hello/core",
+        "//:node_modules/@undra/runtime",
+    ],
+    entry_point = "runtime_test.mjs",
+)

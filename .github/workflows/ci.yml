@@ -494,8 +494,10 @@ jobs:
         working-directory: examples/bazel
         run: bazel test //... --repository_cache="$HOME/.cache/bazel-repository" --test_output=errors
 
-  # The same example on macOS, where rules_swift and the iOS core have Xcode: the Swift consumer runs the core in process, and the
-  # XCFramework (device and simulator slices) builds in a Bazel action.
+  # What only macOS can run, where rules_swift and the iOS core have Xcode: the Swift consumer runs the core in process, and the
+  # XCFramework (device and simulator slices) builds in a Bazel action. The Kotlin and TypeScript targets are the Linux job's.
+  # Every change runs it, like the other macOS jobs: what moves its result is the Undra crates, the Swift runtime, the CLI and
+  # the rules, which is nearly every change, and a job that can be skipped cannot be part of "All green".
   bazel-example-macos:
     name: "Bazel example (macOS, Swift and iOS)"
     runs-on: macos-15
@@ -508,10 +510,10 @@ jobs:
           path: ~/.cache/bazel-repository
           key: bazel-repository-${{ runner.os }}-${{ hashFiles('examples/bazel/MODULE.bazel.lock', 'bazel/MODULE.bazel.lock', 'Cargo.lock') }}
           restore-keys: bazel-repository-${{ runner.os }}-
-      - name: bazel test //... and the iOS core
+      - name: The Swift consumer and the iOS core
         working-directory: examples/bazel
         run: |
-          bazel test //... --repository_cache="$HOME/.cache/bazel-repository" --test_output=errors
+          bazel test //swift/... --repository_cache="$HOME/.cache/bazel-repository" --test_output=errors
           bazel build //:mobile_ios --repository_cache="$HOME/.cache/bazel-repository"
 
   playground-web:

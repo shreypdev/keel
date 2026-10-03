@@ -1,0 +1,10 @@
+load("@undra_rules//undra:android.bzl", "undra_android_library")
+
+# The generated Kotlin bindings as an Android library (kt_android_library). It needs the Android SDK (rules_android reads
+# ANDROID_HOME), not the NDK, so it is `manual`: `bazel build //android:hello --config=android`.
+undra_android_library(
+    name = "hello",
+    bindings = "//:bindings",
+    custom_package = "dev.undra.bazel.hello",
+    tags = ["manual"],
+)

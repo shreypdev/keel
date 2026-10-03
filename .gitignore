@@ -35,4 +35,5 @@ dist
 /contract-tests/swift/PackagesFloor
 
 # Bazel (bazel/, examples/bazel): its convenience symlinks. Its output lives in the output base, not here.
-bazel-*
+/bazel/bazel-*
+/examples/bazel/bazel-*

@@ -7,6 +7,7 @@ load("@undra_rules//undra:defs.bzl", "undra_kt_jvm_library")
 undra_kt_jvm_library(
     name = "hello",
     bindings = "//:bindings",
+    visibility = ["//:__subpackages__"],
 )
 
 kt_jvm_library(
