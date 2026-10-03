@@ -165,7 +165,43 @@ So the gap is Android (nothing to hand the app's client to), and on Apple the We
 * No benchmark row (R4, R9): nothing here touches the boundary; the adapters are host code under the ports and do the same
   per-call work as the ones they sit beside.
 * Size: nothing for an app that does not add the module; for one that does, OkHttp is already in its APK.
-* Compatibility: built against OkHttp 4.12.0 (the line most apps are on); `-Pundra.okhttp.version=<x>` builds and tests the module
-  against another line. No other module depends on it.
+* Compatibility: built against OkHttp 4.12.0 (the line most apps are on) and run once against 5.3.2 (the same 66 JVM unit tests, which
+  pass), since Gradle gives an app on 5.x the highest version. No other module depends on it.
 * Risk and what to watch: the list in decision 6 is OkHttp's, not ours; the one with a security flavor is that malformed UTF-8 in a
   WebSocket text frame is repaired, not rejected, which is what the app's other OkHttp sockets do too.
+
+## Implementation notes (2026-10-02)
+
+What the implementation found or decided where the text above left room:
+
+* **The shared suites came out of the existing ones, and the existing counts did not move.** `AndroidHttpAdapterTest` is now
+  `HttpAdapterContract` plus a 20-line subclass (`:android-adapters`: 151 JVM results per variant, 1 skipped, as before; 150 on the
+  device, 1 skipped); `RealtimeAdapterTests` is `RealtimeAdapterContract` plus a subclass (`:runtime` under `test-local.sh`: the same
+  suites, the realtime one 23 cases). To let `:okhttp-adapters` run them, `Suite`, its assertions, the realtime test server and
+  `eventually` moved from `runtime/src/test` to `test-support` (same packages, so no import changed), and the loopback HTTP server,
+  `RecordingCore` and the Http contract live in `adapter-contracts` (JUnit 4, which both Android modules use). The contract
+  parameters are the things a platform may differ in that a test can observe (`maxRedirects`, whether `PATCH` can be sent, whether a
+  cancelled call closes the socket mid-body, the order of a repeated header, `rejectsMalformedText`, `canAbortBlockedRead`).
+* **OkHttp passed the Http and Sse contracts at the first run, and the WebSocket one with one declared difference** (decision 6, the
+  UTF-8 check). Nothing was loosened to get there: the differences are the parameters above and the cases that say what OkHttp does.
+* **A failure travels as a value and is thrown by the adapter, not resumed through a coroutine** (`Outcome` in the Http adapter, the
+  `WsError?` of `connect`, `Answer` in the Sse adapter): under `-ea` (every Gradle test run) kotlinx-coroutines rebuilds an exception
+  that crosses a resume by reflection, and a typed error with one `String` constructor would come back with its own message as its
+  `reason`.
+* **Mutations shown to fail the suite**: no `Call.cancel()` on cancellation (three Http contract cases), no wait in the WebSocket
+  listener (the realtime suite's stalled reader), the client's read timeout kept on a stream (the quiet-stream case), restricted
+  headers sent, a stream not cancelled on close. The Swift `session:` branch replaced by a session of its own fails the header and
+  the delegate assertions.
+* **OkHttp 5.x**: the module cannot be built against 5.x with this repository's Kotlin 2.0.21 (5.x's metadata is 2.2), and AGP
+  keeps the compile and runtime class paths aligned, so a Gradle property cannot put a newer OkHttp only on the test runtime. The
+  66 JVM unit tests of that day were run by hand against OkHttp 5.3.2 (the module's classes compiled against 4.12.0, the 5.3.2 Android
+  artifact, Okio 3.16.4, Kotlin stdlib 2.2.21, stubs for `android.util.Log` and `Build.VERSION`): 66 of 66 passed.
+* **The per-task delegate** (Swift, decision 8) delivers the WebSocket handshake and close callbacks on macOS 26.x here: the whole
+  WebSocket suite passes on an app's session. Not run: iOS 15 or 16 (the package's floor), where `URLSessionTask.delegate` exists but
+  was not exercised; the existing platform notes on the close frame (`waitForTheClientsClose`) apply to both forms.
+* **What no test shows**: certificate pinning end to end. A TLS test server needs a certificate generator (`okhttp-tls`, which is
+  another artifact than the approved one); the mapping of a pin that does not match to `Network` is a unit test on the exception
+  OkHttp throws, and the pinner sits in the client the tests already show is in the path.
+* **Docs**: `okhttp-adapters/README.md`, the Android and Swift READMEs, `docs/SPEC.md` (8, 11, 17.2, 17.3), the ports page, the
+  cookbook recipe "Your network stack" (the Kotlin lines are compiled and run in `:okhttp-adapters`, which has OkHttp; the Swift and
+  TypeScript lines by `snippets/check.sh`), the test table of `docs/ONBOARDING.md`.
