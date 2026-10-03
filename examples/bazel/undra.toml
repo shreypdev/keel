@@ -1,0 +1,39 @@
+# undra.toml of the Bazel example: the project file `undra build` and `undra bindgen` read. Under Bazel the rules run those
+# two commands (ADR-061), so this file is also the configuration of `undra_core` and `undra_bindings`.
+
+[project]
+name = "bazel-hello"
+id = "dev.undra.bazel.hello"
+platforms = ["ios", "android", "web"]
+
+[core]
+path = "core"
+package = "hello-core"
+# The namespace names the core's C symbol (`hello_core_undra_api`), its libraries and the generated entry point. The
+# `undra_core` rule is given the same name, and fails the build if the two differ.
+namespace = "hello_core"
+
+[paths]
+# Not used under Bazel: the bindings are an output of `undra_bindings`, not a committed tree.
+generated = "generated"
+build = "build"
+
+[undra]
+version = "0.1"
+
+[bindings]
+swift_module = "HelloCore"
+kotlin_package = "dev.undra.bazel.hello"
+ts_scope = "bazel-hello"
+ts_package = "core"
+
+[ios]
+deployment_target = "17.0"
+simulator_archs = ["arm64"]
+
+[android]
+abis = ["arm64-v8a", "x86_64"]
+min_sdk = 26
+
+[web]
+opt_level = "z"

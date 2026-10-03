@@ -1,0 +1,26 @@
+load("@rules_java//java:java_test.bzl", "java_test")
+load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
+load("@undra_rules//undra:defs.bzl", "undra_kt_jvm_library")
+
+# The generated Kotlin bindings of the core, over the Kotlin runtime.
+undra_kt_jvm_library(
+    name = "hello",
+    bindings = "//:bindings",
+)
+
+kt_jvm_library(
+    name = "hello_test_lib",
+    testonly = True,
+    srcs = ["HelloTest.kt"],
+    deps = [":hello"],
+)
+
+# `bazel test //kotlin:hello_test`: the JVM loads libhello_core through JNI and calls the real core.
+java_test(
+    name = "hello_test",
+    data = ["//:core_host"],
+    jvm_flags = ["-Dundra.test.library=$(rootpath //:core_host)"],
+    main_class = "dev.undra.bazel.hello.test.HelloTestKt",
+    use_testrunner = False,
+    runtime_deps = [":hello_test_lib"],
+)

@@ -1,0 +1,20 @@
+load("@undra_rules//undra:defs.bzl", "undra_bindings", "undra_core")
+
+package(default_visibility = ["//:__subpackages__"])
+
+exports_files(["undra.toml"])
+
+undra_core(
+    name = "core",
+    srcs = glob(["core/**"]) + ["Cargo.toml"],
+    config = "undra.toml",
+    namespace = "hello_core",
+    platforms = ["host", "web"],
+    wasm_opt = "@undra_binaryen//:wasm_opt",
+)
+
+undra_bindings(
+    name = "bindings",
+    core = ":core_host",
+    config = "undra.toml",
+)

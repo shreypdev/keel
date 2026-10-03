@@ -1,0 +1,3 @@
+# For `cargo test` in this directory; Bazel writes its own (bazel/undra/private/run.sh).
+[patch.crates-io]
+undra = { path = "../../crates/undra" }

@@ -1,0 +1,10 @@
+# Bounded: other builds share the machine.
+build --jobs=4
+common --enable_bzlmod
+
+# The JDK is the build's own (a remote JDK pinned by rules_java), not whatever `java` the machine has: the Kotlin compiler and
+# the JVM tests run on it.
+build --java_runtime_version=remotejdk_17
+build --tool_java_runtime_version=remotejdk_17
+build --java_language_version=17
+build --tool_java_language_version=17

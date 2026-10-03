@@ -1,0 +1,27 @@
+"""An Undra core, built and consumed under Bazel (ADR-061)."""
+
+module(name = "undra_example")
+
+bazel_dep(name = "undra_rules", version = "0.1.0")
+local_path_override(
+    module_name = "undra_rules",
+    path = "../../bazel",
+)
+
+bazel_dep(name = "rules_java", version = "9.3.0")
+bazel_dep(name = "rules_kotlin", version = "2.4.20")
+bazel_dep(name = "rules_rust", version = "0.74.0")
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2024",
+    extra_target_triples = ["wasm32-unknown-unknown"],
+    versions = ["1.99.0"],
+)
+use_repo(rust, "rust_toolchains")
+
+register_toolchains("@rust_toolchains//:all")
+
+undra = use_extension("@undra_rules//:extensions.bzl", "undra")
+undra.source(path = "../..")
+use_repo(undra, "undra", "undra_binaryen", "undra_vendor")

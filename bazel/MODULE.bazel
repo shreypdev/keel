@@ -1,0 +1,27 @@
+"""Bazel rules for Undra: build a core for every platform and generate its bindings (ADR-061)."""
+
+module(
+    name = "undra_rules",
+    version = "0.1.0",
+    compatibility_level = 1,
+)
+
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "apple_support", version = "1.24.1")
+bazel_dep(name = "rules_rust", version = "0.74.0")
+bazel_dep(name = "rules_java", version = "9.3.0")
+bazel_dep(name = "rules_kotlin", version = "2.4.20")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+
+# The one dependency of the Kotlin runtime, pinned by checksum: the version the runtime's own CI uses.
+http_jar = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
+
+http_jar(
+    name = "undra_kotlinx_coroutines",
+    sha256 = "c24c8bb27bb320c4a93871501a7e5e0c61607638907b197aef675513d4c820be",
+    urls = ["https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.6.4/kotlinx-coroutines-core-jvm-1.6.4.jar"],
+)
+
+undra = use_extension("//:extensions.bzl", "undra")
+use_repo(undra, "undra", "undra_binaryen", "undra_vendor")
