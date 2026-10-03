@@ -12,8 +12,10 @@
 //! of a production stack trace names the same function and the same byte offset in both. The
 //! optimisation is the one `-Oz --strip-debug --strip-producers` always made; `wasm-opt` breaks ties
 //! between functions by name, so a run that sees the names orders them differently from the nameless
-//! one, and the module differs by about 0.1% either way (measured: the hello world +90 bytes
-//! gzipped, the playground -421); `--no-symbols` makes the old bytes.
+//! one, and the module differs by a fraction of a percent (measured when this was written: the hello
+//! world +90 bytes gzipped, the playground -421; on 2026-10-02 the playground's module was 0.22% to
+//! 0.26% larger with symbols, about twenty functions more of 3,070, see the size test in
+//! `tests/symbols.rs`, which allows half a percent); `--no-symbols` makes the old bytes.
 //! (The DWARF stays out of that run on purpose: when `wasm-opt` keeps DWARF it skips every pass that
 //! cannot update it, and the module grows 5 to 7%, so a debug module with DWARF and a shipped module
 //! of the same code cannot both exist.) A second run, over the module with its DWARF, makes the one
