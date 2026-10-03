@@ -934,6 +934,7 @@ format is read from API 23, under the default `min_sdk` of 26, which wants a loa
 * The next change that grows a hello-world core by 5% re-records in the same commit, with the measured cause. A toolchain bump (rustc, the NDK, Xcode) can move the numbers by a few percent: re-record after a look at why.
 * The Android record was measured on macOS; the CI job measures on Ubuntu with the same NDK and rustc. The first hosted run (the pull request's merge commit, 2026-10-03) measured 905,896 bytes for
   arm64-v8a (+376, 0.04%) and 971,168 for x86_64 (−296): a few hundred bytes of path- and host-dependent constants (16 bytes move between two checkouts on this Mac, the `TypeId` constants of the
-  note above); the 5% tolerance absorbs that a hundred times over.
+  note above); the 5% tolerance absorbs that a hundred times over. The `size-ios` job of the same run used `macos-15`'s Xcode 16.4 (the record: Xcode 26.6) and
+  measured 793,533 bytes against 793,517; it ran for 2.5 minutes after waiting 36 for a macOS runner, which is the latency a macOS job adds to `Bench / All green`.
 * `scripts/bench-device.sh --device android` fails on macOS when exactly one emulator is running (`[ "$(... | wc -l)" = 1 ]` is false because `wc -l` pads its count): `--target <serial>` is the way until that
   script is fixed (not this piece's file).
