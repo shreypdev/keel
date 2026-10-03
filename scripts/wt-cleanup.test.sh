@@ -111,6 +111,24 @@ out="$(wt merge gamma --ff --no-ci 2>&1)"; rc=$?
 check "...and says nothing was deleted" has "$out" "nothing was deleted"
 check "...and the branch, the remote branch and the worktree are still there" bash -c "git -C '$MAINDIR' show-ref --verify --quiet refs/heads/wt/gamma && git -C '$W/origin.git' show-ref --verify --quiet refs/heads/wt/gamma && test -d '$W/.work/gamma'"
 
+# ---- 3b. a stacked piece lands as tested; a piece whose merge would change the tree is refused ------------------------
+world stack
+piece one
+piece two
+git -C "$W/.work/two" merge -q --no-edit wt/one >/dev/null 2>&1          # two is stacked on one
+git -C "$MAINDIR" merge -q --no-ff --no-edit wt/one >/dev/null 2>&1       # one landed as a merge commit (the pull-request way)
+git -C "$MAINDIR" push -q origin main
+git -C "$MAINDIR" push -q origin wt/two 2>/dev/null || true
+out="$(wt merge two --ff --no-ci 2>&1)"; rc=$?
+[ "$rc" = 0 ] && ok "a piece stacked on the one that just landed merges without a new run" || { bad "stacked piece merges (exit $rc)"; echo "$out" | sed 's/^/    /'; }
+check "...and main has exactly its tree" bash -c "[ \"\$(git -C '$MAINDIR' rev-parse 'main^{tree}')\" = \"\$(git -C '$W/origin.git' rev-parse 'main^{tree}')\" ] && git -C '$MAINDIR' log --format=%s -1 main | grep -q two"
+piece three
+git -C "$MAINDIR" commit -q --allow-empty -m "main moved: something three lacks" && echo x > "$MAINDIR/moved.txt" && git -C "$MAINDIR" add moved.txt && git -C "$MAINDIR" commit -qm "a file three lacks"
+git -C "$MAINDIR" push -q origin main
+out="$(wt merge three --ff --no-ci 2>&1)"; rc=$?
+[ "$rc" != 0 ] && ok "a piece whose merge would change the tree is refused" || bad "unstacked piece refused"
+check "...and told to merge main" has "$out" "would change its tree"
+
 # ---- 4. clean: merged goes, everything else stays and says why -----------------------------------------------------------
 world four
 piece done1
