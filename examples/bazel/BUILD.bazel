@@ -1,4 +1,5 @@
-load("@undra_rules//undra:defs.bzl", "undra_bindings", "undra_core", "undra_ts_library")
+load("@undra_rules//undra:defs.bzl", "undra_bindings", "undra_core")
+load("@undra_rules//undra:ts.bzl", "undra_ts_library")
 
 package(default_visibility = ["//:__subpackages__"])
 
@@ -44,8 +45,9 @@ undra_ts_library(
 
 # The cores of the mobile apps. They build when asked for by name, because their toolchains are the machine's, not Bazel's:
 #
-#   bazel build //:mobile_ios       an XCFramework (macOS with Xcode)
-#   bazel build //:mobile_android --config=android   jniLibs per ABI (the NDK, cargo-ndk and rules_android_ndk: docs/bazel.html)
+#   bazel build //:mobile_ios       an XCFramework (macOS with Xcode; CI builds it)
+#   //:mobile_android               declared, does not build here: rules_rust needs a C++ toolchain for the Android platforms
+#                                   (rules_android_ndk), which this example does not set up (ADR-061)
 undra_core(
     name = "mobile",
     srcs = glob(["core/**"]) + ["Cargo.toml"],

@@ -1,4 +1,11 @@
-"""`undra_ts_library`: the generated TypeScript bindings, compiled and packaged for Node and bundlers (ADR-061)."""
+"""`undra_ts_library`: the generated TypeScript bindings, compiled and packaged for Node and bundlers (ADR-061).
+
+Its own file, not part of `defs.bzl`: it loads aspect_rules_js, whose `aspect_tools_telemetry` reports the rulesets a build uses
+to Aspect unless the build sets `--repo_env=DO_NOT_TRACK=1` (a module cannot set it for the repository that uses it), so a
+build that does not compile TypeScript never loads it.
+
+    load("@undra_rules//undra:ts.bzl", "undra_ts_library")
+"""
 
 load("@aspect_rules_js//js:defs.bzl", "js_run_binary")
 load("@aspect_rules_js//npm:defs.bzl", "npm_link_package", "npm_package")

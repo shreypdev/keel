@@ -55,6 +55,5 @@ bzl_library(
         ":core",
         ":kotlin",
         ":swift",
-        ":ts",
     ],
 )
