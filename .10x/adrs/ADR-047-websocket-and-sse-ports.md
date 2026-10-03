@@ -163,3 +163,60 @@ What the implementation and the review decided where this text left room, and wh
   refused one message larger than its byte limit with nothing queued; `fetchSse` sent a non-Latin-1
   `Last-Event-ID` (now UTF-8 bytes); a raw `WsError`/`SseError` from its own port answered status 2 on Kotlin.
 
+
+## Amendment: the Swift adapter delivers chunks, 2026-10-02
+
+No public shape, wire, ABI or schema change (`URLSessionSseAdapter.init(session:)`, `SseAdapter`, `SseStream` and every decision above
+stand), so no new ADR; the implementation of decision 9's Swift row changes. User feedback U1 measured the iOS SSE ceiling 2.4x below
+what it should be, and the code confirmed it: `URLSessionSseStream` pulled `URLSession.AsyncBytes` one byte at a time and gave the parser
+`CollectionOfOne(byte)`. The Kotlin adapter reads chunks, and so does the TypeScript one.
+
+* **What it is now.** The default Swift Sse adapter is the delegate of a `URLSession` data task (`task.delegate`, so the session passed to
+  `init(session:)` is used as before). `urlSession(_:dataTask:didReceive:)` hands whole `Data` chunks to `SseParser.push`, once per chunk,
+  and the events queue for the binding's pump. The head is checked in `didReceive response` (the same refusals: non-2xx with its status, a
+  204, a wrong content type); the end is `Ended`, a failure `Network`, bytes that are not UTF-8 `Protocol` (after the events before the
+  bad line, through an internal `SseParser.push(_:into:)`); `close` cancels the task; cancelling the caller of `open` cancels the request.
+* **Backpressure is decision 3, by the Kotlin adapter's rule, with the same names** (`SseStreamReader`): the socket is read only while
+  fewer events `waiting` than the binding's buffer has `room` for (the window, 16 before the first pull). A delegate has no pull, so the
+  task is suspended when `waiting` reaches `room` and resumed when a pull takes it below, and URLSession stops reading and TCP pushes back.
+  The read-ahead is `room` plus at most one chunk plus the few chunks already in flight. **The task is suspended before a chunk is parsed,
+  not after**: parsing takes time, URLSession reads on meanwhile and hands the lot over in one piece (3.7 MB chunks; its dispatch-data
+  concatenation dominated a profile), so a suspend that came after the parse stopped nothing and the stalled-core flood test wrote 41,451
+  of 100,000 events (it holds at 43 KB read with the suspend first).
+* **Why not keep `AsyncBytes`.** Measured both on this machine. Iterating `AsyncBytes` is cheap (about 0.7 ns a byte counting alone, 4 KB
+  events); the old loop around it cost about 19 ns a byte. `AsyncBytes` has no way to take what is already buffered, so the only
+  bulk unit that keeps an event's latency is a line: feeding the parser once per line over `AsyncBytes` reached 143 to 177 MB/s on 4,096
+  byte events against 344 to 408 MB/s for the delegate (equal at 512 bytes). The delegate has the higher ceiling and the same shape as
+  the Kotlin adapter.
+* **Measured** (Apple M5 Pro, macOS 26.5, Swift 6.3.3, the shared Node `/sse/flood`, best of three passes; release by a throwaway harness
+  against the package, debug by `swift test`'s `BENCH swift sse/...` lines in `SseThroughputTests`):
+
+  | | before | after |
+  |---|---|---|
+  | release, 4,096 B events | 12,600 events/s (52 MB/s) | 84,000 to 99,000 events/s (344 to 408 MB/s): 7.8x |
+  | release, 512 B events | 46,000 to 48,000 events/s (24 to 26 MB/s) | 96,000 to 104,000 events/s (51 to 55 MB/s): 2.1x |
+  | release, 64 B events | 39,000 to 43,000 events/s | 36,000 to 46,000 events/s: unchanged |
+  | debug, 4,096 B events | 967 events/s (4.0 MB/s) | 4,030 to 4,130 events/s (16.6 to 17.0 MB/s): 4.2x |
+  | debug, 512 B events | 6,501 events/s (3.4 MB/s) | 27,600 to 29,200 events/s (14.6 to 15.5 MB/s): 4.3x |
+
+  At 64 bytes an event the limit is URLSession's own receive path, which no adapter passes: a delegate that does nothing read 100,000
+  events of 49 bytes at 11,000 a second.
+* **Proof (R4).** `SseChunkTests.swift`: a body cut at every byte, one byte a chunk and seeded three-way cuts parse as the whole; a
+  recorded task shows the suspend and resume rule; a loopback server that sends exactly what a test says shows a real task seeing every
+  byte as its own chunk, resuming after a pull and cancelling with `open`; `testAnSseFloodStallsTheServerWhileTheCoreDoesNotPull` and every
+  other SSE test pass unchanged; the Swift contract column is 33 of 33 (S24 included). Record: `.10x/decisions/sde/sse-chunks.md`.
+* **Review (`.10x/reviews/2026-10-02-sse-chunks-review.md`).** *The app's session delegate.* The stream implements only the response,
+  data and completion callbacks; URLSession forwards the rest to the session's delegate ("methods not implemented on this delegate will
+  still be forwarded", `NSURLSession.h`). Over TLS (`SseSessionDelegateTests`): a session-level pinning delegate decides the stream's
+  server trust (a pin that does not match refuses it), a task-level one gets the trust and HTTP Basic challenges, both get the metrics.
+  This is better than before: `bytes(for:)` never asked a session-level `urlSession(_:didReceive:completionHandler:)`. The trade-off is
+  that the parse runs on the session's delegate queue (main, if the app's session uses `.main`; documented on the type). *A background
+  session* takes no task delegate (setting one raises "Task delegate is not supported on background session task", an `NSException` that
+  aborted the app); `open` now refuses it, `Refused(status: nil)`, before a task exists. `bytes(for:)` had streamed on one in the
+  foreground, so this is a behavior change for that configuration, chosen over keeping a second reader for it. *Counted
+  suspends.* `URLSessionTask` counts suspends, and a `resume` of a running task is not a no-op (it cancels the next `suspend`), so the
+  stream calls them strictly in turn (a seeded test). *Cancellation.* A cancelled pull ends the stream with `Network("cancelled")` and
+  cancels the request, as an `AsyncBytes` read did (the first version left it waiting). *The parser* now splits lines on bytes, not
+  `Character`s (a combining mark after `:`, the space or NUL was joined to it, unlike Kotlin, TypeScript and the standard), and takes
+  runs between line ends: the parser alone in release 310 to 2,246 MB/s on 4,096 B events, and the adapter end to end (release harness,
+  interleaved, a loaded machine) 57,000-67,000 to 95,000-117,000 events/s on 4,096 B events.

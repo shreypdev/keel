@@ -3,8 +3,9 @@
 // the pull (`receive` / `next`) that hands the buffer to the core.
 //
 // The platform streams are lazy (`AsyncThrowingStream(unfolding:)` over `URLSessionWebSocketTask
-// .receive()` or `URLSession.AsyncBytes`), so a full buffer stops the pump, the pump stops asking
-// the socket, and TCP pushes back on the server.
+// .receive()`, or over the events a data task's delegate queued: the Sse adapter suspends the task
+// while enough of them wait), so a full buffer stops the pump, the pump stops asking the socket,
+// and TCP pushes back on the server.
 //
 // A burst is one crossing (ADR-047 §3). URLSession hands a burst over one message per `receive()`
 // call, tens of microseconds apart, which is as fast as the core pulls; answering every pull with

@@ -10,7 +10,7 @@
 //   Lifecycle            UIApplication / NSApplication     LifecycleAdapter (the app can also call UndraLifecycle)
 //   Diagnostics          LoadOptions.onPanic               DiagnosticsAdapter
 //   WebSocket (opt-in)   URLSessionWebSocketTask           URLSessionWebSocketAdapter
-//   Sse (opt-in)         URLSession.bytes + SseParser      URLSessionSseAdapter
+//   Sse (opt-in)         URLSession data task + SseParser  URLSessionSseAdapter
 //   Db (opt-in)          the SQLite3 C API                 SQLiteDbAdapter
 //
 // The opt-in ports (ADR-047, ADR-048) are declared only by a core built with the `websocket`,
