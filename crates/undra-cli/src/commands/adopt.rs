@@ -34,7 +34,7 @@ use super::init::{Setup, generate_bindings, scaffold_core, variables};
 pub fn run(env: &Env<'_>, args: &AdoptArgs) -> Result<()> {
     let ui = env.ui;
     // ADR-063: where a released project's dependencies come from (GitHub, or the mirror the environment names).
-    let dist = crate::dist::Dist::from_sys(env.sys)?;
+    let dist = crate::dist::Dist::announced(env.sys, &ui)?;
     let start = match &args.path {
         Some(p) if p.is_absolute() => p.clone(),
         Some(p) => env.start_dir()?.join(p),

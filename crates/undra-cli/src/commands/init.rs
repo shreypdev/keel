@@ -75,7 +75,7 @@ pub fn run(env: &Env<'_>, args: &InitArgs) -> Result<()> {
 /// Validates the arguments and works out where everything goes.
 fn prepare(env: &Env<'_>, args: &InitArgs) -> Result<Setup> {
     validate_project_name(&args.name)?;
-    let dist = Dist::from_sys(env.sys)?;
+    let dist = Dist::announced(env.sys, &env.ui)?;
     let platforms = Platform::parse_list(&args.platforms)?;
     let names = Names::derive(&args.name);
     let id = args.id.clone().unwrap_or_else(|| names.default_app_id());

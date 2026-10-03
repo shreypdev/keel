@@ -11,10 +11,14 @@
 //! Three environment variables replace the addresses for a rehearsal of a release against a local copy
 //! (`packaging/rehearse-launch.sh`) or for a company mirror: [`ENV_GIT_URL`], [`ENV_RELEASE_URL`] and
 //! [`ENV_MAVEN_REPO`]. They are read by the commands that write dependency lines (`undra init`, `undra adopt`,
-//! `undra bindgen`, `undra upgrade`) and are not stored in the project.
+//! `undra bindgen`, `undra upgrade`), each of which warns when one is set, and are not stored in the project as such:
+//! what they replaced is written into its files. `undra bindgen` in a project names the repository its core's `undra`
+//! dependency comes from (`core/Cargo.toml`) rather than the environment's ([`Dist::follow_repository`]), so a project
+//! made against a mirror stays on it and `undra bindgen --check` does not depend on the shell it runs in.
 
 use crate::error::{CliError, Code, Result};
 use crate::sys::Sys;
+use crate::ui::Ui;
 
 /// The Undra repository: the crates (by tag) and the Swift package (the manifest at its root).
 pub const REPO_URL: &str = "https://github.com/shreypdev/undra";
@@ -106,6 +110,31 @@ impl Dist {
         Dist::from_lookup(|key| sys.env(key))
     }
 
+    /// [`Dist::from_sys`], with a warning for every override in effect: a project written with one fetches Undra from
+    /// somewhere other than GitHub, and whoever runs the command sees that before it writes anything.
+    ///
+    /// # Errors
+    ///
+    /// As [`Dist::from_sys`].
+    pub fn announced(sys: &dyn Sys, ui: &Ui) -> Result<Dist> {
+        let dist = Dist::from_sys(sys)?;
+        for warning in override_warnings(|key| sys.env(key)) {
+            ui.warn(&warning);
+        }
+        Ok(dist)
+    }
+
+    /// Names the repository a project's core takes its `undra` crates from (`url`, from `core/Cargo.toml`) for the
+    /// Swift package too, so the bindings a project generates stay on the source the project was made with, whatever
+    /// the environment says. GitHub's repository, in any spelling (`.git`, `ssh`), stays [`REPO_URL`].
+    pub fn follow_repository(&mut self, url: &str) {
+        self.git_url = if crate::upgrade::same_repository(url, REPO_URL) {
+            REPO_URL.to_owned()
+        } else {
+            url.trim().trim_end_matches('/').to_owned()
+        };
+    }
+
     /// [`Dist::from_sys`] over any lookup (the tests pass a map).
     ///
     /// # Errors
@@ -168,6 +197,25 @@ impl Dist {
             )
         })
     }
+}
+
+/// One warning per override the environment sets (ADR-063): the variable, its value and the GitHub address it replaces.
+#[must_use]
+pub fn override_warnings(get: impl Fn(&str) -> Option<String>) -> Vec<String> {
+    [
+        (ENV_GIT_URL, REPO_URL),
+        (ENV_RELEASE_URL, RELEASES_URL),
+        (ENV_MAVEN_REPO, MAVEN.repository.unwrap_or("Maven Central")),
+    ]
+    .into_iter()
+    .filter_map(|(var, github)| {
+        let value = get(var)?;
+        Some(format!(
+            "{var} is set: the dependency lines this command writes name `{}` instead of {github} (a rehearsal or a mirror, ADR-063); unset it for a project that builds from GitHub",
+            value.trim()
+        ))
+    })
+    .collect()
 }
 
 /// The version of a Kotlin module at a release (`v1.0.0` on JitPack).
@@ -297,6 +345,51 @@ mod tests {
         assert_eq!(d.maven_repo.as_deref(), Some("file:///tmp/rehearsal/m2"));
         let ssh = dist(&[(ENV_GIT_URL, "ssh://git@mirror.example/team/Undra.git")]).unwrap();
         assert_eq!(ssh.swift_package_identity(), "undra");
+    }
+
+    #[test]
+    fn every_override_is_announced_and_none_without_one() {
+        let map: HashMap<&str, &str> = [
+            (ENV_GIT_URL, "file:///tmp/remote/undra.git"),
+            (ENV_MAVEN_REPO, "https://maven.example/undra"),
+        ]
+        .into_iter()
+        .collect();
+        let warnings = override_warnings(|key| map.get(key).map(|v| (*v).to_owned()));
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(
+            warnings[0].starts_with("UNDRA_DIST_GIT_URL is set")
+                && warnings[0].contains(
+                    "`file:///tmp/remote/undra.git` instead of https://github.com/shreypdev/undra"
+                ),
+            "{warnings:?}"
+        );
+        assert!(
+            warnings[1].starts_with("UNDRA_DIST_MAVEN_REPO is set")
+                && warnings[1].contains("instead of https://jitpack.io"),
+            "{warnings:?}"
+        );
+        assert!(override_warnings(|_| None).is_empty());
+    }
+
+    #[test]
+    fn a_project_keeps_the_repository_its_core_comes_from() {
+        // A project made against a mirror: its core names the mirror, and so does the Swift package bindgen writes, with
+        // or without the environment that made it.
+        let mut d = Dist::github();
+        d.follow_repository("file:///srv/mirror/undra.git/");
+        assert_eq!(d.git_url, "file:///srv/mirror/undra.git");
+        assert_eq!(d.swift_package_identity(), "undra");
+        // GitHub's repository in another spelling is still GitHub's, written as `undra init` writes it.
+        for spelling in [
+            "https://github.com/shreypdev/undra.git",
+            "https://github.com/shreypdev/undra/",
+            "ssh://git@github.com/shreypdev/undra.git",
+        ] {
+            let mut d = dist(&[(ENV_GIT_URL, "file:///tmp/elsewhere")]).unwrap();
+            d.follow_repository(spelling);
+            assert_eq!(d.git_url, REPO_URL, "{spelling}");
+        }
     }
 
     #[test]

@@ -165,7 +165,7 @@ fn is_undra_repo(url: &str, dist: &Dist) -> bool {
 }
 
 /// Whether `url` names the repository `wanted`, in any of the spellings [`is_undra_repo`] accepts.
-fn same_repository(url: &str, wanted: &str) -> bool {
+pub(crate) fn same_repository(url: &str, wanted: &str) -> bool {
     normalized_repository(url) == normalized_repository(wanted)
 }
 
