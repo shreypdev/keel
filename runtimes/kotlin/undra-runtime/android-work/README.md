@@ -3,7 +3,8 @@
 The optional `:android-work` Gradle module of the Kotlin runtime (ADR-046, decision 3.4): background drains of the core on Android,
 through WorkManager. It is a module of its own because **WorkManager is a dependency the base runtime and `:android-adapters` must
 not carry**; an app that does not replay its offline queue in the background never adds it. Coordinates
-`dev.undra:android-work:0.1.0-SNAPSHOT` (a composite build resolves them to this module, as the playground app does); minSdk 26;
+`dev.undra:android-work:0.1.0-SNAPSHOT` (a composite build resolves them to this module, as the playground app does), and
+`com.github.shreypdev.undra:android-work:v<version>` from JitPack at a release (ADR-063); minSdk 26;
 `api` dependencies on `:runtime` and `androidx.work:work-runtime-ktx`. `settings.gradle.kts` includes it under the same condition as
 `:android-adapters` (an Android SDK is found).
 

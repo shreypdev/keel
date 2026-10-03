@@ -13,10 +13,8 @@ use undra_bindgen::naming::CoreNames;
 
 use crate::bindgen::{self, Plan, canonicalize_lenient};
 use crate::cli::InitArgs;
-use crate::config::{
-    Platform, ProjectConfig, UNDRA_RELEASE_TAG, UNDRA_REPO_URL, UNDRA_SWIFT_PACKAGE_URL,
-    UNDRA_VERSION,
-};
+use crate::config::{Platform, ProjectConfig, UNDRA_RELEASE_TAG, UNDRA_VERSION};
+use crate::dist::{self, Dist};
 use crate::error::{CliError, Code, Result};
 use crate::fsutil::{self, create_dir_all, is_empty_dir, make_executable, write_if_changed};
 use crate::names::{Names, portable, relative_path, validate_app_id, validate_project_name};
@@ -39,6 +37,8 @@ pub(super) struct Setup {
     pub(super) names: Names,
     pub(super) config: ProjectConfig,
     pub(super) repo: Option<PathBuf>,
+    /// Where a released project's dependencies are fetched from (ADR-063): GitHub, or the mirror the environment names.
+    pub(super) dist: Dist,
 }
 
 /// Runs `undra init`.
@@ -75,6 +75,7 @@ pub fn run(env: &Env<'_>, args: &InitArgs) -> Result<()> {
 /// Validates the arguments and works out where everything goes.
 fn prepare(env: &Env<'_>, args: &InitArgs) -> Result<Setup> {
     validate_project_name(&args.name)?;
+    let dist = Dist::announced(env.sys, &env.ui)?;
     let platforms = Platform::parse_list(&args.platforms)?;
     let names = Names::derive(&args.name);
     let id = args.id.clone().unwrap_or_else(|| names.default_app_id());
@@ -133,6 +134,7 @@ fn prepare(env: &Env<'_>, args: &InitArgs) -> Result<Setup> {
         names,
         config,
         repo,
+        dist,
     })
 }
 
@@ -148,7 +150,7 @@ pub(super) fn variables(setup: &Setup) -> Vars {
         names,
         config,
         repo,
-        ..
+        dist,
     } = setup;
     let generated = root.join(&config.generated);
     let build = root.join(&config.build);
@@ -170,12 +172,15 @@ pub(super) fn variables(setup: &Setup) -> Vars {
             crate::toml_lite::quote(&rel(&root.join("core"), &repo.join("crates/undra")))
         ),
         // Not in a checkout: the crates of the release this CLI belongs to, from its git tag
-        // (crates.io publishing is later).
-        None => format!("{{ git = \"{UNDRA_REPO_URL}\", tag = \"{UNDRA_RELEASE_TAG}\" }}"),
+        // (crates.io publishing is later; ADR-063).
+        None => format!(
+            "{{ git = \"{}\", tag = \"{UNDRA_RELEASE_TAG}\" }}",
+            dist.git_url
+        ),
     };
     let runtimes = match repo {
         Some(repo) => Runtimes::in_repo(repo),
-        None => Runtimes::from_registries(UNDRA_VERSION),
+        None => Runtimes::released(UNDRA_VERSION, dist),
     };
 
     let mut vars = Vars::new()
@@ -273,11 +278,19 @@ pub(super) fn variables(setup: &Setup) -> Vars {
                     rel(&android_dir, dir)
                 ),
             );
+            vars.set("UNDRA_MAVEN_GROUP", "dev.undra");
             vars.set("KOTLIN_RUNTIME_VERSION", "0.1.0-SNAPSHOT");
+            vars.set("MAVEN_REPOSITORY", "");
         }
-        RuntimeRef::Registry { version } => {
+        // ADR-063: the modules of the release, from the repository `dist::MAVEN` names (JitPack builds them from the tag).
+        RuntimeRef::Release { version, dist } => {
             vars.set("KOTLIN_RUNTIME_BUILD", "");
-            vars.set("KOTLIN_RUNTIME_VERSION", format!("{version}.0"));
+            vars.set("UNDRA_MAVEN_GROUP", dist::MAVEN.group);
+            vars.set("KOTLIN_RUNTIME_VERSION", dist::maven_version(version));
+            vars.set(
+                "MAVEN_REPOSITORY",
+                dist.gradle_repository("        ", true).unwrap_or_default(),
+            );
         }
     }
 
@@ -319,15 +332,30 @@ pub(super) fn variables(setup: &Setup) -> Vars {
                 "EXTRA_FS_ALLOW",
                 format!(", here(\"{}\")", rel(&web_dir, dir)),
             );
+            vars.set("RUNTIME_DEDUPE", "");
         }
-        RuntimeRef::Registry { version } => {
+        // ADR-063: the runtime's tarball, an asset of the release on GitHub.
+        RuntimeRef::Release { version, dist } => {
             vars.set("RUNTIME_VITE_IMPORT", "@undra/runtime/vite");
             vars.set(
                 "RUNTIME_DEPENDENCY",
-                format!("\"@undra/runtime\": \"^{version}.0\",\n    "),
+                format!(
+                    "\"@undra/runtime\": \"{}\",\n    ",
+                    dist.npm_url("undra-runtime", version)
+                ),
             );
             vars.set("RUNTIME_ALIAS", "");
-            vars.set("RUNTIME_PATHS", "");
+            // The generated bindings live outside web/ (`generated/ts`) and import `@undra/runtime`, which is installed in
+            // web/node_modules: Node's lookup from their directory would never get there. TypeScript is pointed at the
+            // installed package, and Vite resolves it from this app whoever imports it.
+            vars.set(
+                "RUNTIME_PATHS",
+                ",\n      \"@undra/runtime\": [\"./node_modules/@undra/runtime\"]",
+            );
+            vars.set(
+                "RUNTIME_DEDUPE",
+                "    // The generated bindings (outside web/) import @undra/runtime: resolve it from this app's node_modules.\n    dedupe: [\"@undra/runtime\"],\n",
+            );
             vars.set("EXTRA_FS_ALLOW", "");
         }
     }
@@ -348,10 +376,12 @@ fn package_references(generated: &str, runtime: &RuntimeRef, ios_dir: &Path) -> 
                 rel(ios_dir, dir)
             ));
         }
-        RuntimeRef::Registry { version } => {
+        // ADR-063: the Swift package at the root of the Undra repository, from the project's release on.
+        RuntimeRef::Release { version, dist } => {
             out.push_str("/* End XCLocalSwiftPackageReference section */\n\n/* Begin XCRemoteSwiftPackageReference section */\n");
             out.push_str(&format!(
-                "\t\tA0A0A0A0A0A0A0A000000121 /* UndraRuntime package */ = {{\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"{UNDRA_SWIFT_PACKAGE_URL}\";\n\t\t\trequirement = {{\n\t\t\t\tkind = upToNextMajorVersion;\n\t\t\t\tminimumVersion = {version}.0;\n\t\t\t}};\n\t\t}};\n/* End XCRemoteSwiftPackageReference section */"
+                "\t\tA0A0A0A0A0A0A0A000000121 /* UndraRuntime package */ = {{\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"{}\";\n\t\t\trequirement = {{\n\t\t\t\tkind = upToNextMajorVersion;\n\t\t\t\tminimumVersion = {version};\n\t\t\t}};\n\t\t}};\n/* End XCRemoteSwiftPackageReference section */",
+                dist.git_url
             ));
         }
     }
@@ -480,7 +510,11 @@ fn readme_vars(setup: &Setup, vars: Vars) -> Vars {
             "The core uses the Undra crates, and the apps the Undra runtimes, from the checkout at `{}` (`[undra] path` in undra.toml).",
             repo.display()
         ),
-        None => format!("The core depends on the Undra crates at the git tag `{UNDRA_RELEASE_TAG}` of {UNDRA_REPO_URL} (core/Cargo.toml); the apps on the matching runtimes (Swift package, Maven artifact, npm package)."),
+        None => format!(
+            "The core depends on the Undra crates at the git tag `{UNDRA_RELEASE_TAG}` of {} (core/Cargo.toml), and the apps on the runtimes of the same release, all from that repository: the Swift package at its root, the Kotlin artifacts JitPack builds from the tag (`{}`), and the npm package attached to the GitHub Release (`web/package.json`). `undra upgrade` moves them all to a newer release together.",
+            setup.dist.git_url,
+            dist::maven_coordinate("runtime", UNDRA_VERSION)
+        ),
     });
     vars
 }
@@ -534,7 +568,7 @@ explicitly, and it says how to install it when it is missing.
 The app module packages `build/android/jniLibs` (the path in `android/app/build.gradle.kts` is relative to
 the module, `android/app`; after a build `undra` checks that it still names the directory it wrote) and
 depends on the generated Kotlin module (`generated/kotlin`, included by `android/settings.gradle.kts`) and on
-the Undra runtime (`dev.undra:runtime`).
+the Undra runtime (`@@UNDRA_MAVEN_GROUP@@:runtime`).
 
 **Against `undra dev`.** Debug builds can run against the core `undra dev` serves instead of the one in the
 APK, so a Rust change needs no rebuild of the app and `undra build --platform android` is not needed at all:
@@ -563,7 +597,8 @@ npm run build                                 # type-checks and bundles
 
 There is no `undra build` to run first: the `undra()` plugin of `web/vite.config.ts` (`@undra/runtime/vite`) runs
 `undra build --platform web` when Vite starts, for `npm run build` as for `npm run dev`, and under `npm run dev` it
-rebuilds the core and reloads the page whenever `core/src` changes. It finds `undra` on `PATH` (or `UNDRA_BIN`) and says
+rebuilds the core and reloads the page onto it whenever `core/src` changes (a page opened with `?undra=`, below, is left on the
+core `undra dev` serves, which keeps its state). It finds `undra` on `PATH` (or `UNDRA_BIN`) and says
 how to install it when it is missing; `UNDRA_SKIP_BUILD=1` skips it when the core was built in an earlier step.
 
 The page loads the wasm core and runs it on the main thread. Add `?undra=ws://127.0.0.1:7443` to the URL
@@ -594,7 +629,7 @@ pub(super) fn generate_bindings(setup: &Setup) -> Result<Generated> {
     let plan = Plan {
         generator,
         platforms: setup.config.platforms.clone(),
-        runtimes: Runtimes::for_project(&project),
+        runtimes: Runtimes::for_project(&project, &setup.dist),
         out: canonicalize_lenient(&project.generated_dir()),
     };
     let files = bindgen::plan_files(&schema, &plan)?;
@@ -932,8 +967,16 @@ mod tests {
         let settings = std::fs::read_to_string(root.join("android/settings.gradle.kts")).unwrap();
         assert!(
             settings.contains("includeBuild(")
-                && settings.contains("runtimes/kotlin/undra-runtime"),
+                && settings.contains("runtimes/kotlin/undra-runtime")
+                && !settings.contains("jitpack"),
             "{settings}"
+        );
+        // The composite build substitutes the repository's own coordinates; nothing names a release.
+        let app = std::fs::read_to_string(root.join("android/app/build.gradle.kts")).unwrap();
+        assert!(
+            app.contains("implementation(\"dev.undra:runtime:0.1.0-SNAPSHOT\")")
+                && !app.contains("com.github.shreypdev"),
+            "{app}"
         );
         assert!(
             root.join("android/gradlew").is_file(),
@@ -948,26 +991,135 @@ mod tests {
         let _ = std::fs::remove_dir_all(parent);
     }
 
+    /// The dependency lines of every template of a released project (ADR-063): one release, all from GitHub.
+    fn assert_release_lines(root: &Path, app: &str, git: &str, releases: &str, maven: &str) {
+        let read = |path: &str| std::fs::read_to_string(root.join(path)).unwrap();
+        let v = UNDRA_VERSION;
+        let core = read("core/Cargo.toml");
+        assert!(
+            core.contains(&format!("undra = {{ git = \"{git}\", tag = \"v{v}\" }}")),
+            "{core}"
+        );
+        assert!(
+            read("undra.toml").contains(&format!("version = \"{v}\"\n")),
+            "undra.toml names the full release"
+        );
+        let pbx = read(&format!("ios/{app}.xcodeproj/project.pbxproj"));
+        assert!(
+            pbx.contains(&format!("isa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"{git}\";\n\t\t\trequirement = {{\n\t\t\t\tkind = upToNextMajorVersion;\n\t\t\t\tminimumVersion = {v};")),
+            "{pbx}"
+        );
+        let swift = read("generated/swift/Package.swift");
+        assert!(
+            swift.contains(&format!(".package(url: \"{git}\", from: \"{v}\")"))
+                && swift.contains(".product(name: \"UndraRuntime\", package: \"undra\")"),
+            "{swift}"
+        );
+        let app_gradle = read("android/app/build.gradle.kts");
+        for module in ["runtime", "android-adapters"] {
+            assert!(
+                app_gradle.contains(&format!(
+                    "implementation(\"com.github.shreypdev.undra:{module}:v{v}\")"
+                )),
+                "{app_gradle}"
+            );
+        }
+        assert!(
+            app_gradle.contains(&format!(
+                "// implementation(\"com.github.shreypdev.undra:android-work:v{v}\")"
+            )),
+            "{app_gradle}"
+        );
+        assert!(
+            read("generated/kotlin/build.gradle.kts")
+                .contains(&format!("api(\"com.github.shreypdev.undra:runtime:v{v}\")"))
+        );
+        let settings = read("android/settings.gradle.kts");
+        assert!(
+            settings.contains(&format!(
+                "        mavenCentral()\n        // Undra's Kotlin runtime, built from the release tag (ADR-063). Only its group is looked up here.\n        maven {{\n            url = uri(\"{maven}\")\n            content {{ includeGroup(\"com.github.shreypdev.undra\") }}\n        }}\n    }}\n"
+            )),
+            "{settings}"
+        );
+        assert!(!settings.contains("includeBuild("), "{settings}");
+        let pkg = read("web/package.json");
+        assert!(
+            pkg.contains(&format!(
+                "\"@undra/runtime\": \"{releases}/v{v}/undra-runtime-{v}.tgz\","
+            )),
+            "{pkg}"
+        );
+        // The generated bindings (outside web/) find the installed runtime: TypeScript through `paths`, Vite by `dedupe`
+        // (without them `npm run build` fails to resolve `@undra/runtime` from generated/ts; the launch rehearsal found it).
+        let tsconfig = read("web/tsconfig.json");
+        assert!(
+            tsconfig.contains("\"@undra/runtime\": [\"./node_modules/@undra/runtime\"]"),
+            "{tsconfig}"
+        );
+        let vite = read("web/vite.config.ts");
+        assert!(vite.contains("dedupe: [\"@undra/runtime\"],"), "{vite}");
+        let readme = read("README.md");
+        assert!(
+            readme.contains(&format!("com.github.shreypdev.undra:runtime:v{v}")),
+            "{readme}"
+        );
+        // Nothing names what does not exist: the old Swift repository, Maven Central's group, a registry range.
+        for file in [
+            format!("ios/{app}.xcodeproj/project.pbxproj"),
+            "generated/swift/Package.swift".to_owned(),
+            "android/app/build.gradle.kts".to_owned(),
+            "generated/kotlin/build.gradle.kts".to_owned(),
+            "web/package.json".to_owned(),
+            "README.md".to_owned(),
+        ] {
+            let text = read(&file);
+            for gone in ["undra-swift", "\"dev.undra:", "\"^0.", "\"^1."] {
+                assert!(!text.contains(gone), "{file} still has {gone}");
+            }
+        }
+    }
+
     #[test]
-    fn a_registry_project_names_published_packages() {
-        let parent = fsutil::unique_temp_dir("init-registry");
+    fn a_released_project_names_the_release_on_github_on_every_platform() {
+        let parent = fsutil::unique_temp_dir("init-release");
         create_dir_all(&parent).unwrap();
         run(&env(&parent), &args("demo", "ios,android,web")).unwrap();
         let root = parent.canonicalize().unwrap().join("demo");
-        let pbx = std::fs::read_to_string(root.join("ios/Demo.xcodeproj/project.pbxproj")).unwrap();
-        assert!(
-            pbx.contains("XCRemoteSwiftPackageReference") && pbx.contains("undra-swift"),
-            "pbxproj"
+        assert_release_lines(
+            &root,
+            "Demo",
+            "https://github.com/shreypdev/undra",
+            "https://github.com/shreypdev/undra/releases/download",
+            "https://jitpack.io",
         );
-        let app = std::fs::read_to_string(root.join("android/app/build.gradle.kts")).unwrap();
-        assert!(
-            app.contains(&format!("dev.undra:runtime:{UNDRA_VERSION}.0\"")),
-            "{app}"
-        );
-        let pkg = std::fs::read_to_string(root.join("web/package.json")).unwrap();
-        assert!(
-            pkg.contains(&format!("\"@undra/runtime\": \"^{UNDRA_VERSION}.0\"")),
-            "{pkg}"
+        let _ = std::fs::remove_dir_all(parent);
+    }
+
+    #[test]
+    fn a_mirror_replaces_every_address_and_nothing_else() {
+        let parent = fsutil::unique_temp_dir("init-mirror");
+        create_dir_all(&parent).unwrap();
+        let root = parent.canonicalize().unwrap().join("demo");
+        let dist = Dist {
+            git_url: "file:///tmp/rehearsal/remote/undra.git".to_owned(),
+            release_url: "http://127.0.0.1:8123/releases".to_owned(),
+            maven_repo: Some("file:///tmp/rehearsal/m2".to_owned()),
+        };
+        let setup = Setup {
+            root: root.clone(),
+            names: Names::derive("demo"),
+            config: ProjectConfig::new("demo", "com.example.demo", Platform::ALL.to_vec()),
+            repo: None,
+            dist,
+        };
+        scaffold(&setup).unwrap();
+        generate_bindings(&setup).unwrap();
+        assert_release_lines(
+            &root,
+            "Demo",
+            "file:///tmp/rehearsal/remote/undra.git",
+            "http://127.0.0.1:8123/releases",
+            "file:///tmp/rehearsal/m2",
         );
         let _ = std::fs::remove_dir_all(parent);
     }
@@ -1158,6 +1310,7 @@ mod tests {
                 names: Names::derive("slices"),
                 config: project.config,
                 repo: None,
+                dist: Dist::github(),
             });
             let outputs = vars.render(templates::IOS_OUTPUT_LIST).unwrap();
             let _ = std::fs::remove_dir_all(parent);

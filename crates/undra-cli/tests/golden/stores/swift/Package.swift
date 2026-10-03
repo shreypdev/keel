@@ -6,7 +6,7 @@ let package = Package(
     name: "GoldenStores",
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [.library(name: "GoldenStores", targets: ["GoldenStores"])],
-    dependencies: [.package(url: "https://github.com/shreypdev/undra-swift", from: "0.1.0")],
+    dependencies: [.package(url: "https://github.com/shreypdev/undra", from: "<version>")],
     targets: [
         // Declares the core's entry point; the core itself is linked into the app.
         .target(name: "GoldenStoresCoreFFI", path: "Sources/GoldenStoresCoreFFI"),
@@ -14,7 +14,7 @@ let package = Package(
             name: "GoldenStores",
             dependencies: [
                 "GoldenStoresCoreFFI",
-                .product(name: "UndraRuntime", package: "undra-swift"),
+                .product(name: "UndraRuntime", package: "undra"),
             ],
             path: "Sources/GoldenStores"
         ),

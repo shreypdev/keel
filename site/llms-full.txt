@@ -155,9 +155,16 @@ Nothing is downloaded: the templates are part of the `undra` binary. The project
 | `generated/` | Swift, Kotlin and TypeScript bindings for that core, already generated ([how to review them](https://shreypdev.github.io/undra/docs/reviewing-generated-code.html)) |
 | `ios/` `android/` `web/` | One minimal, real app per platform, using the generated bindings |
 
-Without other flags the project uses released versions: the Undra crates at the git tag of the `undra` that made it, `@undra/runtime` from npm, the Swift runtime as a Swift package and the Kotlin runtime from Maven Central. Pass `--undra-path ~/src/undra` (or set `UNDRA_PATH`) to use a checkout's crates and runtimes instead.
+The project depends on the release of the `undra` that made it, and on nothing but the Undra repository on GitHub: no registry account, no token. With `undra` 1.0.0 the lines are:
 
-**iOS and Android, for now.** The Swift and Kotlin runtimes are not published yet (it is [next on the roadmap](https://shreypdev.github.io/undra/roadmap/#next-the-swift-package-and-maven-central)), so the web app and `undra dev` work from a released `undra` while the iOS and Android apps build against a checkout: `git clone https://github.com/shreypdev/undra ~/src/undra`, then `undra init myapp --undra-path ~/src/undra`.
+| Where | The dependency |
+| --- | --- |
+| `core/Cargo.toml` | `undra = { git = "https://github.com/shreypdev/undra", tag = "v1.0.0" }` |
+| iOS (the Xcode project, and `generated/swift/Package.swift`) | `.package(url: "https://github.com/shreypdev/undra", from: "1.0.0")`, product `UndraRuntime` |
+| `android/app/build.gradle.kts` | `implementation("com.github.shreypdev.undra:runtime:v1.0.0")` and `:android-adapters:v1.0.0`, from `https://jitpack.io`, which `settings.gradle.kts` declares for that group only |
+| `web/package.json` | `"@undra/runtime": "https://github.com/shreypdev/undra/releases/download/v1.0.0/undra-runtime-1.0.0.tgz"` |
+
+Swift Package Manager reads the repository's tags, JitPack builds the Kotlin modules from the tag, and npm installs the release's tarball by its URL. `undra upgrade` moves all of them to a newer release together. Pass `--undra-path ~/src/undra` (or set `UNDRA_PATH`) to use a checkout's crates and runtimes instead.
 
 ## 4. Start the live loop
 
@@ -186,7 +193,7 @@ ws://127.0.0.1:7443
 
 Edit Rust and save: the core is rebuilt and restarted with its state, the connected apps reconnect by themselves and stay on the screen they were on, and the terminal says so (`Restarted: ws://127.0.0.1:7443 (schema hash 0x…); state kept (1 store, 1 KiB, restored in 157 µs)`). An edit that changes the API, a field or an error's message, changes the schema hash: the server says so, and an app built from the old bindings reports the mismatch and stops until you run `undra bindgen` and rebuild it. Development log records (a line per transaction commit, port call and panic) print in the terminal; the devtools address opens a timeline of every change-set.
 
-On the web, open the page with the server's address: `http://localhost:5173/?undra=ws://127.0.0.1:7443` (development builds only). Vite's plugin watches `core/src` too, and when it rebuilds the wasm core it reloads the page, which then starts fresh. To keep the page on the served core and its state across a rebuild, start it with `UNDRA_SKIP_BUILD=1 npm run dev` once the wasm core has been built.
+On the web, open the page with the server's address: `http://localhost:5173/?undra=ws://127.0.0.1:7443` (development builds only). Vite's plugin watches `core/src` too and rebuilds the wasm core; it reloads the pages that run that core and leaves a page opened with `?undra=` alone, so the page stays on the served core with its state.
 
 **No authentication.** The server has none. Keep the default loopback address unless a device has to reach it, and never expose it beyond a network you trust.
 
@@ -212,11 +219,11 @@ await UndraMyappCore.load({ mode: "remote", url: devUrl });
 
 ### iOS
 
-Open `ios/` in Xcode and run on a simulator. There is no `undra build` to run first: the *Build the Undra core* Run Script phase of the Xcode project builds the core before the app compiles, a Debug build with a debug core and a Release build with a release one, and Xcode skips it while the core is unchanged. In debug builds the generated app reads `UNDRA_DEV_URL` (for example `ws://<your Mac>:7443`) and attaches to `undra dev` when it is set.
+Open `ios/` in Xcode and run on a simulator. Xcode resolves the Swift package `undra` from `https://github.com/shreypdev/undra` at the project's release the first time (it clones the repository, about 47 MiB). There is no `undra build` to run first: the *Build the Undra core* Run Script phase of the Xcode project builds the core before the app compiles, a Debug build with a debug core and a Release build with a release one, and Xcode skips it while the core is unchanged. In debug builds the generated app reads `UNDRA_DEV_URL` (for example `ws://<your Mac>:7443`) and attaches to `undra dev` when it is set.
 
 ### Android
 
-Build and install from `android/` with Gradle (`./gradlew :app:installDebug`); there is no `undra build` to run first, because the `undraBuild` Gradle task builds the core before everything else and Gradle skips it while the core is unchanged. A release variant (`assembleRelease`, `bundleRelease`) gets a release core, anything else a debug one: a debug core is tens of megabytes per ABI. Debug builds can run against `undra dev` instead (no native build needed; `-PundraSkipBuild=true` leaves the task out): `./gradlew -PundraDevUrl=ws://10.0.2.2:7443 :app:installDebug` for an emulator, or `adb reverse` (`undra dev --android`) and `ws://127.0.0.1:7443` for a USB device.
+Build and install from `android/` with Gradle (`./gradlew :app:installDebug`); the runtime's modules come from JitPack, built from the release's tag. There is no `undra build` to run first, because the `undraBuild` Gradle task builds the core before everything else and Gradle skips it while the core is unchanged. A release variant (`assembleRelease`, `bundleRelease`) gets a release core, anything else a debug one: a debug core is tens of megabytes per ABI. Debug builds can run against `undra dev` instead (no native build needed; `-PundraSkipBuild=true` leaves the task out): `./gradlew -PundraDevUrl=ws://10.0.2.2:7443 :app:installDebug` for an emulator, or `adb reverse` (`undra dev --android`) and `ws://127.0.0.1:7443` for a USB device.
 
 ## 6. Build what you ship
 
@@ -1331,7 +1338,7 @@ The kit runs your real core on fakes and a manual clock, plays a recorded sessio
 | a state that is slow to reach | `RecordedCore`: a recorded session under the generated stores, no core |
 | a test that fails when the core makes another request | `Replayer`: a recording as the script for the ports |
 
-The same three exist in Swift (`UndraTestKit`, a product of the `UndraRuntime` package), Kotlin (`dev.undra:testkit`), TypeScript (`@undra/testkit`, no runtime dependencies) and, for tests of the core itself, Rust (`undra::testing`). They sit beside the runtimes: no generated file, wire frame or C entry point changes.
+The same three exist in Swift (`UndraTestKit`, a product of the `UndraRuntime` package), Kotlin (`com.github.shreypdev.undra:testkit`, at the runtime's version), TypeScript (`@undra/testkit`, the release's `undra-testkit-<version>.tgz`, no runtime dependencies) and, for tests of the core itself, Rust (`undra::testing`). They sit beside the runtimes: no generated file, wire frame or C entry point changes.
 
 ## Preview a screen
 
@@ -2124,7 +2131,7 @@ The core never makes a request; the platform does, through the `Http` port (and 
 
 ## The recipe
 
-- **Android:** add the optional `dev.undra:okhttp-adapters` module and call `AndroidPlatformDefaults.installWithOkHttp(core, context, client)` in place of `install`. `Http`, `WebSocket` and `Sse` go through your `OkHttpClient`: its interceptors, its `Authenticator` (a `401` is answered with a refreshed token and the request goes again), its event listeners, its `CertificatePinner`. One exception is OkHttp's own: a WebSocket's upgrade is seen by your application interceptors, not by your network interceptors or your event listener.
+- **Android:** add the optional `okhttp-adapters` module (`com.github.shreypdev.undra:okhttp-adapters`, at the runtime's version) and call `AndroidPlatformDefaults.installWithOkHttp(core, context, client)` in place of `install`. `Http`, `WebSocket` and `Sse` go through your `OkHttpClient`: its interceptors, its `Authenticator` (a `401` is answered with a refreshed token and the request goes again), its event listeners, its `CertificatePinner`. One exception is OkHttp's own: a WebSocket's upgrade is seen by your application interceptors, not by your network interceptors or your event listener.
 - **iOS:** pass your `URLSession` to `HttpAdapter`, `URLSessionWebSocketAdapter` and `URLSessionSseAdapter`. Its configuration, its delegate (server trust and the pinning built on it, authentication challenges) and its `URLProtocol` classes apply. Give event streams a session with the same delegate and a configuration that lets a stream stay quiet.
 - **Web:** pass your `fetch` and `WebSocket` to `fetchHttp`, `fetchSse` and `browserWebSocket`. Whatever your wrapper does to a request, it does to the core's.
 - **React Native:** nothing to pass. `reactNativeHttp()` is React Native's `fetch`, which is the app's networking module, so what the app configures there applies.
@@ -2351,7 +2358,7 @@ undra init todo --undra-path ~/src/undra       # use a local checkout of Undra
 undra init todo --ios-deployment-target 15.0   # an iOS app that supports iOS 15 and 16 (ObservableObject stores)
 ```
 
-Creates a project directory with `undra.toml`, `core/` (a working to-do store), `generated/` (bindings, already generated), one minimal, real app per platform in `ios/`, `android/` and `web/`, and a CI workflow (`.github/workflows/undra.yml`: a job for the core and one per app, installing `undra` at the version pinned at the top of the file). Nothing is downloaded: the templates are part of the binary. Without `--undra-path` the project depends on released versions of the crates and runtimes; a project that uses a checkout gets no workflow, since CI cannot see the checkout.
+Creates a project directory with `undra.toml`, `core/` (a working to-do store), `generated/` (bindings, already generated), one minimal, real app per platform in `ios/`, `android/` and `web/`, and a CI workflow (`.github/workflows/undra.yml`: a job for the core and one per app, installing `undra` at the version pinned at the top of the file). Nothing is downloaded: the templates are part of the binary. Without `--undra-path` the project depends on the release of this `undra`, all from `github.com/shreypdev/undra`: the crates by tag, the Swift package at the repository's root, the Kotlin modules from JitPack and `@undra/runtime` as the release's asset ([the lines](https://shreypdev.github.io/undra/docs/getting-started.html#3-create-a-project)). `UNDRA_DIST_GIT_URL`, `UNDRA_DIST_RELEASE_URL` and `UNDRA_DIST_MAVEN_REPO` replace those three addresses, for a rehearsal of a release or a mirror (an `https://`, `http://` or `file://` URL; anything else is `error[undra::C0009]`); `undra bindgen`, `adopt` and `upgrade` read them too. A project that uses a checkout gets no workflow, since CI cannot see the checkout.
 
 | Flag | Meaning |
 | --- | --- |
@@ -2511,7 +2518,7 @@ undra upgrade --no-bindgen     # move the pins only
 undra upgrade --docs           # keep the core's doc comments in the regenerated bindings
 ```
 
-Reads every place a project pins its Undra version (the core's `undra` dependency in `Cargo.toml`, which a `rev` or `branch` pin leaves pinned by the release's tag, `[undra] version` in `undra.toml`, `@undra/runtime` (and `@undra/react-native`) in `package.json`, `dev.undra:runtime` and `dev.undra:android-adapters` in the Gradle scripts, the Undra Swift package in the Xcode project, and `UNDRA_VERSION` in the CI workflow), moves them all to the version of this `undra` in the shapes `undra init` writes, regenerates the bindings and prints the migration notes of every release the project crosses: what you have to do, what behaves differently, what is new. Only the version text changes, so comments and formatting stay, and the files are written all or none; a version held in a Gradle variable is left and named. Your app's own project files are not edited. A project that depends on a checkout of the Undra repository is on whatever that checkout is: the command says so and changes nothing. A project newer than this `undra` is refused (`error[undra::C0014]`): update the CLI first.
+Reads every place a project pins its Undra version (the core's `undra` dependency in `Cargo.toml`, which a `rev` or `branch` pin leaves pinned by the release's tag, `[undra] version` in `undra.toml`, `@undra/runtime` (and `@undra/react-native`, `@undra/testkit`) in `package.json`, the runtime's Kotlin modules (`com.github.shreypdev.undra:runtime`, `:android-adapters` and the optional ones) in the Gradle scripts, the Undra Swift package in the Xcode project, and `UNDRA_VERSION` in the CI workflow), moves them all to the version of this `undra` in the shapes `undra init` writes (one release, all from the Undra repository on GitHub: the release's tag, its npm asset's URL; the JitPack repository is added to `settings.gradle.kts` when a project's Kotlin pins move to it), regenerates the bindings and prints the migration notes of every release the project crosses: what you have to do, what behaves differently, what is new. Only the version text changes, so comments and formatting stay, and the files are written all or none; a version held in a Gradle variable is left and named. Your app's own project files are not edited. A project that depends on a checkout of the Undra repository is on whatever that checkout is: the command says so and changes nothing. A project newer than this `undra` is refused (`error[undra::C0014]`): update the CLI first.
 
 ## undra adopt
 
@@ -2548,7 +2555,7 @@ generated = "generated"        # written by `undra bindgen`; commit it or check 
 build = "build"                # written by `undra build`; do not commit
 
 [undra]
-version = "0.1"                # path = "…" points at a checkout of the Undra repository
+version = "1.0.0"              # the release every dependency names; path = "…" points at a checkout instead
 
 [bindings]
 # swift_module = "TodoCore"
@@ -3545,7 +3552,7 @@ the core and the project disagree about where Undra comes from, or the project i
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| core/Cargo.toml pins Undra at tag v999.0.0, newer than this undra (<version>) | `undra upgrade` moves a project forward only, and a CLI older than the project's runtimes would generate bindings they do not match (ahead is <dir>/ahead) | update this `undra` first (`curl -fsSL https://shreypdev.github.io/undra/install.sh \| sh`, `brew upgrade undra` or `npm update -g @undra/cli`) and run `undra upgrade` again |
+| core/Cargo.toml pins Undra at tag v999.0.0, newer than this undra (<version>) | `undra upgrade` moves a project forward only, and a CLI older than the project's runtimes would generate bindings they do not match (ahead is <dir>/ahead) | update this `undra` first (`brew upgrade undra`, `curl -fsSL https://shreypdev.github.io/undra/install.sh \| sh` or `cargo install --locked --force --git https://github.com/shreypdev/undra undra-cli`, whichever installed it) and run `undra upgrade` again |
 | undra.toml says Undra is at /somewhere/else, but the core's `undra` dependency is at <repo> | the library Undra ships is built from the same Undra as the core, and the platform runtimes come from `[undra] path`; if they differ, the core and the apps would speak different wire formats | make them agree: set `path` of the core's `undra` dependency and `[undra] path` in undra.toml to the same checkout (or remove `[undra] path` to use released runtimes) |
 
 ## Runtime messages
@@ -4668,6 +4675,7 @@ What you can build on today, grouped. Each line has its page in the docs and its
 - **iOS 15 and 16 (ADR-045)**ObservableObject stores below iOS 17; proven by compilation and a probe on iOS 26.5.
 - **No manual build step**A Gradle task, an Xcode build phase and a Vite plugin run undra build.
 - **Bazel rules (ADR-061)**undra_core and undra_bindings, hermetic and offline; JVM, Node and Swift tested.
+- **Everything from GitHub at one tag (ADR-063)**The crates, the Swift package, the Kotlin modules (JitPack) and the npm runtimes; no account needed.
 
 ### Data
 
@@ -4729,7 +4737,7 @@ recorded as open
 Each of these is recorded as open in the repository, with the work done around it. A plan, not a promise; the order may change.
 
 - Benchmarks on physical phonesEvery device row so far is from a simulator, an emulator or headless Chromium. Real-phone rows next, then budgets for them and a CI job.
-- The Swift package and Maven CentralPublish the Swift and Kotlin runtimes, so the iOS and Android apps undra init makes build without a checkout of Undra. crates.io follows, under a registry-safe prefix.
+- Maven Central and the npm registryThe conventional registries, after launch, beside GitHub: the Kotlin runtime on Maven Central and the npm packages on the registry. undra upgrade moves a project over. crates.io follows, under a registry-safe prefix.
 - Android modules tested in CIundra-compose, android-adapters and android-work pass locally and on the emulator; an emulator job in CI runs them.
 - Android under Bazel, verifiedThe rules declare Android; a build and a test run prove it.
 - Byte-reproducible undra buildToday the same core built in two directories differs, because cargo hashes the absolute path into crate names.
@@ -4823,7 +4831,7 @@ cd myapp/web && npm install && npm run dev
 
 The installer script and cargo work too. `undra init` writes a core with a to-do store, its bindings and an app per platform, downloading nothing. `npm run dev` builds the core to WebAssembly (the first build compiles the Undra crates and takes a minute or two) and serves the app at `http://localhost:5173`. Edit `core/src/lib.rs` and save: the page is on the new core. `undra dev` serves one core to every app at once.
 
-One limit of the first days: the Swift and Kotlin runtimes are not yet published as a Swift package and on Maven Central, so the iOS and Android apps build against a checkout (`undra init myapp --undra-path ~/src/undra`). [Getting started](https://shreypdev.github.io/undra/docs/getting-started.html) has every step, as we ran it.
+The iOS and Android apps get their runtimes from the same GitHub release, with no account: the Swift package at the repository's root and the Kotlin modules from JitPack. [Getting started](https://shreypdev.github.io/undra/docs/getting-started.html) has every step, as we ran it.
 
 ## What it is not
 

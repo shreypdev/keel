@@ -2,7 +2,7 @@
 # Packs one release asset: undra-v<version>-<target>.tar.gz, flat, holding `undra` (mode 0755) and
 # the LICENSE-* files, plus <asset>.sha256 in `sha256sum` format ("<hash>  <file>").
 #
-# The release workflow and the local tests (packaging/npm/test.sh, packaging/test-install.sh)
+# The release workflow and the local tests (packaging/test-install.sh, packaging/rehearse-launch.sh)
 # all use this script, so what CI publishes and what the tests install have the same layout.
 set -eu
 

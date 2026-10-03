@@ -244,9 +244,10 @@ pub struct ProjectConfig {
     /// Where `undra build` writes artifacts, relative to the project.
     pub build: String,
     /// A checkout of the Undra repository the crates and runtimes come from (relative to the
-    /// project); absent when they come from the registries.
+    /// project); absent when they come from a release.
     pub undra_path: Option<String>,
-    /// The Undra version the registries are asked for.
+    /// The Undra release the project's dependencies name (`1.0.0`; a two-part value an older `undra init` wrote means
+    /// `<line>.0`).
     pub undra_version: String,
     /// Binding names.
     pub bindings: BindingsConfig,
@@ -260,21 +261,10 @@ pub struct ProjectConfig {
     pub runtimes: RuntimesConfig,
 }
 
-/// The Undra release line (`<major>.<minor>`) this CLI belongs to: what `undra init` asks the
-/// package registries for (`@undra/runtime`, `dev.undra:runtime`, the Swift package). It follows
-/// the workspace version, so a release never leaves a scaffold asking for the previous line.
-pub const UNDRA_VERSION: &str = concat!(
-    env!("CARGO_PKG_VERSION_MAJOR"),
-    ".",
-    env!("CARGO_PKG_VERSION_MINOR")
-);
-
-/// Where the Undra crates are fetched from (until they are on crates.io): this repository.
-pub const UNDRA_REPO_URL: &str = "https://github.com/shreypdev/undra";
-
-/// The Swift package of the runtime a registry-mode Xcode project depends on (`undra init` writes
-/// it; `undra upgrade` moves its requirement and no other package's).
-pub const UNDRA_SWIFT_PACKAGE_URL: &str = "https://github.com/shreypdev/undra-swift";
+/// The Undra release this CLI belongs to, in full (`1.0.0`): what `undra init` pins every dependency of a project to and
+/// writes as `[undra] version` (ADR-063: the crates' tag, the Swift package, the Kotlin artifacts and the npm tarballs all
+/// name this one release). It is the workspace version, so a release never leaves a scaffold asking for the previous one.
+pub const UNDRA_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The git tag of this CLI's release, `v<version>`: what `undra init` pins the core's `undra`
 /// dependency to, so the project uses the crates the CLI was released with.
@@ -638,7 +628,7 @@ impl ProjectConfig {
             "\n[undra]\n\
              # Where Undra comes from. `path` is a checkout of the Undra repository (crates and\n\
              # runtimes are used from there); without it, the release `version` names is used: the\n\
-             # crates by git tag (see core/Cargo.toml), the runtimes from their package registries.\n\
+             # crates by git tag (see core/Cargo.toml), the runtimes from the same release (ADR-063).\n\
              version = {}",
             quote(&self.undra_version)
         );

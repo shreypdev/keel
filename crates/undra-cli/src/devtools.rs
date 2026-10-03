@@ -194,6 +194,28 @@ mod tests {
     }
 
     #[test]
+    fn the_tab_shows_undras_mark() {
+        // The icon is site/favicon.svg, inline (the playground's is the same): its rounded square and its stroke.
+        let index = std::str::from_utf8(ASSETS[0].bytes).unwrap();
+        let icon = index
+            .lines()
+            .find(|l| l.contains("rel=\"icon\""))
+            .expect("an icon link");
+        let mark = include_str!("../../../site/favicon.svg");
+        let path = mark
+            .split("d=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .expect("the mark's path");
+        assert!(
+            icon.contains(&format!("d='{path}'"))
+                && icon.contains("viewBox='0 0 32 32'")
+                && icon.contains("rx='8' fill='%23ff6a2a'"),
+            "{icon}"
+        );
+    }
+
+    #[test]
     fn the_page_is_at_most_150_kb_gzipped() {
         // `build.sh` measures the real gzip (and CI runs it); here, the raw size bounds it from above
         // loosely enough that a gzip can only be smaller: 150 KB gzipped is never less than 150 KB

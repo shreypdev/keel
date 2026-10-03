@@ -3,7 +3,8 @@
 The optional `:okhttp-adapters` Gradle module of the Kotlin runtime (ADR-060): the `Http`, `WebSocket` and `Sse` ports over **your
 own `OkHttpClient`**, so that its interceptors, its `Authenticator` (token refresh), its event listeners (tracing) and its
 certificate pinner apply to everything the core sends, with nothing Undra-specific to configure. Artifact
-`dev.undra:okhttp-adapters:0.1.0-SNAPSHOT` (a composite build resolves it to this module, as the playground app does), minSdk 26.
+`dev.undra:okhttp-adapters:0.1.0-SNAPSHOT` (a composite build resolves it to this module, as the playground app does), and
+`com.github.shreypdev.undra:okhttp-adapters:v<version>` from JitPack at a release (ADR-063); minSdk 26.
 
 It is its own module because **OkHttp is a dependency the other modules must not carry**: `:runtime` is Kotlin stdlib and
 kotlinx-coroutines, `:android-adapters` is the Android SDK and `:runtime`, so adopting Undra adds nothing to an app. An app that does

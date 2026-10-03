@@ -1,61 +1,218 @@
 # Releasing Undra
 
-One tag, one workflow, four install channels. `.github/workflows/release.yml` builds the `undra`
-binary for macOS and Linux on x86_64 and arm64, and on a version tag publishes it as
+One tag, one workflow, one repository (ADR-063). Everything an Undra app needs comes from
+`github.com/shreypdev/undra` at a release tag `v<version>`; no registry account exists on either side.
 
-| Channel | What users run | Where it comes from |
+| What | What users run or write | Where it comes from |
 |---|---|---|
-| Homebrew | `brew install shreypdev/undra/undra` | the formula in `shreypdev/homebrew-undra`, pointing at the GitHub Release tarballs |
-| npm | `npm install -g @undra/cli` (or `undra`) | `@undra/cli` + `@undra/cli-<platform>` packages carrying the binary |
-| curl | `curl -fsSL https://shreypdev.github.io/undra/install.sh \| sh` | `site/install.sh`, which downloads the GitHub Release tarball and checks its sha256 |
-| cargo | `cargo install --git https://github.com/shreypdev/undra undra-cli` | the repository itself; nothing to publish |
+| CLI, Homebrew | `brew install shreypdev/undra/undra` | the formula in `shreypdev/homebrew-undra`, pointing at the GitHub Release's tarballs |
+| CLI, installer | `curl -fsSL https://shreypdev.github.io/undra/install.sh \| sh` | `site/install.sh`, which downloads the Release's tarball and checks its sha256 |
+| CLI, cargo | `cargo install --locked --git https://github.com/shreypdev/undra --tag v1.0.0 undra-cli` | the repository |
+| Rust crates | `undra = { git = "https://github.com/shreypdev/undra", tag = "v1.0.0" }` | the repository at the tag |
+| Swift runtime | `.package(url: "https://github.com/shreypdev/undra", from: "1.0.0")` | `Package.swift` at the repository's root, at the tag |
+| Kotlin runtime | `com.github.shreypdev.undra:runtime:v1.0.0` with `https://jitpack.io` for that group | JitPack, which builds the tag (`jitpack.yml`) the first time it is asked |
+| npm runtimes | `"@undra/runtime": "https://github.com/shreypdev/undra/releases/download/v1.0.0/undra-runtime-1.0.0.tgz"` | the GitHub Release's assets (also `undra-react-native-*.tgz`, `undra-testkit-*.tgz`) |
 
-`@undra/runtime` (the TypeScript runtime the generated web code imports) is published by the same
-run. Windows and Alpine (musl) are not supported (roadmap).
+`undra init` writes exactly those lines for the release it belongs to; `undra upgrade` moves them. The workflow
+(`.github/workflows/release.yml`) builds the CLI for macOS and Linux on x86_64 and arm64, packs the three npm
+packages, tests both installs on the real artifacts, and on a version tag publishes the GitHub Release and the
+tap's formula. Maven Central and the npm registry are later and additive (ADR-063: one constant and one
+`undra upgrade`). Windows and Alpine (musl) are not supported (roadmap).
 
-## Prerequisites (the founder does these once)
+## The launch checklist
 
-1. **The repository is `shreypdev/undra`.** The rename is `gh repo rename undra` after the rename
-   piece merged. The install URLs, the Homebrew formula and npm's provenance check all name
-   that repository.
-2. **npm.** Create the organisation `undra` on npmjs.com (free for public packages; it owns the
-   `@undra` scope). Create a *granular access token* with read and write access to the `@undra`
-   scope and to the unscoped package `undra` (a token for "all packages" works for the first
-   publish, when the packages do not exist yet), with *bypass two-factor authentication*
-   enabled (CI cannot answer a one-time code) and an expiry. Store it as the repository secret
-   **`NPM_TOKEN`** (Settings, Secrets and variables, Actions). Once the first release is out,
-   replace an "all packages" token with one scoped to the `@undra` organisation and the package
-   `undra`, or drop the token altogether: npm's *trusted publishing* lets this workflow publish
-   with its OIDC token alone (configure it per package on npmjs.com, naming this repository,
-   `release.yml` and the `release` environment; it needs npm 11.5 or newer in the job, so add
-   `npm install -g npm@latest` before publishing; check npm's current documentation).
-3. **Homebrew tap.** Create the public repository `shreypdev/homebrew-undra` with a README, so
-   it has a default branch (git cannot hold an empty `Formula/` directory; the first release
-   creates it). Create a *fine-grained personal access token* for that one repository only,
-   with Contents: read and write, and an expiry. Store it as the repository secret
-   **`HOMEBREW_TAP_TOKEN`**.
-4. **GitHub Pages** deploys `site/` (`site.yml`), which is what serves `install.sh`.
+In order. Each step is one command or one click, and says how to see that it worked. Run the commands from a
+clone of `shreypdev/undra` on `main`, with `gh` signed in as the repository's owner.
 
-The workflow's first publishing step checks that both secrets exist and that the npm token
-works, before anything is published.
+### 1. Check the repository
 
-**Hardening (recommended).** The publish job runs in the GitHub environment `release`. Create
-it (Settings, Environments), restrict *Deployment branches and tags* to the tag pattern `v*`, and
-move `NPM_TOKEN` and `HOMEBREW_TAP_TOKEN` from the repository secrets into that environment.
-Then only a run on a version tag can read them, and a manual run of the workflow on some
-branch cannot. Add required reviewers there if a second pair of eyes should approve each
-release.
+```sh
+gh repo view shreypdev/undra --json visibility,defaultBranchRef   # PUBLIC, main
+curl -fsSI https://shreypdev.github.io/undra/install.sh | head -n 1  # HTTP/2 200 (GitHub Pages, site.yml)
+```
 
-Second, decide who can create a version tag at all: a *tag ruleset* (Settings, Rules, Rulesets;
-target tags matching `v*`; restrict creation, update and deletion; the bypass list is you). The
-workflow refuses a `v*` tag whose commit is not on `main`, so a tag on a branch or on rewritten
-history builds like a dry run and publishes nothing; the ruleset stops such a tag from being
-pushed in the first place, by anyone else with push access.
+The repository must be public: SwiftPM, JitPack, Cargo and the installer read it without credentials.
+
+### 2. Create the tap repository
+
+```sh
+gh repo create shreypdev/homebrew-undra --public --add-readme --description "Homebrew tap for Undra"
+```
+
+Verify: `gh repo view shreypdev/homebrew-undra` shows it with a default branch (the README gives it one; the
+first release creates `Formula/`).
+
+### 3. Give the workflow a token for the tap
+
+GitHub, Settings of your account, Developer settings, Fine-grained personal access tokens, Generate: repository
+access **only `shreypdev/homebrew-undra`**, permission **Contents: read and write**, an expiry. Then:
+
+```sh
+gh secret set HOMEBREW_TAP_TOKEN --repo shreypdev/undra     # paste the token
+```
+
+Verify: `gh secret list --repo shreypdev/undra` lists `HOMEBREW_TAP_TOKEN`. (No npm token: nothing is published to
+npm. If `NPM_TOKEN` is still there from before, `gh secret delete NPM_TOKEN --repo shreypdev/undra`.)
+
+Recommended hardening, once: create the environment `release` (Settings, Environments), restrict *Deployment
+branches and tags* to the tag pattern `v*` and move the secret into it (`gh secret set HOMEBREW_TAP_TOKEN --env
+release`); add a tag ruleset (Settings, Rules, Rulesets: tags matching `v*`, restrict creation, update and
+deletion, bypass: you). The workflow already refuses a `v*` tag whose commit is not on `main`.
+
+Recommended before announcing: reserve the npm scope `@undra` (npmjs.com, *Add Organization*, the free plan for
+public packages; nothing is published). Nothing of Undra's is on the registry, but `@undra/react-native`,
+`@undra/testkit` and every generated bindings package name `@undra/runtime` by a range, and npm installs a missing
+peer from the registry: an app that installs one of them without the runtime's URL, or a `npm install` inside
+`generated/ts`, would fetch whatever someone else published as `@undra/runtime`. Verify:
+`npm view @undra/runtime` still answers 404 and `npm org ls undra` lists you.
+
+### 4. Rehearse with a release candidate (required)
+
+A prerelease exercises every channel that only a real tag can (SwiftPM against github.com, JitPack's build, the
+Release's assets, the installer) before `v1.0.0` exists, and announces nothing. It is not optional: JitPack's build of the
+tag (its Android SDK, its group and version) cannot be shown any other way, and Android apps of a release whose JitPack
+build fails cannot build. Do not go on to step 5 until steps 8 and 9 pass for the candidate.
+
+```sh
+scripts/bump-version.sh 1.0.0-rc.1         # step 5 says what it sets
+git switch -c release/1.0.0-rc.1 && git commit -qam "chore(release): 1.0.0-rc.1"
+git push -u origin release/1.0.0-rc.1 && gh pr create --fill     # four "All green", then squash-merge
+git switch main && git pull && git tag v1.0.0-rc.1 && git push origin v1.0.0-rc.1
+gh run watch
+```
+
+What it publishes: a GitHub **prerelease** `v1.0.0-rc.1` with the four CLI tarballs, the three npm tarballs and
+`checksums.txt`; nothing else. The tap is left alone, the installer's "latest" ignores prereleases, no post, no
+formula, no registry. Then run steps 8 and 9 with `1.0.0-rc.1` for `1.0.0`, without step 9's two `brew` lines
+(the tap has no formula for a prerelease; install the CLI with
+`curl -fsSL https://shreypdev.github.io/undra/install.sh | UNDRA_VERSION=1.0.0-rc.1 sh`): a project made by
+that CLI pins `v1.0.0-rc.1` everywhere. A project of `1.0.0` never resolves to a prerelease tag: SwiftPM's
+`from: "1.0.0"` ignores `v1.0.1-rc.1` and `v1.1.0-rc.1` (checked with a local tagged clone), and Cargo, JitPack and
+the npm URLs name one tag each. A failure here costs a `1.0.0-rc.2`, not a broken `1.0.0`. The
+prerelease and its tag can stay; nothing points at them.
+
+The same rehearsal without any account runs on one machine: `bash packaging/rehearse-launch.sh` (a copy of the
+repository as the remote, the assets on a local web server, JitPack's command into a local Maven repository; the
+summary says per platform whether the app built without the checkout), or the workflow *Launch rehearsal* on
+GitHub (`gh workflow run launch-rehearsal.yml`).
+
+### 5. Set the version
+
+```sh
+scripts/bump-version.sh 1.0.0
+```
+
+It sets the workspace and `Cargo.lock`, the three npm packages and their locks, every `"@undra/runtime"` range and
+the runtimes' `Hello` versions, and lists the files. It also files the migration notes kept under a version that was
+never released (no tag `v<old>`: the first entry of `crates/undra-cli/src/migrations.rs`, "Since v1.0", kept under
+`0.1.0`) under the new one, so `undra upgrade` prints them to the projects of a `0.1.0` CLI; after step 4 they stay
+under `1.0.0-rc.1`, which a `0.1.0` project crosses too. Verify: `bash scripts/bump-version.sh --check 1.0.0` says
+`every version file says 1.0.0`. In a fresh clone run `cargo fetch` first (the script refreshes `Cargo.lock` offline).
+
+### 6. Open and merge the version pull request
+
+```sh
+git switch -c release/1.0.0 && git commit -qam "chore(release): 1.0.0"
+git push -u origin release/1.0.0 && gh pr create --fill
+gh pr checks --watch                # the four "All green"
+gh pr merge --squash
+```
+
+Verify: `git switch main && git pull && bash scripts/bump-version.sh --check` says `1.0.0`.
+
+### 7. Push the tag
+
+```sh
+git tag v1.0.0 && git push origin v1.0.0
+gh run watch                        # Release: verify, four builds, package, publish
+```
+
+### 8. What the workflow publishes, and warming JitPack
+
+The run, in order: **verify** (the tag is `v` plus the workspace version, every version file agrees, the commit is
+on `main`); **build** the CLI for four targets (`undra --version` says `undra 1.0.0 (<sha>)`); **package**:
+`checksums.txt`, the three npm tarballs, an install of them by URL with no registry, the curl installer against the
+tarballs, the Homebrew formula; **publish**: the GitHub Release `v1.0.0` (generated notes, the seven assets and
+`checksums.txt`), then the commit `undra 1.0.0` of `Formula/undra.rb` in the tap. Nothing else is published: the
+crates and the Swift package are the tag itself.
+
+```sh
+gh release view v1.0.0              # undra-v1.0.0-<4 targets>.tar.gz, undra-{runtime,react-native,testkit}-1.0.0.tgz, checksums.txt
+```
+
+JitPack builds the Kotlin modules the first time anyone asks for them. Ask yourself, before announcing:
+
+```sh
+curl -fsS -o /dev/null -w '%{http_code}\n' https://jitpack.io/com/github/shreypdev/undra/runtime/v1.0.0/runtime-v1.0.0.pom
+# The first request starts the build and may time out: repeat it until it prints 200 (a few minutes). Then the log:
+curl -fsS https://jitpack.io/com/github/shreypdev/undra/v1.0.0/build.log | tail -n 20
+```
+
+The log ends with `Published: runtime testkit android-adapters android-work undra-compose okhttp-adapters
+(com.github.shreypdev.undra, v1.0.0)` (`runtimes/kotlin/undra-runtime/scripts/jitpack-install.sh`) and JitPack's
+list of build artifacts. The same is at https://jitpack.io/#shreypdev/undra, the tag's row and its log icon. Check
+one Android module too: the same `curl` for `android-adapters/v1.0.0/android-adapters-v1.0.0.pom` prints 200.
+
+JitPack builds and serves these bytes; nothing signs them. Record what it serves, so a later change shows, and add
+it to the release notes (`gh release edit v1.0.0 --notes-file ...`, appended to the generated notes):
+
+```sh
+for m in runtime testkit android-adapters android-work undra-compose okhttp-adapters; do
+  ext=aar; case $m in runtime | testkit) ext=jar ;; esac
+  printf '%s  %s\n' "$(curl -fsSL "https://jitpack.io/com/github/shreypdev/undra/$m/v1.0.0/$m-v1.0.0.$ext" | shasum -a 256 | cut -d' ' -f1)" "$m-v1.0.0.$ext"
+done
+```
+
+An app that wants to hold JitPack to those bytes commits Gradle's dependency verification
+(`./gradlew --write-verification-metadata sha256 :app:assembleDebug`, `gradle/verification-metadata.xml`): a changed
+artifact then fails its build (ADR-063, section 4).
+
+### 9. Check each channel from a clean machine
+
+Use clean locations; the version is the tag's and the commit its first seven characters.
+
+```sh
+brew update && brew install shreypdev/undra/undra && undra --version && brew test undra   # undra 1.0.0 (<sha>)
+brew audit --strict shreypdev/undra/undra
+curl -fsSL https://shreypdev.github.io/undra/install.sh | UNDRA_HOME="$(mktemp -d)" sh
+cargo install --locked --git https://github.com/shreypdev/undra --tag v1.0.0 undra-cli    # says (unknown) for the sha
+
+cd "$(mktemp -d)" && undra init smoke && cd smoke
+grep 'undra = ' core/Cargo.toml                       # tag = "v1.0.0"
+(cd web && npm install && npm run build)              # @undra/runtime from the Release's asset
+xcodebuild -project ios/Smoke.xcodeproj -scheme Smoke -destination 'generic/platform=iOS Simulator' build
+(cd android && ./gradlew :app:assembleDebug)          # com.github.shreypdev.undra:*:v1.0.0 from JitPack
+undra bindgen --check                                 # the bindings init wrote are current
+```
+
+The iOS build resolves the Swift package `undra` 1.0.0 from github.com (Xcode's package list shows it); the first
+resolution clones the repository (about 47 MiB).
+
+### 10. Announce
+
+Only now: the post, the links. Everything a reader runs exists.
+
+## When a channel fails
+
+A tag is immutable and projects pin it: never move or delete one. Fix forward with `v1.0.1` (steps 5 to 9 with
+`1.0.1`), and meanwhile steer users away:
+
+* **The workflow stopped half-way** (an expired token, a network error): every publish step is idempotent. Re-run
+  the failed job (`gh run rerun <run-id> --failed`) or `gh workflow run release.yml --ref v1.0.0 -f publish=true`.
+  An existing Release must hold the same `checksums.txt`, else the run fails: cut a patch.
+* **A broken GitHub Release**: `gh release edit v1.0.0 --prerelease` stops the installer's "latest" from choosing it
+  (`gh release edit <previous tag> --latest` pins the previous one). Do not delete it: projects pin its assets.
+* **Homebrew**: revert the formula commit in `shreypdev/homebrew-undra` and push (`git revert <commit> && git push`).
+* **JitPack's build failed**: read the log (step 8). A failure on JitPack's side (a timeout, a missing SDK
+  component) can be retried from https://jitpack.io/#shreypdev/undra (the tag's row); a failure in the repository is
+  a patch release. Android apps of `v1.0.0` cannot build until a tag builds on JitPack.
+* **The Swift package or the crates**: a broken tag is a patch release; `undra upgrade` moves projects to it.
+* **cargo**: nothing to roll back; users pin `--tag`.
 
 ## The dry run
 
-Run it on any branch, any time (GitHub offers manual runs of a workflow only once its file is on
-the default branch); it builds, packages and tests everything and publishes nothing:
+Run it on any branch, any time (GitHub offers manual runs of a workflow only once its file is on the default
+branch); it builds, packages and tests everything and publishes nothing:
 
 ```sh
 gh workflow run release.yml --ref <branch> -f publish=false
@@ -63,119 +220,29 @@ gh run watch                       # pick the run
 gh run download <run-id>           # the workflow artifacts, to look at them
 ```
 
-A green dry run shows that: the four binaries build and report `undra <version> (<sha>)`; the
-`checksums.txt` verifies; the seven npm tarballs are built, `npm install -g` of the launcher
-and the Linux x64 package gives a working `undra`; `site/install.sh` downloads, verifies and
-installs the same tarballs from a local web server; the Homebrew formula generates and is
-valid Ruby. The job summaries list the checksums and the glibc version the Linux binaries need.
-
-What a dry run cannot show, and the first real release therefore proves: that the npm token is
-accepted and the package names are free, that npm accepts the provenance statement, that
-`gh release create` and the tap push succeed, and that `brew install` of the published formula
-works. The checks after a release below cover each.
-
-## The release
-
-```sh
-scripts/bump-version.sh 1.0.0       # Cargo.toml, Cargo.lock, the TS runtime, packaging/npm; prints the files
-git switch -c release/1.0.0
-git commit -am "chore(release): 1.0.0"
-git push -u origin release/1.0.0    # open the pull request; CI green; merge
-git switch main && git pull
-git tag v1.0.0 && git push origin v1.0.0
-gh run watch
-```
-
-Add the release's notes to `crates/undra-cli/src/migrations.rs` in the same pull request: `undra upgrade` prints the notes of
-every release a project crosses (what an app author must do, what behaves differently, what is new), and a release with
-no entry prints nothing, which tells the author nothing changed. **For the first release (1.0.0)**: the first entry, "Since v1.0",
-is keyed `0.1.0` (the workspace version while it was written); re-key it to `1.0.0` in the release pull request, or a
-project `undra init` pinned to `v0.1.0` crosses no entry on its way to 1.0.0 and is told nothing changed. The projects `undra init` writes pin this version
-(`core/Cargo.toml`'s git tag, the runtimes, `UNDRA_VERSION` of `.github/workflows/undra.yml`), so the release has to exist
-for their first CI run and `cargo build` to succeed.
-
-The tag has to be `v` plus the workspace version, on the merged commit, which has to be on
-`main`. The workflow's first job refuses anything else (`scripts/bump-version.sh --check` also
-fails when any version file was missed). It then:
-
-1. **builds** `undra-cli` with `--release --locked` for the four targets (`UNDRA_BUILD_SHA` is the
-   commit, so `undra --version` says which one), checks the version line, and packs
-   `undra-v1.0.0-<target>.tar.gz` (the binary and the licences);
-2. **packages** `checksums.txt`, the npm tarballs and the formula, and tests the npm install and
-   the curl installer on them;
-3. **publishes**, in this order: the GitHub Release (generated notes), the npm packages
-   (`@undra/runtime`, the four platform packages, `@undra/cli`, `undra`, all with provenance),
-   and the commit that updates `Formula/undra.rb` in the tap.
-
-Every publishing step is idempotent, so a release that stopped half-way (an expired token, a
-network error) is completed by re-running the failed job, or
-`gh workflow run release.yml --ref v1.0.0 -f publish=true`. Nothing is ever overwritten: an
-existing GitHub Release must hold the same `checksums.txt`, and an npm version that already
-exists is skipped only when the registry's tarball has the same bytes (its `dist.integrity`) as
-the one this run built; otherwise the run fails and the answer is a patch release. Before
-anything is published, the publish job checks the downloaded artifacts against the checksums the
-build and package jobs wrote, so what goes out is what was tested.
-
-A version with a suffix (`1.0.0-rc.1`) is a prerelease: a GitHub prerelease (the installer's
-"latest" ignores it), npm tag `next`, and the tap is left alone. Install one with
-`UNDRA_VERSION=1.0.0-rc.1 sh install.sh` or `npm install -g @undra/cli@next`.
-
-## After a release: check each channel
-
-Use clean locations; the version is the one you tagged and the commit is the tag's, first seven
-characters.
-
-```sh
-# GitHub Release: four tarballs and checksums.txt
-gh release view v1.0.0
-# Homebrew
-brew update && brew install shreypdev/undra/undra && undra --version && brew test undra
-brew audit --strict shreypdev/undra/undra
-# npm (a scratch prefix, so nothing of yours is touched)
-npm install -g --prefix "$(mktemp -d)" @undra/cli && npm view @undra/cli dist-tags
-npm view undra version && npm view @undra/runtime version     # all three at 1.0.0
-npm view @undra/cli@1.0.0 dist.attestations                    # the provenance attestation exists
-# curl (a scratch UNDRA_HOME)
-curl -fsSL https://shreypdev.github.io/undra/install.sh | UNDRA_HOME="$(mktemp -d)" sh
-# cargo, and a project that pins the tag
-cargo install --locked --git https://github.com/shreypdev/undra --tag v1.0.0 undra-cli
-undra init smoke --platforms web --dir "$(mktemp -d)" && undra --version
-```
-
-`undra --version` prints `undra 1.0.0 (<sha>)` from brew, npm and curl and `(unknown)` from a
-cargo build. In the project `undra init` made, `core/Cargo.toml` names
-`tag = "v1.0.0"`, and `undra bindgen --check` inside it passes.
-
-## Rollback
-
-Releases are immutable; the answer to a bad release is a patch release (`scripts/bump-version.sh
-1.0.1`, the same steps). Until it is out, steer users away:
-
-* **GitHub Release**: `gh release edit v1.0.0 --prerelease` stops the installer's "latest" from
-  choosing it (and `gh release edit <previous tag> --latest` pins the previous one). Do not
-  delete a release or move a tag: projects made by `undra init` pin the tag.
-* **npm**: a version cannot be published twice. Point `latest` back, and deprecate:
-  `npm dist-tag add @undra/cli@<previous> latest` (also `undra`, `@undra/runtime`), then
-  `npm deprecate @undra/cli@1.0.0 "broken, use 1.0.1"`. The launcher pins its platform packages
-  to its own version, so moving the launcher's tag is enough.
-* **Homebrew**: revert the formula commit in `shreypdev/homebrew-undra` and push:
-  `git revert <commit> && git push`.
-* **cargo**: nothing to roll back; users pin `--tag`.
+A green dry run shows that the four binaries build and report `undra <version> (<sha>)`; `checksums.txt` verifies;
+the three npm tarballs install by URL from a local web server with no registry, every peer satisfied;
+`site/install.sh` downloads, verifies and installs the CLI's tarball from a local web server; the Homebrew formula
+generates and is valid Ruby. The job summaries list the checksums and the glibc version the Linux binaries need.
+What only a real tag shows: that `gh release create` and the tap push succeed, that JitPack builds the tag, that
+SwiftPM resolves the repository from github.com, and that `brew install` works: steps 4, 8 and 9.
 
 ## Maintenance
 
-* **Linux binaries need glibc at least as new as the runner's.** The matrix builds on
-  `ubuntu-22.04` and `ubuntu-22.04-arm` on purpose, so the floor is glibc 2.35 (Ubuntu 22.04,
-  Debian 12, RHEL 9 and derivatives); the build job's summary prints the exact floor. When GitHub
-  retires the 22.04 images, moving the two Linux `os:` values to 24.04 raises the floor to 2.39;
-  keeping 2.35 then means building in a 22.04 container or with `cargo zigbuild`.
-* **macOS binaries are not notarised.** A binary fetched by `curl`, Homebrew or npm carries no
-  quarantine flag and runs; one downloaded in a browser needs `xattr -d com.apple.quarantine`.
-* **Action pins.** Every third-party action in `release.yml` is a commit SHA with its version in
-  a comment. To update one: `gh api repos/<owner>/<name>/git/ref/tags/<tag> --jq .object.sha`
-  (for an annotated tag, follow it to the commit), edit the SHA and the comment, run the dry
-  run.
-* **Tokens expire.** `NPM_TOKEN` and `HOMEBREW_TAP_TOKEN` have the expiry chosen when they were
-  made; the preflight step names the one that no longer works.
-* **Tests for the pieces**: `bash packaging/npm/test.sh`, `bash packaging/test-install.sh`
-  (both build the CLI, or use `UNDRA_BIN`), and `bash scripts/bump-version.sh --check`.
+* **Linux binaries need glibc at least as new as the runner's.** The matrix builds on `ubuntu-22.04` and
+  `ubuntu-22.04-arm` on purpose, so the floor is glibc 2.35 (Ubuntu 22.04, Debian 12, RHEL 9 and derivatives); the
+  build job's summary prints the exact floor. When GitHub retires the 22.04 images, moving the two Linux `os:` values
+  to 24.04 raises the floor to 2.39; keeping 2.35 then means building in a 22.04 container or with `cargo zigbuild`.
+* **macOS binaries are not notarised.** A binary fetched by `curl` or Homebrew carries no quarantine flag and runs; one
+  downloaded in a browser needs `xattr -d com.apple.quarantine`.
+* **Action pins.** Every third-party action in `release.yml` is a commit SHA with its version in a comment. To update
+  one: `gh api repos/<owner>/<name>/git/ref/tags/<tag> --jq .object.sha` (for an annotated tag, follow it to the
+  commit), edit the SHA and the comment, run the dry run.
+* **The tap token expires.** `HOMEBREW_TAP_TOKEN` has the expiry chosen when it was made; the preflight step says when
+  it is missing or cannot push.
+* **Moving to the registries** (ADR-063): Maven Central is the `MAVEN` constant of `crates/undra-cli/src/dist.rs`
+  (`dev.undra`, no version prefix, no extra repository) plus a publishing job; the npm registry is the npm packages
+  published as well as attached. `undra upgrade` moves existing projects either way.
+* **Tests for the pieces**: `bash scripts/bump-version.test.sh`, `bash packaging/test-install.sh` (builds the CLI, or
+  `UNDRA_BIN`), `bash packaging/pack-npm.sh --out <dir> && bash packaging/test-npm-assets.sh --release-dir <dir>`,
+  and the whole thing: `bash packaging/rehearse-launch.sh`.

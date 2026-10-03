@@ -176,13 +176,13 @@ gradle.taskGraph.whenReady {
 
 dependencies {
     // The Undra runtime and the bindings generated from the core.
-    implementation("dev.undra:runtime:@@KOTLIN_RUNTIME_VERSION@@")
+    implementation("@@UNDRA_MAVEN_GROUP@@:runtime:@@KOTLIN_RUNTIME_VERSION@@")
     // The Android half of the runtime: the adapters of the standard ports (Http, Kv, SecureStore, Fs, Connectivity,
     // Lifecycle) and the Choreographer frame pacer. Its manifest declares INTERNET and ACCESS_NETWORK_STATE.
-    implementation("dev.undra:android-adapters:@@KOTLIN_RUNTIME_VERSION@@")
+    implementation("@@UNDRA_MAVEN_GROUP@@:android-adapters:@@KOTLIN_RUNTIME_VERSION@@")
     // Optional: WorkManager drains the core's offline queue while the app is in the background (UndraApp.kt says how to
     // schedule it). Uncomment to use it; `undra upgrade` keeps the version in step with the others once it is.
-    // implementation("dev.undra:android-work:@@KOTLIN_RUNTIME_VERSION@@")
+    // implementation("@@UNDRA_MAVEN_GROUP@@:android-work:@@KOTLIN_RUNTIME_VERSION@@")
     implementation(project(":core-bindings"))
 
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))

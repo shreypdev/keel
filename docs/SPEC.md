@@ -1198,7 +1198,7 @@ crates/undra             facade: re-exports prelude, macros, runtime, ports, que
 runtimes/swift/UndraRuntime          Package.swift, Sources/UndraRuntime, Sources/UndraFFI (undra.h: the types of the C ABI table, no functions), Tests
 runtimes/kotlin/undra-runtime        settings.gradle.kts; modules: runtime (JVM+Android), android-adapters, and the optional android-work (WorkManager), undra-compose and okhttp-adapters (the app's OkHttpClient behind Http, WebSocket and Sse, ADR-060)
 runtimes/ts/@undra/runtime           package.json (ESM, exports: ., ./react, ./vue, ./svelte, ./solid, ./worker, ./vite, ./node), src/, test/
-runtimes/swift/UndraRuntime (product UndraTestKit), runtimes/kotlin/undra-runtime/testkit (dev.undra:testkit), runtimes/ts/@undra/testkit   the testing kits (§17.5)
+runtimes/swift/UndraRuntime (product UndraTestKit), runtimes/kotlin/undra-runtime/testkit (`testkit`), runtimes/ts/@undra/testkit   the testing kits (§17.5)
 testkit/                            the fixtures every kit reads (recordings, a seed) and the fakes' conformance file
 runtimes/ts/devtools                 the page `undra dev` serves at /devtools (ADR-054): TypeScript, no framework, imports only @undra/runtime/wire; build.sh bundles it with esbuild into crates/undra-cli/assets/devtools/ (committed, so cargo build needs no Node; `build.sh --check` runs in CI and fails when the committed files differ from a rebuild; 150 KB gzipped at most)
 runtimes/rn/@undra/react-native      package.json (ESM; peers @undra/runtime, react-native), src/ (NativeTransport, loadNative), cpp/ (the C++ TurboModule over undra.h, ADR-038), ios/, android/CMakeLists.txt, UndraReactNative.podspec, react-native.config.cjs, babel-plugin.cjs, test/
@@ -1207,7 +1207,22 @@ examples/playground/{ios,android,web}
 examples/two-cores/{a,b,ios,android,jvm,node}   the playground core under two namespaces, and a test app per platform loading both (ADR-044)
 contract-tests/                     schema fixture + per-language runners + the shared scenario list
 bench/                              criterion (Rust), node bench, JVM bench, iOS bench target notes
+Package.swift                       the Swift runtime as the repository's package (`undra`, products UndraRuntime and UndraTestKit, by path into runtimes/swift; ADR-063)
+jitpack.yml                         JitPack's build of a release tag: runtimes/kotlin/undra-runtime/scripts/jitpack-install.sh (ADR-063)
 ```
+
+**Distribution (ADR-063).** A project made by a released `undra` names that one release, `<version>`, in every dependency and
+fetches everything from the Undra repository: `undra = { git = "https://github.com/shreypdev/undra", tag = "v<version>" }`; the
+Swift package `https://github.com/shreypdev/undra` `from: "<version>"` (`.product(name: "UndraRuntime", package: "undra")` in the
+generated `Package.swift`); the Kotlin modules `com.github.shreypdev.undra:<module>:v<version>` from `https://jitpack.io`,
+declared for that group only in `settings.gradle.kts` (the generated module's `api(...)` names the runtime the same way); and
+`@undra/runtime` (`@undra/react-native`, `@undra/testkit`) as the GitHub Release's asset
+`https://github.com/shreypdev/undra/releases/download/v<version>/undra-runtime-<version>.tgz`, which the testkit and the React Native
+host name as a peer (`^<version>`). `[undra] version` of `undra.toml` is that full version. A project on a checkout uses its paths
+and the repository's own Kotlin identity (`dev.undra:<module>:0.1.0-SNAPSHOT`, substituted by a composite build).
+`UNDRA_DIST_GIT_URL`, `UNDRA_DIST_RELEASE_URL` and `UNDRA_DIST_MAVEN_REPO` replace the three addresses (a rehearsal, a mirror); a
+command that reads one warns, and `undra bindgen` in a project names the repository its core's `undra` dependency comes from. The
+generated `package.json` asks for `@undra/runtime` `^<version>`, the project's release; an `undra` of another release says so.
 
 `undra schema diff <old.json> <new.json>` and `undra schema diff --against <git-ref> [FILE]` (ADR-062) print the semantic difference of two schemas (§2.6), one line per change marked `breaking` or `additive`; `--against` compares `FILE` (default `schema.json` in the project's directory) as committed at the ref (`git show <ref>:<path>`; nothing is built) with the one in the working tree, and `--exit-code` exits 1 when a line is breaking. Since nothing is built, `--against` checks the file against the bindings of the project that holds it: the first Swift, Kotlin or TypeScript source the generated tree's `.undra-generated` lists carries the schema hash it was generated from (§10, `undra_bindgen::provenance::schema_hash_in`), read from the working tree and with `git show <ref>:./<generated>/..` at the ref; a file whose hash differs from its bindings' at either end is reported on stderr with both hashes, and a stale working-tree file also makes `--exit-code` exit 1. `undra schema export [-o FILE] [--docs] [--release] [--check]` writes the core's schema (the exchange form of §2.3, without docs unless `--docs`) as the file those read, with every type (the compact form of §2.1) and every small definition (a field, a parameter, a signal, a case without a payload; at most 140 columns) on one line, so the playground's file is about 3,300 lines against 8,800 pretty-printed and a field that became optional is one changed line; with `--check` it writes nothing and fails with `C0007` when `FILE` (default `schema.json` in the project's directory) is not exactly that text, the CI gate of the file as `undra bindgen --check` is of the bindings.
 

@@ -1,0 +1,96 @@
+name: Launch rehearsal
+
+# packaging/rehearse-launch.sh on a macOS runner (ADR-063): a copy of the repository, bumped to a throwaway version and
+# tagged, stands in for github.com/shreypdev/undra; the npm tarballs the release attaches are served from a local web
+# server; jitpack.yml's install command publishes the Kotlin modules into a local Maven repository. Then `undra init`
+# (built from that copy, no --undra-path) makes a project and its web, iOS (simulator) and Android apps are built from
+# those stand-ins alone. The summary in the log says, per platform, whether it built and how long it took.
+#
+# Not one of the four required "All green" checks, and not run on every pull request: it needs macOS (the iOS app) and
+# costs about 20 to 30 minutes of a macOS runner with cold caches (the CLI, then the core compiled for wasm, the iOS
+# simulator and two Android ABIs). It runs by hand (`gh workflow run launch-rehearsal.yml`, optionally
+# `-f version=1.0.0-rc.1`) and on pull requests that touch what a released project is made of: the templates, the
+# distribution code, the version script, the release packaging and workflow, Package.swift, jitpack.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version to rehearse (default: <workspace version>-rehearsal.1)"
+        type: string
+        required: false
+  pull_request:
+    paths:
+      - "crates/undra-cli/templates/**"
+      - "crates/undra-cli/src/dist.rs"
+      - "crates/undra-cli/src/commands/init.rs"
+      - "crates/undra-cli/src/bindgen.rs"
+      - "crates/undra-cli/src/runtimes.rs"
+      - "crates/undra-cli/src/commands/bindgen.rs"
+      - "runtimes/ts/@undra/runtime/package.json"
+      - "runtimes/ts/@undra/runtime/src/vite.ts"
+      - "runtimes/rn/@undra/react-native/package.json"
+      - "runtimes/ts/@undra/testkit/package.json"
+      - "runtimes/swift/UndraRuntime/Package.swift"
+      - "scripts/bump-version.sh"
+      - "packaging/**"
+      - ".github/workflows/release.yml"
+      - "jitpack.yml"
+      - "Package.swift"
+      - "runtimes/kotlin/undra-runtime/**/*.gradle.kts"
+      - "runtimes/kotlin/undra-runtime/scripts/jitpack-install.sh"
+      - ".github/workflows/launch-rehearsal.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: launch-rehearsal-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  NDK_VERSION: 27.2.12479018
+
+jobs:
+  rehearse:
+    name: A release rehearsed (web, iOS, Android built from it alone)
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: wasm32-unknown-unknown,aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      # `undra init` makes the Android app's Gradle wrapper with the installed Gradle, as on a developer's machine.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+      - name: The newest stable Xcode
+        run: |
+          newest="$(ls -d /Applications/Xcode_*.app | grep -v -i -E 'beta|candidate|_rc' | sort -V | tail -n 1)"
+          sudo xcode-select -s "$newest/Contents/Developer"
+          xcodebuild -version
+      - name: The Android NDK and cargo-ndk
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          cargo install cargo-ndk
+      - name: Rehearse the release
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # (macOS's bash is 3.2: an empty array under `set -u` is an unbound variable, so no array here.)
+          if [ -n "${VERSION:-}" ]; then set -- --version "$VERSION"; fi
+          bash packaging/rehearse-launch.sh --platforms web,ios,android "$@" | tee rehearsal.log
+          sed -n '/^Rehearsal of Undra/,$p' rehearsal.log >>"$GITHUB_STEP_SUMMARY"

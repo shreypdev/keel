@@ -179,8 +179,22 @@ fn the_configuration_names_the_output() {
     let package: serde_json::Value = serde_json::from_str(file(&ts, "package.json")).unwrap();
     assert_eq!(package["name"], "@acme/core");
     assert_eq!(package["version"], "2.3.4");
-    assert_eq!(package["peerDependencies"]["@undra/runtime"], "^0.1.0");
+    // The runtime it asks for: this generator's release by default (the number moves with every release, so it is not
+    // written here: scripts/bump-version.sh does not edit Rust), the project's release when `undra bindgen` says so.
+    assert_eq!(
+        package["peerDependencies"]["@undra/runtime"],
+        undra_bindgen::RUNTIME_RANGE
+    );
+    assert_eq!(
+        undra_bindgen::RUNTIME_RANGE,
+        concat!("^", env!("CARGO_PKG_VERSION"))
+    );
     assert_eq!(package["type"], "module");
+    generator.ts_runtime_range = "^9.8.7".into();
+    let ts = generator.typescript(&schema).unwrap();
+    let package: serde_json::Value = serde_json::from_str(file(&ts, "package.json")).unwrap();
+    assert_eq!(package["peerDependencies"]["@undra/runtime"], "^9.8.7");
+    assert_eq!(package["devDependencies"]["@undra/runtime"], "^9.8.7");
 
     generator.ts_scope = String::new();
     let ts = generator.typescript(&schema).unwrap();

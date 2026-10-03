@@ -56,11 +56,22 @@ its own once per display frame (ADR-031), exactly as on the web.
    also compiles `AcmePayCoreTable.m`, the class `UndraCoreTable_acme_pay` through which the module
    finds the core by its namespace (the module is built once for every core, so it names none).
 
-2. **Add the packages** (`@undra/runtime` and `react-native` are its peers) and your generated bindings:
+2. **Add the packages** (`@undra/runtime` and `react-native` are its peers) and your generated bindings. Both are
+   assets of the Undra release on GitHub (ADR-063): install them by URL, at the version of your `undra`
+   (`undra --version`), and `undra upgrade` moves both URLs together:
 
    ```sh
-   npm install @undra/react-native @undra/runtime
+   v=1.0.0
+   npm install https://github.com/shreypdev/undra/releases/download/v$v/undra-react-native-$v.tgz \
+               https://github.com/shreypdev/undra/releases/download/v$v/undra-runtime-$v.tgz
    ```
+
+   The bindings (`generated/ts`) are TypeScript sources, used as they are: do not `npm install` that directory (it is
+   not built, and the `@undra/runtime` it imports must be the app's one copy). Let Metro resolve them, and the runtime
+   from the app: `watchFolders` with `generated/ts/src`, `resolver.nodeModulesPaths` with the app's `node_modules`, an
+   alias of your bindings' package name to `generated/ts/src/index.ts`, and the rule that serves `./x.ts` for an import
+   of `./x.js` (`examples/playground/rn/metro.config.js` has all four; its other aliases point at a checkout and are not
+   needed with the packages above).
 
 3. **Babel**: Hermes cannot compile `import.meta`, which `@undra/runtime`'s `wasm-worker` mode contains
    (that mode never runs under React Native, but Metro bundles it). Add the package's plugin:

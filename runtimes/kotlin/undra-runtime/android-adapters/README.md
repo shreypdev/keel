@@ -8,7 +8,7 @@ opt-in `Db` port (ADR-048) and the Choreographer frame pacer. **No third-party d
 `settings.gradle.kts` includes it only when an Android SDK is found (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, or `sdk.dir`
 in `local.properties`), so a JVM-only checkout still builds `:runtime`. Its coordinates are
 `dev.undra:android-adapters:0.1.0-SNAPSHOT` (a composite build resolves them to this module, as the playground app
-does). minSdk 26.
+does), and `com.github.shreypdev.undra:android-adapters:v<version>` from JitPack at a release (ADR-063). minSdk 26.
 
 ## The one call
 

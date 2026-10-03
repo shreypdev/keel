@@ -25,6 +25,9 @@ use super::Env;
 /// See the modules it drives: [`crate::schema`], [`crate::bindgen`], [`crate::builds`].
 pub fn run(env: &Env<'_>, args: &BindgenArgs) -> Result<()> {
     let ui = env.ui;
+    // ADR-063: a released project's packages name the release where the environment says (GitHub unless a mirror is
+    // set, which is announced); a malformed setting stops the command before the core is built.
+    let dist = crate::dist::Dist::announced(env.sys, &ui)?;
     let project = match Project::discover(&env.start_dir()?) {
         Ok(project) => Some(project),
         // `--schema` needs no project: generating from a file is the fallback of SPEC 13.
@@ -46,8 +49,19 @@ pub fn run(env: &Env<'_>, args: &BindgenArgs) -> Result<()> {
         ui.warn("the schema is empty: the core has no `#[undra::api]` items that are `pub`, or its registrations were not linked");
     }
 
-    let plan = plan(session.as_ref(), args, &schema, &env.start_dir()?)?;
+    let plan = plan(session.as_ref(), args, &schema, &env.start_dir()?, &dist)?;
     let files = bindgen::plan_files(&schema, &plan)?;
+    // R7: the bindings are this `undra`'s; a released project's runtimes are the release it pins.
+    let other_release = session
+        .as_ref()
+        .and_then(|s| release_mismatch(&s.project.config, crate::config::UNDRA_VERSION));
+    if let Some(pinned) = &other_release {
+        let cli = crate::config::UNDRA_VERSION;
+        ui.warn(&format!(
+            "this project is on Undra {pinned} (undra.toml) and this undra is {cli}: the bindings it writes are {cli}'s, and the project's runtimes are {pinned}'s. {}",
+            release_advice(pinned, cli)
+        ));
+    }
 
     if args.check {
         let problems = bindgen::check(&plan.out, &files);
@@ -59,13 +73,35 @@ pub fn run(env: &Env<'_>, args: &BindgenArgs) -> Result<()> {
             ));
             return Ok(());
         }
+        let (why, fix) = match &other_release {
+            Some(pinned) => (
+                format!(
+                    "they are generated from the core's schema by `undra`, and this undra is {} while the project is on Undra {pinned}: another release generates other bindings (or the core changed, or they were edited by hand)",
+                    crate::config::UNDRA_VERSION
+                ),
+                release_advice(pinned, crate::config::UNDRA_VERSION),
+            ),
+            None => (
+                "they are generated from the core's schema, and the core changed (or they were edited by hand)".to_owned(),
+                "run `undra bindgen` and commit the result".to_owned(),
+            ),
+        };
         return Err(CliError::new(
             Code::Bindgen,
-            format!("the generated bindings in {} are out of date", plan.out.display()),
-            "they are generated from the core's schema, and the core changed (or they were edited by hand)",
-            "run `undra bindgen` and commit the result",
+            format!(
+                "the generated bindings in {} are out of date",
+                plan.out.display()
+            ),
+            why,
+            fix,
         )
-        .with_detail(problems.iter().map(|p| format!("  {p}")).collect::<Vec<_>>().join("\n")));
+        .with_detail(
+            problems
+                .iter()
+                .map(|p| format!("  {p}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ));
     }
 
     let applied = bindgen::apply(&plan.out, &files)?;
@@ -111,6 +147,33 @@ pub fn run(env: &Env<'_>, args: &BindgenArgs) -> Result<()> {
         applied.removed.len()
     ));
     Ok(())
+}
+
+/// The release a released project pins (`[undra] version`, in full) when it is not `cli`'s; `None` for a project on a
+/// checkout (`[undra] path`), whose runtimes are the checkout's.
+fn release_mismatch(config: &ProjectConfig, cli: &str) -> Option<String> {
+    if config.undra_path.is_some() {
+        return None;
+    }
+    let pinned = crate::dist::full_version(&config.undra_version);
+    (pinned != cli).then_some(pinned)
+}
+
+/// What to do about a project on release `pinned` worked on with an `undra` of release `cli`: use the project's release
+/// (what its CI installs), or move the project forward when this `undra` is newer (`undra upgrade` never moves one back).
+fn release_advice(pinned: &str, cli: &str) -> String {
+    let install = format!(
+        "use undra {pinned}, the project's release and what its CI installs (`curl -fsSL https://shreypdev.github.io/undra/install.sh | UNDRA_VERSION={pinned} sh`)"
+    );
+    match (
+        crate::semver::Semver::parse(pinned),
+        crate::semver::Semver::parse(cli),
+    ) {
+        (Some(p), Some(c)) if p < c => format!(
+            "Run `undra upgrade` to move the project to {cli} (and commit what it changes), or {install}"
+        ),
+        _ => format!("{}{}", install[..1].to_uppercase(), &install[1..]),
+    }
 }
 
 fn schema_is_empty(schema: &Schema) -> bool {
@@ -181,6 +244,7 @@ fn plan(
     args: &BindgenArgs,
     schema: &Schema,
     cwd: &Path,
+    dist: &crate::dist::Dist,
 ) -> Result<Plan> {
     let mut generator = Generator::for_crate(&schema.crate_name);
     // The iOS floor and the Swift observation mode (ADR-045): the project's, and what the command line says.
@@ -203,7 +267,7 @@ fn plan(
         args.ios_deployment_target.as_deref(),
     )?;
     let mut platforms = Platform::ALL.to_vec();
-    let mut runtimes = Runtimes::from_registries(crate::config::UNDRA_VERSION);
+    let mut runtimes = Runtimes::released(crate::config::UNDRA_VERSION, dist);
     let mut default_out = cwd.join("generated");
     if let Some(session) = session {
         let project = &session.project;
@@ -226,7 +290,18 @@ fn plan(
             generator.swift_typed_throws = typed;
         }
         platforms.clone_from(&project.config.platforms);
-        runtimes = Runtimes::for_project(project);
+        // ADR-063: the Swift package names the repository the core's `undra` crates come from (core/Cargo.toml), the
+        // project's own record of where it gets Undra, so a project made against a mirror stays on it whatever the
+        // environment of this run says.
+        let mut dist = dist.clone();
+        if let Ok(crate::cargo::CoreInfo {
+            undra: crate::cargo::UndraSource::Git { url, .. },
+            ..
+        }) = session.core()
+        {
+            dist.follow_repository(url);
+        }
+        runtimes = Runtimes::for_project(project, &dist);
         default_out = project.generated_dir();
     }
     if let Some(list) = &args.platforms {
@@ -243,4 +318,48 @@ fn plan(
         runtimes,
         out: canonicalize_lenient(&out),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(version: &str, path: Option<&str>) -> ProjectConfig {
+        let mut config = ProjectConfig::new("demo", "com.example.demo", Vec::new());
+        config.undra_version = version.to_owned();
+        config.undra_path = path.map(ToOwned::to_owned);
+        config
+    }
+
+    #[test]
+    fn a_released_project_on_another_release_is_named_and_a_checkout_is_not() {
+        assert_eq!(release_mismatch(&config("1.0.0", None), "1.0.0"), None);
+        // A two-part version an older `undra init` wrote is the first release of its line.
+        assert_eq!(release_mismatch(&config("1.0", None), "1.0.0"), None);
+        assert_eq!(
+            release_mismatch(&config("1.0.0", None), "1.0.1").as_deref(),
+            Some("1.0.0")
+        );
+        assert_eq!(
+            release_mismatch(&config("0.9.0", Some("../undra")), "1.0.0"),
+            None
+        );
+    }
+
+    #[test]
+    fn the_advice_moves_a_project_forward_only() {
+        // This undra is newer: upgrade the project, or use its release.
+        let newer = release_advice("1.0.0", "1.0.1");
+        assert!(
+            newer.starts_with("Run `undra upgrade` to move the project to 1.0.1")
+                && newer.contains("UNDRA_VERSION=1.0.0 sh"),
+            "{newer}"
+        );
+        // This undra is older: `undra upgrade` would refuse (C0014), so only the project's release is offered.
+        let older = release_advice("1.0.1", "1.0.0");
+        assert!(
+            older.starts_with("Use undra 1.0.1") && !older.contains("undra upgrade"),
+            "{older}"
+        );
+    }
 }

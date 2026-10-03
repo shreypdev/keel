@@ -4,8 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CORE_REBUILT_EVENT,
+  DEV_RELOAD_ID,
+  DEV_RELOAD_SOURCE,
   UNDRA_INSTALL_COMMAND,
   UndraBuildError,
+  buildPathOf,
   corePathOf,
   findCoreLayout,
   findUndra,
@@ -184,11 +188,17 @@ describe("the project", () => {
     expect(corePathOf('[core]\npath = "crates/engine"\n')).toBe("crates/engine");
     expect(corePathOf('[project]\npath = "nope"\n[core]\n# a comment\npath = \'single\'\n')).toBe("single");
     expect(corePathOf('[core]\npackage = "x"\n[paths]\npath = "other"\n')).toBe("core");
+    expect(buildPathOf('[project]\nname = "a"\n')).toBe("build");
+    expect(buildPathOf('[paths]\ngenerated = "gen"\nbuild = "out/undra"\n')).toBe("out/undra");
   });
 
   it("finds undra.toml from a directory below it", () => {
     const { root, web } = makeProject("crates/engine");
-    expect(findCoreLayout(web)).toEqual({ projectRoot: root, coreDir: join(root, "crates", "engine") });
+    expect(findCoreLayout(web)).toEqual({
+      projectRoot: root,
+      coreDir: join(root, "crates", "engine"),
+      buildDir: join(root, "build"),
+    });
     expect(findCoreLayout(dir)).toBeNull();
   });
 
@@ -233,6 +243,8 @@ describe("the plugin", () => {
     expect(plugin.enforce).toBe("pre");
     expect(typeof plugin.buildStart).toBe("function");
     expect(typeof plugin.configureServer).toBe("function");
+    expect(typeof plugin.transformIndexHtml).toBe("function");
+    expect(typeof plugin.handleHotUpdate).toBe("function");
   });
 
   it("builds the web core when Vite starts, from the project that holds the app", async () => {
@@ -351,20 +363,24 @@ describe("the plugin", () => {
 });
 
 describe("under vite dev", () => {
-  async function started(extra: { debounceMs?: number; watch?: string[] } = {}): Promise<{
+  async function started(extra: { debounceMs?: number; watch?: string[]; page?: boolean } = {}): Promise<{
     root: string;
     web: string;
     fake: ReturnType<typeof fakeServer>;
     logger: Logger;
+    plugin: ReturnType<typeof undra>;
   }> {
     const { root, bin, web } = makeProject();
     const logger = new Logger();
-    const plugin = undra({ command: bin, debounceMs: 5, ...extra });
+    const { page, ...options } = extra;
+    const plugin = undra({ command: bin, debounceMs: 5, ...options });
     plugin.configResolved(config(web, "serve", logger));
     await plugin.buildStart();
     const fake = fakeServer();
     plugin.configureServer(fake.server);
-    return { root, web, fake, logger };
+    // A page Vite served with the plugin's client module (what index.html gets under vite dev).
+    if (page === true) plugin.load(plugin.resolveId(DEV_RELOAD_ID) ?? "");
+    return { root, web, fake, logger, plugin };
   }
 
   it("watches the core's sources and manifests, and nothing of the app", async () => {
@@ -382,6 +398,43 @@ describe("under vite dev", () => {
     expect(calls()).toEqual([`-C ${web} build --platform web`, `-C ${web} build --platform web`]);
     expect(fake.sent).toEqual([{ type: "full-reload" }]);
     expect(logger.infos.join("\n")).toContain("lib.rs changed, rebuilding the core");
+  });
+
+  it("lets the page decide when it has the plugin's client module: a page on the core undra dev serves keeps its state", async () => {
+    const { root, fake } = await started({ page: true });
+    fake.watcher.emit("change", join(root, "core", "src", "lib.rs"));
+    await until(() => fake.sent.length === 1, "the event");
+    expect(fake.sent).toEqual([
+      { type: "custom", event: CORE_REBUILT_EVENT, data: { file: join(root, "core", "src", "lib.rs") } },
+    ]);
+  });
+
+  it("adds its client module to the page under vite dev only, and serves it", async () => {
+    const { plugin } = await started();
+    expect(plugin.transformIndexHtml()).toEqual([
+      { tag: "script", attrs: { type: "module", src: `/@id/${DEV_RELOAD_ID}` }, injectTo: "head" },
+    ]);
+    const id = plugin.resolveId(DEV_RELOAD_ID);
+    expect(id).toBe(`\0${DEV_RELOAD_ID}`);
+    expect(plugin.resolveId("react")).toBeUndefined();
+    expect(plugin.load(id ?? "")).toBe(DEV_RELOAD_SOURCE);
+    expect(plugin.load("/src/App.tsx")).toBeUndefined();
+    // `vite build` and a skipped plugin add nothing.
+    const { web } = makeProject();
+    const building = undra({ command: bin });
+    building.configResolved(config(web, "build"));
+    expect(building.transformIndexHtml()).toEqual([]);
+    const skipped = undra({ command: bin, skip: true });
+    skipped.configResolved(config(web, "serve"));
+    expect(skipped.transformIndexHtml()).toEqual([]);
+  });
+
+  it("keeps Vite from reloading pages when undra build rewrites the wasm, and leaves the app's files to Vite", async () => {
+    const { root, web, plugin } = await started();
+    expect(plugin.handleHotUpdate({ file: join(root, "build", "web", "app_core.wasm") })).toEqual([]);
+    expect(plugin.handleHotUpdate({ file: join(root, "build", "symbols", "web", "app_core.dwarf.wasm") })).toEqual([]);
+    expect(plugin.handleHotUpdate({ file: join(web, "src", "App.tsx") })).toBeUndefined();
+    expect(plugin.handleHotUpdate({ file: join(root, "build-notes.md") })).toBeUndefined();
   });
 
   it("counts a burst of saves once", async () => {
@@ -465,6 +518,31 @@ describe("under vite dev", () => {
     expect(fake.added).toContain(join(root, "shared", "src"));
     fake.watcher.emit("change", join(root, "shared", "src", "util.rs"));
     await until(() => fake.sent.length === 1, "the reload");
+  });
+
+  it("leaves the page loaded with ?undra= alone and reloads any other page (the client module, run as a browser would)", async () => {
+    // The module's code with Vite's import.meta replaced by what a page has: the HMR client and the env.
+    const run = (search: string, env: Record<string, string | undefined>): { reloaded: boolean; info: string[] } => {
+      const listeners = new Map<string, () => void>();
+      const hot = { on: (event: string, listener: () => void) => void listeners.set(event, listener) };
+      let reloaded = false;
+      const info: string[] = [];
+      const code = DEV_RELOAD_SOURCE.replaceAll("import.meta.hot", "hot").replaceAll("import.meta.env", "env");
+      new Function("hot", "env", "location", "console", code)(
+        hot,
+        env,
+        { search, reload: () => void (reloaded = true) },
+        { info: (m: string) => void info.push(m) },
+      );
+      listeners.get(CORE_REBUILT_EVENT)?.();
+      return { reloaded, info };
+    };
+    expect(run("", {}).reloaded).toBe(true);
+    expect(run("?other=1", { VITE_UNDRA_DEV_URL: "" }).reloaded).toBe(true);
+    const served = run("?undra=ws://127.0.0.1:7443", {});
+    expect(served.reloaded).toBe(false);
+    expect(served.info.join("\n")).toContain("kept its state");
+    expect(run("", { VITE_UNDRA_DEV_URL: "ws://10.0.2.2:7443" }).reloaded).toBe(false);
   });
 
   it("says so, and builds nothing, when there is no undra.toml above the app", () => {

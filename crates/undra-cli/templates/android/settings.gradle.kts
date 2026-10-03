@@ -13,7 +13,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-    }
+@@MAVEN_REPOSITORY@@    }
 }
 
 rootProject.name = "@@NAME@@"

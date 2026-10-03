@@ -161,9 +161,8 @@ mod tests {
 
     #[test]
     fn it_starts_with_the_notes_since_v1_0() {
-        // Keyed to the workspace version until the first release is cut; the release pull request
-        // re-keys it (docs/RELEASING.md), so this checks the entry, not its key: a test that asked
-        // for `CARGO_PKG_VERSION` here would fail the moment `scripts/bump-version.sh` ran.
+        // Keyed to the workspace version until the first release is cut; scripts/bump-version.sh files it under the
+        // release (the outgoing version was never released), so this checks the entry, not its key.
         let first = &MIGRATIONS[0];
         assert!(first.title.starts_with("Since v1.0"), "{}", first.title);
         assert!(first.semver() <= v(env!("CARGO_PKG_VERSION")));
@@ -209,10 +208,14 @@ mod tests {
                 .map(|m| m.version)
                 .collect()
         };
-        assert_eq!(versions(Some("0.0.9"), "0.1.0"), ["0.1.0"]);
-        assert_eq!(versions(Some("0.0.9"), "1.0.0"), ["0.1.0"]);
+        // The first notes' release moves when a release is cut (scripts/bump-version.sh files notes kept under a version
+        // that was never released under the new one), so it is read from the table, not written here.
+        let first = MIGRATIONS[0].version;
+        let this = env!("CARGO_PKG_VERSION");
+        assert_eq!(versions(Some("0.0.9"), first), [first]);
+        assert_eq!(versions(Some("0.0.9"), this)[0], first);
         assert_eq!(
-            versions(Some("0.1.0"), "1.0.0"),
+            versions(Some(first), first),
             Vec::<&str>::new(),
             "already past it"
         );
@@ -222,8 +225,8 @@ mod tests {
             "not there yet"
         );
         assert_eq!(
-            versions(None, "0.1.0"),
-            ["0.1.0"],
+            versions(None, first),
+            [first],
             "a project of unknown version gets everything up to the target"
         );
     }

@@ -9,6 +9,8 @@ dist
 /runtimes/swift/.build
 # SwiftPM's build directory, wherever a package is built (a generated bindings package included).
 .build/
+# Xcode's state for a package it opened (the repository's root Package.swift, ADR-063).
+/.swiftpm/
 # The Android library of @undra/react-native, as an app's Gradle build (the playground's) writes it.
 /runtimes/rn/@undra/react-native/android/build
 /runtimes/rn/@undra/react-native/android/.cxx

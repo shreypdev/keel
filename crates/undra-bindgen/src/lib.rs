@@ -123,6 +123,12 @@ impl std::str::FromStr for SwiftObservation {
     }
 }
 
+/// The range of `@undra/runtime` a generated `package.json` asks for by default: the release this generator belongs to
+/// and the ones compatible with it (ADR-063: `@undra/runtime` is installed from the release's asset, and npm checks a
+/// peer range against the installed package's version). `scripts/bump-version.sh` moves every copy of it in the
+/// repository.
+pub const RUNTIME_RANGE: &str = concat!("^", env!("CARGO_PKG_VERSION"));
+
 /// Configuration of the generators.
 ///
 /// [`Generator::for_crate`] derives every name from the core's crate name;
@@ -181,6 +187,10 @@ pub struct Generator {
     pub ts_js_number: bool,
     /// `version` of the generated `package.json`.
     pub package_version: String,
+    /// The range of `@undra/runtime` the generated `package.json` asks for (its peer and dev dependency). Default: this
+    /// generator's own release, `^<version>` ([`RUNTIME_RANGE`]). `undra bindgen` sets the release a project pins
+    /// (`[undra] version`, ADR-063) so the generated package's bytes do not depend on which `undra` wrote them.
+    pub ts_runtime_range: String,
     /// Declare the standard library (the ten standard ports and their eight types) like any
     /// other item. Off by default: every runtime already ships them, so generating them again
     /// would declare a second `FsError` in the app (see [`stdlib`] and ADR-024). Turn it on only
@@ -204,6 +214,7 @@ impl Generator {
             ts_package: crate_name.replace('_', "-").to_ascii_lowercase(),
             ts_js_number: false,
             package_version: "0.1.0".to_owned(),
+            ts_runtime_range: RUNTIME_RANGE.to_owned(),
             emit_standard_library: false,
         }
     }

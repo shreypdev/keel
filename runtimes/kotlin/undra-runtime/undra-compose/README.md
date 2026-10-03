@@ -3,7 +3,7 @@
 The optional Compose helpers of the Kotlin runtime (ADR-043): the only Gradle module that depends on Compose.
 `:runtime` stays Kotlin stdlib + kotlinx-coroutines, and an app that draws its lists another way never pulls this in.
 Coordinates `dev.undra:undra-compose:0.1.0-SNAPSHOT` (a composite build resolves them to this module, as the playground
-does); minSdk 26. Like `:android-adapters` it is included by `settings.gradle.kts` only when an Android SDK is found.
+does), and `com.github.shreypdev.undra:undra-compose:v<version>` from JitPack at a release (ADR-063); minSdk 26. Like `:android-adapters` it is included by `settings.gradle.kts` only when an Android SDK is found.
 It depends on `compose-foundation` (`LazyListScope` is in its public API) and `compose-runtime`, versions from the Compose
 BOM of `gradle/libs.versions.toml` (an app's own BOM wins). No ProGuard rules: nothing here is reflective.
 

@@ -1,6 +1,6 @@
 name: Release
 
-# One workflow behind four install channels (the runbook is docs/RELEASING.md):
+# One workflow behind a release (the runbook is docs/RELEASING.md; ADR-063: everything comes from this repository):
 #
 #   * push a tag v<version>                     -> build, package, then publish
 #   * run it by hand with `publish` off         -> the same build and packaging, nothing published:
@@ -9,10 +9,12 @@ name: Release
 #                                                  so this is also how a half-finished release is
 #                                                  completed)
 #
-# Publishing is a GitHub Release (tarballs + checksums.txt), the npm packages (@undra/runtime,
-# four @undra/cli-<platform> packages, @undra/cli and the unscoped undra) and an update of the
-# formula in shreypdev/homebrew-undra. The build and package jobs run on every trigger and hold
-# no secret; the publish job is the only one with write access and secrets.
+# Publishing is a GitHub Release (the CLI's four tarballs, the npm tarballs of @undra/runtime,
+# @undra/testkit and @undra/react-native that projects depend on by URL, and checksums.txt) and an
+# update of the formula in shreypdev/homebrew-undra. The tag itself is the rest: Cargo fetches the
+# crates by it, SwiftPM reads the root Package.swift at it, and JitPack builds the Kotlin modules
+# from it (jitpack.yml) the first time someone asks. The build and package jobs run on every
+# trigger and hold no secret; the publish job is the only one with write access and a secret.
 #
 # Third-party actions are pinned to commit SHAs (the comment names the version).
 
@@ -22,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Publish for real (GitHub Release, npm, Homebrew). Off is a dry run. Needs a v* tag as the ref."
+        description: "Publish for real (GitHub Release, Homebrew). Off is a dry run. Needs a v* tag as the ref."
         type: boolean
         default: false
 
@@ -52,7 +54,7 @@ jobs:
           # The whole history and every branch: the publish check below asks whether the tagged
           # commit is on the default branch.
           fetch-depth: 0
-      - name: The tag, the workspace, the runtime and the npm packages agree
+      - name: The tag, the workspace and every file that carries the version agree
         id: version
         env:
           EVENT: ${{ github.event_name }}
@@ -62,7 +64,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          # Cargo.toml, the TypeScript runtime and packaging/npm/templates all say one version.
+          # Cargo.toml, the three npm packages and every "@undra/runtime" range say one version (ADR-063).
           bash scripts/bump-version.sh --check
           version=$(awk '/^\[/ { section = $0 } section == "[workspace.package]" && /^version = "/ { gsub(/^version = "|"$/, ""); print; exit }' Cargo.toml)
 
@@ -180,7 +182,7 @@ jobs:
           retention-days: 30
 
   package:
-    name: Package (checksums, npm, Homebrew)
+    name: Package (checksums, the npm assets, Homebrew)
     needs: [verify, build]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -199,7 +201,7 @@ jobs:
           pattern: undra-*
           path: built
           merge-multiple: true
-      - name: checksums.txt
+      - name: The CLI's tarballs
         run: |
           set -euo pipefail
           mkdir release
@@ -209,6 +211,19 @@ jobs:
             cp "built/$asset" release/
             cat "built/$asset.sha256" >>release/checksums.txt
           done
+      # ADR-063: projects depend on these by the release asset's URL. The build is `tsc` (and the runtime's rename pass,
+      # ADR-057); `npm ci --ignore-scripts`, so no dependency's install script runs on a release build.
+      - name: The npm packages (@undra/runtime, @undra/testkit, @undra/react-native)
+        run: |
+          set -euo pipefail
+          bash packaging/pack-npm.sh --out npm
+          for stem in undra-runtime undra-testkit undra-react-native; do
+            cp "npm/$stem-$VERSION.tgz" release/
+            (cd release && sha256sum "$stem-$VERSION.tgz") >>release/checksums.txt
+          done
+      - name: checksums.txt
+        run: |
+          set -euo pipefail
           (cd release && sha256sum --check --strict checksums.txt)
           {
             echo '### Release assets'
@@ -216,39 +231,11 @@ jobs:
             cat release/checksums.txt
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
-      - name: Build the npm packages
-        run: |
-          set -euo pipefail
-          # The binaries come out of the tarballs the release ships, so the packages and the
-          # tarballs cannot disagree.
-          node packaging/npm/build.mjs --artifacts release --out npm/packages --version "$VERSION"
-          mkdir npm/tarballs
-          for dir in npm/packages/*/; do
-            (cd "$dir" && npm pack --pack-destination "$GITHUB_WORKSPACE/npm/tarballs" --silent)
-          done
-      - name: Build the @undra/runtime package
-        working-directory: runtimes/ts/@undra/runtime
-        run: |
-          set -euo pipefail
-          # The build is `tsc` twice and the rename pass of the production flavour (ADR-057, scripts/build.mjs, which
-          # reads oxc through rolldown's prebuilt binding); no dependency's install script gets to run on a release build.
-          npm ci --ignore-scripts
-          npm run build
-          npm pack --pack-destination "$GITHUB_WORKSPACE/npm/tarballs" --silent
-      - name: The seven npm tarballs exist at this version
-        run: |
-          set -euo pipefail
-          for name in undra-runtime undra-cli undra undra-cli-darwin-arm64 undra-cli-darwin-x64 undra-cli-linux-x64 undra-cli-linux-arm64; do
-            test -f "npm/tarballs/$name-$VERSION.tgz" || { echo "::error::npm/tarballs/$name-$VERSION.tgz is missing"; exit 1; }
-          done
-          # The publish job checks the tarballs it downloads against this list before publishing.
-          (cd npm/tarballs && sha256sum ./*.tgz >SHA256SUMS)
-          ls -l npm/tarballs
-      # What this proves, on the real artifacts and before anything is published: the launcher
-      # package installs with `npm install -g` and runs the Linux x64 binary; the curl installer
-      # downloads, verifies and installs the same tarball from a local server.
-      - name: Install the npm packages (Linux x64) and run undra
-        run: bash packaging/npm/test.sh --tarballs npm/tarballs
+      # What this proves, on the real artifacts and before anything is published: a project installs the three npm
+      # tarballs by URL from a web server with no registry, every peer satisfied; the curl installer downloads,
+      # verifies and installs the CLI's tarball from a local server.
+      - name: Install the npm assets by URL, without a registry
+        run: bash packaging/test-npm-assets.sh --release-dir release --version "$VERSION"
       - name: Run the curl installer against the release assets
         run: bash packaging/test-install.sh --release-dir release
       - name: Generate the Homebrew formula
@@ -266,52 +253,34 @@ jobs:
           retention-days: 30
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: npm-tarballs
-          path: |
-            npm/tarballs/*.tgz
-            npm/tarballs/SHA256SUMS
-          if-no-files-found: error
-          retention-days: 30
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
           name: homebrew-formula
           path: homebrew/undra.rb
           if-no-files-found: error
           retention-days: 30
 
   release:
-    name: Publish (GitHub Release, npm, Homebrew)
+    name: Publish (GitHub Release, Homebrew)
     needs: [verify, package]
     # Tag pushes, and manual runs with publish on; verify has already refused anything that is not
     # on a v<workspace version> tag. A dry run skips this whole job.
     if: needs.verify.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # An environment is where the two secrets can be restricted to v* tags (docs/RELEASING.md,
-    # hardening); with the secrets at repository level it changes nothing.
+    # An environment is where the secret can be restricted to v* tags (docs/RELEASING.md,
+    # hardening); with the secret at repository level it changes nothing.
     environment: release
     permissions:
       contents: write # the GitHub Release
-      id-token: write # npm provenance (an OIDC token for the attestation)
     env:
       VERSION: ${{ needs.verify.outputs.version }}
       PRERELEASE: ${{ needs.verify.outputs.prerelease }}
       TAG: v${{ needs.verify.outputs.version }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-          package-manager-cache: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-assets
           path: release
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: npm-tarballs
-          path: npm
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: homebrew-formula
@@ -320,27 +289,24 @@ jobs:
       - name: The artifacts are the bytes the package job tested
         run: |
           set -euo pipefail
-          # checksums.txt was written on the runners that built each tarball and verified by the
-          # package job; the npm list was written next to the tarballs the package job installed.
+          # checksums.txt was written on the runners that built each CLI tarball and next to the npm
+          # tarballs the package job installed, and verified by it.
           (cd release && sha256sum --check --strict checksums.txt)
-          (cd npm && sha256sum --check --strict SHA256SUMS)
 
-      - name: Preflight (the secrets exist and work, before anything is published)
+      - name: Preflight (the secret exists and works, before anything is published)
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
         run: |
           set -euo pipefail
-          if [ -z "$NPM_TOKEN" ]; then
-            echo "::error::The NPM_TOKEN secret is not set (docs/RELEASING.md, prerequisites)."
-            exit 1
+          if [ "$PRERELEASE" = true ]; then
+            echo "A prerelease leaves the tap alone: HOMEBREW_TAP_TOKEN is not needed."
+            exit 0
           fi
           if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
-            echo "::error::The HOMEBREW_TAP_TOKEN secret is not set (docs/RELEASING.md, prerequisites)."
+            echo "::error::The HOMEBREW_TAP_TOKEN secret is not set (docs/RELEASING.md, the launch checklist)."
             exit 1
           fi
-          echo "npm user: $(npm whoami)"
           push=$(GH_TOKEN="$HOMEBREW_TAP_TOKEN" gh api repos/shreypdev/homebrew-undra --jq '.permissions.push // false')
           if [ "$push" != true ]; then
             echo "::warning::HOMEBREW_TAP_TOKEN does not report push access to shreypdev/homebrew-undra; the formula update at the end may fail."
@@ -362,7 +328,7 @@ jobs:
             fi
             echo "Release $TAG exists with these checksums; uploading whatever it lacks."
             have=$(gh release view "$TAG" --json assets --jq '.assets[].name')
-            for file in undra-v*.tar.gz checksums.txt; do
+            for file in undra-v*.tar.gz undra-*.tgz checksums.txt; do
               if ! printf '%s\n' "$have" | grep -qx "$file"; then
                 gh release upload "$TAG" "$file"
               fi
@@ -370,40 +336,8 @@ jobs:
           else
             flags=(--title "Undra $TAG" --generate-notes --verify-tag)
             if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
-            gh release create "$TAG" undra-v*.tar.gz checksums.txt "${flags[@]}"
+            gh release create "$TAG" undra-v*.tar.gz undra-*.tgz checksums.txt "${flags[@]}"
           fi
-
-      - name: npm (provenance, public)
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          tag_flags=()
-          if [ "$PRERELEASE" = true ]; then tag_flags=(--tag next); fi
-          publish() { # <package name> <tarball>
-            # ./ keeps npm from reading a path with a slash as a GitHub user/repo shorthand
-            local tarball="./npm/$2" published ours
-            # Already on the registry (a re-run of a half-finished release): skip it, but only when
-            # the registry holds these exact bytes. `npm view` of a missing version exits 1.
-            if published=$(npm view "$1@$VERSION" dist.integrity 2>/dev/null) && [ -n "$published" ]; then
-              ours="sha512-$(openssl dgst -sha512 -binary "$tarball" | base64 | tr -d '\n')"
-              if [ "$published" != "$ours" ]; then
-                echo "::error::$1@$VERSION is already on npm with different contents (registry $published, this run $ours). A version is never republished: cut a patch version (docs/RELEASING.md, rollback). If the name belongs to someone else, it has to be claimed or dropped first."
-                exit 1
-              fi
-              echo "$1@$VERSION is already on npm with these exact bytes; skipping"
-              return 0
-            fi
-            npm publish "$tarball" --provenance --access public "${tag_flags[@]}"
-          }
-          # Dependencies first: the launchers name the platform packages, which name nothing.
-          publish @undra/runtime "undra-runtime-$VERSION.tgz"
-          publish @undra/cli-darwin-arm64 "undra-cli-darwin-arm64-$VERSION.tgz"
-          publish @undra/cli-darwin-x64 "undra-cli-darwin-x64-$VERSION.tgz"
-          publish @undra/cli-linux-x64 "undra-cli-linux-x64-$VERSION.tgz"
-          publish @undra/cli-linux-arm64 "undra-cli-linux-arm64-$VERSION.tgz"
-          publish @undra/cli "undra-cli-$VERSION.tgz"
-          publish undra "undra-$VERSION.tgz"
 
       - name: Homebrew tap
         env:

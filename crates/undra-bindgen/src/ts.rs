@@ -1345,10 +1345,10 @@ impl TsGen<'_> {
                 "typecheck": "tsc -p tsconfig.json --noEmit"
             },
             "peerDependencies": {
-                "@undra/runtime": "^0.1.0"
+                "@undra/runtime": self.cfg.ts_runtime_range
             },
             "devDependencies": {
-                "@undra/runtime": "^0.1.0",
+                "@undra/runtime": self.cfg.ts_runtime_range,
                 "typescript": "^5.5.0"
             }
         });

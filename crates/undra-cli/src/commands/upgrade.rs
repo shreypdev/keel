@@ -4,7 +4,7 @@
 //! [`crate::migrations`]; this module reads the project, prints the plan, writes the files,
 //! regenerates the bindings and prints the notes of every release the project crosses.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::cli::{BindgenArgs, UpgradeArgs};
 use crate::error::{CliError, Code, Result};
@@ -28,7 +28,9 @@ pub fn run(env: &Env<'_>, args: &UpgradeArgs) -> Result<()> {
     let ui = env.ui;
     let target = Semver::parse(crate::version::SEMVER)
         .expect("the CLI's own version is a version: a test checks it");
-    let plan = upgrade::plan(&project.root, &project.generated_dir(), &target);
+    // ADR-063: the pins name the release where the environment says (GitHub unless a mirror is set).
+    let dist = crate::dist::Dist::announced(env.sys, &env.ui)?;
+    let plan = upgrade::plan(&project.root, &project.generated_dir(), &target, &dist);
 
     // A dependency on a checkout of the repository is the version of that checkout.
     if plan.on_a_checkout() {
@@ -36,7 +38,18 @@ pub fn run(env: &Env<'_>, args: &UpgradeArgs) -> Result<()> {
         return Ok(());
     }
     if let Some((file, pin)) = plan.ahead() {
-        return Err(ahead(&project, file, &pin.shown, &target));
+        let installed = std::env::current_exe()
+            .ok()
+            .map(|exe| exe.canonicalize().unwrap_or(exe))
+            .and_then(|exe| {
+                channel_of(
+                    &exe,
+                    env.sys.home().as_deref(),
+                    env.sys.env("UNDRA_HOME"),
+                    env.sys.env("CARGO_HOME"),
+                )
+            });
+        return Err(ahead(&project, file, &pin.shown, &target, installed));
     }
 
     let current = plan.current();
@@ -117,6 +130,14 @@ pub fn run(env: &Env<'_>, args: &UpgradeArgs) -> Result<()> {
     ));
     for hint in lock_file_hints(&plan) {
         ui.hint(&hint);
+    }
+    if plan.gradle_repository_missing {
+        if let Some(lines) = dist.gradle_repository("        ", true) {
+            ui.warn(&format!(
+                "the Kotlin runtime now comes from {} (ADR-063), and no Gradle settings script of the project could be given it: add it to the repositories your Android build resolves from (the `dependencyResolutionManagement {{ repositories {{ }} }}` block of settings.gradle.kts, or `allprojects {{ repositories {{ }} }}` of an older build):\n{lines}",
+                dist.maven_repo.as_deref().unwrap_or_default()
+            ));
+        }
     }
 
     if args.no_bindgen {
@@ -226,8 +247,73 @@ fn path_message(project: &Project, plan: &Plan) -> String {
     out
 }
 
+/// How the running `undra` was installed, as far as its path tells.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Channel {
+    /// Homebrew: the binary is in a cellar (`/opt/homebrew/Cellar/undra/<version>/bin/undra`).
+    Homebrew,
+    /// The installer (`install.sh`): `$UNDRA_HOME/bin`, by default `~/.undra/bin`.
+    Installer,
+    /// `cargo install`: `$CARGO_HOME/bin`, by default `~/.cargo/bin`.
+    Cargo,
+}
+
+impl Channel {
+    /// The command that updates `undra` through this channel.
+    fn update_command(self) -> &'static str {
+        match self {
+            Channel::Homebrew => "brew upgrade undra",
+            Channel::Installer => "curl -fsSL https://shreypdev.github.io/undra/install.sh | sh",
+            Channel::Cargo => {
+                "cargo install --locked --force --git https://github.com/shreypdev/undra undra-cli"
+            }
+        }
+    }
+}
+
+/// The channel that installed the binary at `exe` (symlinks resolved), when its directory says so; `None` for anything
+/// else (a build in a checkout's `target/`, a copy somewhere).
+fn channel_of(
+    exe: &Path,
+    home: Option<&Path>,
+    undra_home: Option<String>,
+    cargo_home: Option<String>,
+) -> Option<Channel> {
+    let dir = exe.parent()?;
+    if exe.components().any(|c| c.as_os_str() == "Cellar") {
+        return Some(Channel::Homebrew);
+    }
+    let bin = |root: Option<PathBuf>| root.is_some_and(|root| dir == root.join("bin"));
+    if bin(undra_home.map(PathBuf::from)) || bin(home.map(|h| h.join(".undra"))) {
+        return Some(Channel::Installer);
+    }
+    if bin(cargo_home.map(PathBuf::from)) || bin(home.map(|h| h.join(".cargo"))) {
+        return Some(Channel::Cargo);
+    }
+    None
+}
+
+/// What to run to update `undra`: the channel's command when it is known, else the three.
+fn update_help(installed: Option<Channel>) -> String {
+    match installed {
+        Some(channel) => format!("`{}`", channel.update_command()),
+        None => format!(
+            "`{}`, `{}` or `{}`, whichever installed it",
+            Channel::Homebrew.update_command(),
+            Channel::Installer.update_command(),
+            Channel::Cargo.update_command()
+        ),
+    }
+}
+
 /// `C0014`: the project is ahead of this `undra`.
-fn ahead(project: &Project, file: &Path, shown: &str, target: &Semver) -> CliError {
+fn ahead(
+    project: &Project,
+    file: &Path,
+    shown: &str,
+    target: &Semver,
+    installed: Option<Channel>,
+) -> CliError {
     CliError::new(
         Code::UndraMismatch,
         format!(
@@ -239,7 +325,10 @@ fn ahead(project: &Project, file: &Path, shown: &str, target: &Semver) -> CliErr
             project.config.name,
             project.root.display()
         ),
-        "update this `undra` first (`curl -fsSL https://shreypdev.github.io/undra/install.sh | sh`, `brew upgrade undra` or `npm update -g @undra/cli`) and run `undra upgrade` again",
+        format!(
+            "update this `undra` first ({}) and run `undra upgrade` again",
+            update_help(installed)
+        ),
     )
 }
 
@@ -329,6 +418,49 @@ fn wrap(text: &str, marker: &str, width: usize) -> String {
 mod tests {
     use super::*;
     use crate::migrations::{Kind, Note};
+
+    #[test]
+    fn the_update_help_names_the_channel_the_binary_came_from() {
+        let home = Path::new("/Users/me");
+        let of = |exe: &str| channel_of(Path::new(exe), Some(home), None, None);
+        assert_eq!(
+            of("/opt/homebrew/Cellar/undra/1.0.0/bin/undra"),
+            Some(Channel::Homebrew)
+        );
+        assert_eq!(
+            of("/home/linuxbrew/.linuxbrew/Cellar/undra/1.0.0/bin/undra"),
+            Some(Channel::Homebrew)
+        );
+        assert_eq!(of("/Users/me/.undra/bin/undra"), Some(Channel::Installer));
+        assert_eq!(of("/Users/me/.cargo/bin/undra"), Some(Channel::Cargo));
+        assert_eq!(of("/Users/me/src/undra/target/debug/undra"), None);
+        assert_eq!(of("/usr/local/bin/undra"), None);
+        // UNDRA_HOME and CARGO_HOME move the directories.
+        assert_eq!(
+            channel_of(
+                Path::new("/opt/tools/undra/bin/undra"),
+                Some(home),
+                Some("/opt/tools/undra".into()),
+                None
+            ),
+            Some(Channel::Installer)
+        );
+        assert_eq!(
+            channel_of(
+                Path::new("/opt/cargo/bin/undra"),
+                Some(home),
+                None,
+                Some("/opt/cargo".into())
+            ),
+            Some(Channel::Cargo)
+        );
+        assert_eq!(update_help(Some(Channel::Homebrew)), "`brew upgrade undra`");
+        let all = update_help(None);
+        for needle in ["brew upgrade undra", "install.sh | sh", "cargo install"] {
+            assert!(all.contains(needle), "{all}");
+        }
+        assert!(!all.contains("npm"), "{all}");
+    }
 
     #[test]
     fn notes_are_wrapped_with_a_hanging_indent() {

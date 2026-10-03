@@ -6,11 +6,13 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 // record/replay. Kotlin stdlib + kotlinx-coroutines + :runtime only; JVM and Android (a Compose @Preview runs on the JVM).
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    `maven-publish`
 }
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
+    withSourcesJar()
 }
 
 kotlin {
@@ -45,5 +47,14 @@ tasks.test {
         events("failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         showStandardStreams = true
+    }
+}
+
+// ADR-063: published at every release (JitPack builds the tag; scripts/jitpack-install.sh), with its sources.
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            from(components["java"])
+        }
     }
 }

@@ -13,7 +13,7 @@ beside the runtimes.
 
 | | Swift | Kotlin | TypeScript | Rust |
 |---|---|---|---|---|
-| Package | `UndraTestKit` (a product of the `UndraRuntime` package) | `dev.undra:testkit` | `@undra/testkit` | `undra::testing` (`undra-testkit`) |
+| Package | `UndraTestKit` (a product of the `UndraRuntime` package) | `com.github.shreypdev.undra:testkit` (`dev.undra:testkit` in a checkout) | `@undra/testkit` (the release's `undra-testkit-<version>.tgz`) | `undra::testing` (`undra-testkit`) |
 | Real core + fakes | `PreviewCore` | `PreviewCore` | `PreviewCore` | `Harness` |
 | A recording as a core | `RecordedCore` | `RecordedCore` | `RecordedCore` | |
 | Record port traffic | `PortRecorder` | `PortRecorder` | `PortRecorder` | `Recorder` |
