@@ -16,7 +16,7 @@ name: Two cores
 
 on:
   push:
-    branches: [main, "wt/**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -128,3 +128,20 @@ jobs:
         run: examples/two-cores/jvm/run.sh
       - name: Node
         run: examples/two-cores/node/run.sh
+
+  # The one check branch protection requires: green only when every job above succeeded (a failed, cancelled or
+  # skipped job fails it). `if: always()` so it reports after failures too; without it a failed job leaves the
+  # check "expected" forever and a pull request can never merge. Name and job id are the same in every workflow.
+  all-green:
+    name: All green
+    if: always()
+    needs: [ios, android, jvm-and-node]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' >/dev/null

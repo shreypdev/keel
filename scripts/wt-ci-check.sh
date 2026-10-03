@@ -6,6 +6,9 @@
 #       For each required <workflow> (its `name:`), the newest run of it (a re-run supersedes the run it repeats) must be
 #       completed with conclusion success. Prints one line per workflow (`ok`, `RED`, `RUNNING`, `MISSING`) and exits 0
 #       only when every one is ok.
+#   wt-ci-check.sh pr-verdict <checks.json> <workflow>...
+#       <checks.json> is `gh pr checks <n> --json name,workflow,state,bucket`: the "All green" check of each required
+#       workflow must have passed on the pull request's head. Same lines and exit code as verdict.
 #   wt-ci-check.sh site-needed <site.yml>
 #       Reads the changed files (one per line) from stdin and prints `yes` when one of them matches a `paths:` entry of
 #       the Site workflow's `push` trigger, else `no`: Site runs only for those, so it is required only for them.
@@ -33,6 +36,26 @@ verdict() {
   return "$bad"
 }
 
+# pr-verdict <checks.json> <workflow>...: <checks.json> is `gh pr checks <n> --json name,workflow,state,bucket`. For each
+# required workflow the check named "All green" must be in the pass bucket. One line per workflow (`ok`, `RED`,
+# `RUNNING`, `MISSING`); exit 0 only when every one is ok.
+pr_verdict() {
+  local checks="$1"; shift
+  [ -f "$checks" ] || die "no such file: $checks"
+  local bad=0 name line
+  for name in "$@"; do
+    line="$(jq -r --arg wf "$name" '
+      [ .[] | select(.workflow == $wf and .name == "All green") ] | last
+      | if . == null then "MISSING no \"All green\" check of \($wf) on this head"
+        elif .bucket == "pass" then "ok \($wf)"
+        elif .bucket == "pending" then "RUNNING \($wf) is \(.state)"
+        else "RED \($wf) is \(.state)" end' "$checks")"
+    printf '%s\n' "$line"
+    case "$line" in ok\ *) ;; *) bad=1 ;; esac
+  done
+  return "$bad"
+}
+
 site_needed() {
   local site="$1"
   [ -f "$site" ] || die "no such file: $site"
@@ -54,5 +77,6 @@ site_needed() {
 case "${1:-}" in
   verdict) shift; [ "$#" -ge 2 ] || die "usage: verdict <runs.json> <workflow>..."; verdict "$@" ;;
   site-needed) shift; [ "$#" -eq 1 ] || die "usage: site-needed <site.yml>"; site_needed "$1" ;;
-  *) die "usage: wt-ci-check.sh verdict|site-needed ..." ;;
+  pr-verdict) shift; [ "$#" -ge 2 ] || die "usage: pr-verdict <checks.json> <workflow>..."; pr_verdict "$@" ;;
+  *) die "usage: wt-ci-check.sh verdict|site-needed|pr-verdict ..." ;;
 esac
