@@ -6,11 +6,17 @@ import PackageDescription
 let package = Package(
     name: "CookbookSnippets",
     platforms: [.iOS(.v17), .macOS(.v14)],
-    dependencies: [.package(path: "../../generated/swift")],
+    dependencies: [
+        .package(path: "../../generated/swift"),
+        .package(path: "../../../../runtimes/swift/UndraRuntime"),
+    ],
     targets: [
         .target(
             name: "Snippets",
-            dependencies: [.product(name: "CookbookCore", package: "swift")],
+            dependencies: [
+                .product(name: "CookbookCore", package: "swift"),
+                .product(name: "UndraRuntime", package: "UndraRuntime"),
+            ],
             path: "Sources/Snippets"
         ),
     ],
