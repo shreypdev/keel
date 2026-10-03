@@ -53,6 +53,15 @@ status checkpoints 32 and 33 — and then the feedback wave of checkpoint 34: th
 `generated-weight` (#3), `sse-chunks` (#5), `okhttp-adapters` (#4), `bazel` (#7), `android-size` (#8). **Nothing is
 open: `origin` has `main` only.** What each review left recorded is listed at the end of checkpoint 34; the two
 findings not taken on are U2 (Xcode 27, needs the reporter's crash log) and U6 (GraphQL).
+
+**Launch readiness (2026-10-03, status checkpoint 35).** The site for launch (#11), the posts' fact-check (#13), the web
+size re-record (#12) and distribution from GitHub (#14, ADR-063) are on `main` (`da087cc`); `origin` has `main` only.
+The live site already reads as on launch day: its `brew` and installer commands become true with the release. **Nothing
+is announced and nothing is tagged.** The founder's steps are `docs/RELEASING.md`, in order; step 4, the
+`v1.0.0-rc.1` rehearsal tag, is required. An agent must not create tags, releases, repositories or tokens, and must
+not be given a token: the secret is set by the founder with `gh secret set`. After the tag: check each channel from a
+clean machine before any post. Follow-ups that are safe to take as small pull requests: the three CI flakes named in
+checkpoint 35, the test count on the landing page, `schema.json` in the examples.
 - **On hold by the founder:** the Android emulator CI job for `android-adapters`, `android-work` and
   `undra-compose`. Not started. Ask him before starting it. (The "Android emulator (API 34, x86_64)" job in
   `two-cores.yml` is older and unrelated.)
