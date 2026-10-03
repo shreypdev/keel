@@ -221,7 +221,9 @@ pr_land() {
   rm -f "$checks"
   [ "$(gh pr view "$num" --json headRefOid --jq .headRefOid)" = "$head" ] \
     || die "pull request #$num moved past ${head:0:12} while the checks ran: run merge again"
-  gh pr merge "$num" --merge --delete-branch \
+  # No --delete-branch: gh would also delete the local branch and its worktree, and the sweep below does that
+  # uniformly (remote, local, worktree, ci-local clone) only after main is verified to contain the head.
+  gh pr merge "$num" --merge \
     || die "GitHub refused to merge #$num (branch protection: is main merged in and every required check green?); nothing was deleted"
   echo "wt.sh: merged pull request #$num (a merge commit of ${head:0:12})"
   git pull -q --ff-only "$REMOTE" main || die "main is merged on $REMOTE but the local main did not fast-forward: fix the local checkout, then run scripts/wt.sh clean"
@@ -280,8 +282,8 @@ case "$cmd" in
       git push -q "$REMOTE" main \
         || die "main is merged locally but the push to $REMOTE failed; nothing was deleted. Fix the push, then run scripts/wt.sh clean"
     fi
-    # (a) verify: the branch is in main, and the pushed main contains the head.
-    git merge-base --is-ancestor "wt/$slug" main || die "wt/$slug is not an ancestor of main after the merge: nothing was deleted"
+    # (a) verify: the head is in main, and the pushed main contains it (by sha: the branch ref may already be gone).
+    git merge-base --is-ancestor "$head" main || die "${head:0:12} is not an ancestor of main after the merge: nothing was deleted"
     fetch_remote_main
     git merge-base --is-ancestor "$head" "refs/remotes/$REMOTE/main" \
       || die "$REMOTE/main does not contain ${head:0:12} after the push: nothing was deleted"
