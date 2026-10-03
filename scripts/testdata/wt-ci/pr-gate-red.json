@@ -1,0 +1,20 @@
+[
+ {
+  "workflow": "Gate",
+  "name": "Site / Complete",
+  "bucket": "pass",
+  "state": "SUCCESS"
+ },
+ {
+  "workflow": "Gate",
+  "name": "CI / Complete",
+  "bucket": "fail",
+  "state": "FAILURE"
+ },
+ {
+  "workflow": "Gate",
+  "name": "All green",
+  "bucket": "fail",
+  "state": "FAILURE"
+ }
+]

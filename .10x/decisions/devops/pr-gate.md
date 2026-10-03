@@ -27,3 +27,24 @@ contains the head, clean up). `--ff` keeps the fast-forward path for repositorie
 `scripts/wt-cleanup.test.sh`, whose scratch repositories have no GitHub.
 
 **Not done here:** no twin workflow for Site (not needed once it always runs on pull requests); no auto-merge.
+
+## One gate (2026-10-03)
+
+The first design was wrong in the one place that mattered. Each workflow ended in a job named "All green" and the
+ruleset required the context `All green`. GitHub resolves a required check by name: with four check runs of one
+name it took whichever existed, and Site's finishes in minutes. Seen on pull request #15: `mergeStateStatus` was
+`UNSTABLE` (mergeable) with "Site / All green" the only check marked required, while twelve CI jobs were still
+running. `scripts/wt.sh merge` asked for all four, so nothing wrong was merged through it, but the web UI would
+have allowed it.
+
+Now: `gate.yml` runs on `pull_request` and `merge_group`, calls `ci.yml`, `bench.yml`, `two-cores.yml` and `site.yml`
+as reusable workflows (`workflow_call`), and its last job "All green" needs the four. The four no longer trigger
+on pull requests themselves; on `main` they run as before (Site deploys there). Their roll-ups are named "Complete".
+One job in the repository is called "All green", so the ruleset's one required context means one thing. The Site
+call grants `pages: write` and `id-token: write` because a called workflow cannot declare more than its caller
+gives, even for a job (the deploy) that is skipped on pull requests.
+
+Rejected: requiring four distinct names in the ruleset (the founder asked for one check, and a fifth workflow would
+again be forgotten), and a fifth workflow that polls the other four through the API (holds a runner for the whole
+run and races the checks' creation).
+

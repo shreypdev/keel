@@ -69,8 +69,9 @@ name: Bench
 on:
   push:
     branches: [main]
-  pull_request:
-  merge_group:
+  # Pull requests and the merge queue run this through the Gate workflow (.github/workflows/gate.yml), which calls it
+  # and ends in the one required check; it runs by itself only on main.
+  workflow_call:
 
 concurrency:
   # A pull request's newer run replaces its older one, and so does a newer push to a piece's branch
@@ -246,11 +247,11 @@ jobs:
           path: bench-results/native-size.jsonl
           if-no-files-found: ignore
 
-  # The one check branch protection requires: green only when every job above succeeded (a failed, cancelled or
-  # skipped job fails it). `if: always()` so it reports after failures too; without it a failed job leaves the
-  # check "expected" forever and a pull request can never merge. Name and job id are the same in every workflow.
-  all-green:
-    name: All green
+  # This workflow's own roll-up: green only when every job above succeeded (a failed, cancelled or skipped job fails it;
+  # `if: always()` so it reports after failures too). The Gate workflow needs it for every workflow it calls, and
+  # ends in the one check the ruleset requires. Named "Complete" so that only the Gate's last job is called "All green".
+  complete:
+    name: Complete
     if: always()
     needs: [budgets, size, size-ios]
     runs-on: ubuntu-latest

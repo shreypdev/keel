@@ -1,0 +1,60 @@
+name: Gate
+
+# The one check the ruleset on main requires. A pull request (and a merge-queue group) runs CI, Bench, Two cores and
+# Site as jobs of THIS workflow, and the last job, "All green", needs all four: it is green only when every job of
+# every one of them succeeded, and it cannot report before they finish.
+#
+# Why one workflow: each of the four used to end in its own job named "All green", and the ruleset names a check by
+# its name. GitHub took the first one to finish (Site, in a few minutes) as the required check, so a pull request
+# showed as mergeable while CI was still running. One name, one job, that depends on everything, is what the
+# ruleset can hold (.10x/decisions/devops/pr-gate.md).
+#
+# The four keep running by themselves on main (and Site deploys from there); each ends in a job named "Complete".
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+# A newer push to a pull request replaces the run it supersedes.
+concurrency:
+  group: gate-${{ github.event_name == 'pull_request' && github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  bench:
+    name: Bench
+    uses: ./.github/workflows/bench.yml
+
+  two-cores:
+    name: Two cores
+    uses: ./.github/workflows/two-cores.yml
+
+  site:
+    name: Site
+    uses: ./.github/workflows/site.yml
+    # What site.yml declares for its deploy job, which only runs on main: a called workflow cannot ask for more
+    # than its caller grants, even for a job that is skipped.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+  all-green:
+    name: All green
+    if: always()
+    needs: [ci, bench, two-cores, site]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every workflow succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' >/dev/null

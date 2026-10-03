@@ -7,8 +7,7 @@
 #       completed with conclusion success. Prints one line per workflow (`ok`, `RED`, `RUNNING`, `MISSING`) and exits 0
 #       only when every one is ok.
 #   wt-ci-check.sh pr-verdict <checks.json> <workflow>...
-#       <checks.json> is `gh pr checks <n> --json name,workflow,state,bucket`: the "All green" check of each required
-#       workflow must have passed on the pull request's head. Same lines and exit code as verdict.
+#       <checks.json> is `gh pr checks <n> --json name,workflow,state,bucket`: the "All green" check of each required #       workflow must have passed on the pull request's head. Same lines and exit code as verdict.
 #   wt-ci-check.sh site-needed <site.yml>
 #       Reads the changed files (one per line) from stdin and prints `yes` when one of them matches a `paths:` entry of
 #       the Site workflow's `push` trigger, else `no`: Site runs only for those, so it is required only for them.

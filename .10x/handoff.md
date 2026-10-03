@@ -40,8 +40,8 @@ piece lands unless CI is green on its pushed head (`scripts/wt.sh merge` enforce
 the exact head when site paths changed — `gh workflow run site.yml --ref wt/<name>` when the filter skipped it);
 (2) Fable designs where the difficulty is in deciding, a cheaper model implements, an adversarial review follows;
 (3) **`main` is protected by the founder's ruleset (2026-10-03): a pull request, squash only, the required check
-`All green` (the roll-up job of CI, Bench, Two cores and Site), no bypass, no "up to date" rule and no merge queue.**
-`scripts/wt.sh merge <slug>` opens the pull request, waits for the four checks, squash-merges, verifies `main`'s tree is
+`All green` (the last job of the Gate workflow, which runs CI, Bench, Two cores and Site and needs all four), no bypass, no "up to date" rule and no merge queue.**
+`scripts/wt.sh merge <slug>` opens the pull request, waits for that check, squash-merges, verifies `main`'s tree is
 the tested head's tree and cleans up; `scripts/wt.sh pr <slug>` opens a draft early; `--ff` is only for repositories
 without protection and the script tests. A branch must contain `main` or be stacked on the piece landing before it
 (merging `main` into it changes nothing); build the whole stack before pushing. State commits ride in a piece's pull
