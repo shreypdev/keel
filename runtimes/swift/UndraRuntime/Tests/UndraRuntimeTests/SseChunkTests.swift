@@ -370,6 +370,37 @@ final class SseChunkBackpressureTests: XCTestCase {
         XCTAssertNil(answered)
         XCTAssertFalse(detector.fired, "the pull was not answered by the close")
     }
+
+    /// Cancelling the task whose pull waits for an event ends the stream as a cancelled read of `URLSession.AsyncBytes` ended it
+    /// (what this adapter was before it read chunks): the pull throws `network("cancelled")` and the request is cancelled, so the
+    /// server sees the client leave. A pull that waited until a chunk or the close came would hold the request open.
+    func testCancellingAWaitingPullEndsTheStreamAndCancelsTheRequest() async throws {
+        let control = RecordingControl()
+        let stream = URLSessionSseStream(lastEventId: nil, room: 4, control: control)
+        let detector = HangDetector { await stream.close() }
+        defer { detector.cancel() }
+        let pull = Task { () async -> Result<SseEvent?, SseError> in
+            var iterator = stream.events.makeAsyncIterator()
+            do {
+                return .success(try await iterator.next())
+            } catch {
+                return .failure(error as? SseError ?? .network("not an SseError: \(error)"))
+            }
+        }
+        await eventually("the pull to wait") { stream.hasWaitingPull }
+        pull.cancel()
+        let result = await pull.value
+        XCTAssertEqual(result, .failure(.network("cancelled")))
+        XCTAssertFalse(detector.fired, "cancelling the task did not end the pull")
+        XCTAssertEqual(control.calls, [.cancel], "the request is cancelled")
+
+        // The stream is over: a chunk that comes after is not parsed and the task is not suspended again, and a pull finishes.
+        stream.receive(Data(eventBytes(0 ..< 3)))
+        XCTAssertEqual(control.calls, [.cancel])
+        var iterator = stream.events.makeAsyncIterator()
+        let after = try await iterator.next()
+        XCTAssertNil(after)
+    }
 }
 
 // MARK: - A real URLSession task against a server that writes what the test says
@@ -625,6 +656,34 @@ final class SseChunkWireTests: XCTestCase {
         let result = await opening.value
         XCTAssertEqual(result, .failure(.network("cancelled")))
         XCTAssertFalse(detector.fired, "cancelling open did not cancel the request")
+        await eventually("the server seeing the client leave") { server.clientLeft }
+    }
+
+    /// Cancelling the task that waits for the next event cancels the request: the pull throws `network("cancelled")`, as a
+    /// cancelled `URLSession.AsyncBytes` read did, and the server sees the client leave.
+    func testCancellingTheTaskThatWaitsForAnEventCancelsTheRequest() async throws {
+        let server = try ScriptedEventServer()
+        let stream = try await open(server)
+        let detector = HangDetector { await stream.close() }
+        defer { detector.cancel() }
+        server.send(eventBytes(0 ..< 1))
+        let tookFirst = Locked(false)
+        let pull = Task { () async -> (first: SseEvent?, end: Result<SseEvent?, SseError>) in
+            var iterator = stream.events.makeAsyncIterator()
+            let first = try? await iterator.next()
+            tookFirst.withLock { $0 = true }
+            do {
+                return (first, .success(try await iterator.next()))
+            } catch {
+                return (first, .failure(error as? SseError ?? .network("not an SseError: \(error)")))
+            }
+        }
+        await eventually("the first event taken and the next pull waiting") { tookFirst.withLock { $0 } && stream.hasWaitingPull }
+        pull.cancel()
+        let (first, end) = await pull.value
+        XCTAssertEqual(first, expectedEvents(0 ..< 1)[0])
+        XCTAssertEqual(end, .failure(.network("cancelled")))
+        XCTAssertFalse(detector.fired, "cancelling the task did not end the pull")
         await eventually("the server seeing the client leave") { server.clientLeft }
     }
 

@@ -236,6 +236,13 @@ final class URLSessionSseStream: NSObject, SseStream, URLSessionDataDelegate, @u
         }
     }
 
+    /// Whether a pull waits for an event now (what the tests wait on).
+    var hasWaitingPull: Bool {
+        return state.withLock { (current: inout State) -> Bool in
+            return current.waiter != nil
+        }
+    }
+
     // MARK: Opening
 
     /// Starts `request` on `session` and waits for the answer's head. Cancelling the caller
@@ -336,20 +343,53 @@ final class URLSessionSseStream: NSObject, SseStream, URLSessionDataDelegate, @u
         }
     }
 
-    /// Waits until a chunk queued an event, the body ended, or the stream was closed.
+    /// Waits until a chunk queued an event, the body ended, the stream was closed, or the waiting
+    /// task was cancelled.
     private func park() async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let ready = state.withLock { (current: inout State) -> Bool in
-                if current.over || current.end != nil || current.waiting > 0 {
-                    return true
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let ready = state.withLock { (current: inout State) -> Bool in
+                    if current.over || current.end != nil || current.waiting > 0 {
+                        return true
+                    }
+                    current.waiter = continuation
+                    return false
                 }
-                current.waiter = continuation
-                return false
+                if ready {
+                    continuation.resume()
+                }
             }
-            if ready {
-                continuation.resume()
-            }
+        } onCancel: {
+            cancelRead()
         }
+    }
+
+    /// The task that waits for an event was cancelled: the stream ends as a cancelled read of
+    /// `URLSession.AsyncBytes` ended it (what this adapter read before it took chunks), with
+    /// ``SseError/network(_:)`` "cancelled" after the events already queued, and the request is
+    /// cancelled, so the server sees the client leave. A pull that waited on for a chunk or a close
+    /// would hold the request open for a reader that is gone.
+    private func cancelRead() {
+        let taken = state.withLock { (current: inout State) -> (CheckedContinuation<Void, Never>?, (any SseTaskControl)?, Bool)? in
+            if current.over || current.end != nil {
+                return nil
+            }
+            current.end = SseError.network("cancelled")
+            let waiter = current.waiter
+            current.waiter = nil
+            let suspended = current.suspended
+            current.suspended = false
+            return (waiter, current.control, suspended)
+        }
+        guard let (waiter, control, wasSuspended) = taken else {
+            return
+        }
+        control?.cancel()
+        if wasSuspended {
+            // As in `close`: a cancelled task that stays suspended may never report.
+            control?.resume()
+        }
+        waiter?.resume()
     }
 
     /// One chunk of the body: parsed whole, its events queued. The parser keeps what is left of an
