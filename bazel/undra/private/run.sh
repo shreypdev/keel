@@ -31,6 +31,7 @@ LIBRARY=""
 OUT_FILE=""
 OUT_DIR=""
 OUT_SYMBOLS=""
+NAMESPACE=""
 UNDRA_ROOT=""
 APP_ROOT=""
 SYSROOTS=""
@@ -65,6 +66,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     out_file) OUT_FILE="$value" ;;
     out_dir) OUT_DIR="$value" ;;
     out_symbols) OUT_SYMBOLS="$value" ;;
+    namespace) NAMESPACE="$value" ;;
     undra_root) UNDRA_ROOT="$value" ;;
     app_root) APP_ROOT="$value" ;;
     out_swift) OUT_SWIFT="$value" ;;
@@ -261,18 +263,15 @@ case "$MODE" in
     case "$PLATFORM" in
       host)
         found=""
-        for candidate in "$BUILD_DIR"/host/lib*.dylib "$BUILD_DIR"/host/lib*.so; do
+        for candidate in "$BUILD_DIR/host/lib$NAMESPACE.dylib" "$BUILD_DIR/host/lib$NAMESPACE.so"; do
           [ -f "$candidate" ] && found="$candidate"
         done
-        [ -n "$found" ] || die "undra build produced no host library below $BUILD_DIR/host"
+        [ -n "$found" ] || die "undra build did not produce lib$NAMESPACE below build/host (it produced: $(ls "$BUILD_DIR/host" 2>/dev/null | tr '\n' ' ')): undra_core(namespace = \"$NAMESPACE\") must be the [core] namespace of undra.toml"
         cp "$found" "$(abs "$OUT_FILE")"
         ;;
       web)
-        found=""
-        for candidate in "$BUILD_DIR"/web/*.wasm; do
-          case "$candidate" in *.debug.wasm | *.dwarf.wasm) ;; *) [ -f "$candidate" ] && found="$candidate" ;; esac
-        done
-        [ -n "$found" ] || die "undra build produced no wasm module below $BUILD_DIR/web"
+        found="$BUILD_DIR/web/$NAMESPACE.wasm"
+        [ -f "$found" ] || die "undra build did not produce $NAMESPACE.wasm below build/web (it produced: $(ls "$BUILD_DIR/web" 2>/dev/null | tr '\n' ' ')): undra_core(namespace = \"$NAMESPACE\") must be the [core] namespace of undra.toml"
         cp "$found" "$(abs "$OUT_FILE")"
         ;;
       ios)

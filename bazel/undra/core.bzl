@@ -2,8 +2,6 @@
 
 load("//undra/private:actions.bzl", "RUNNER_ATTRS", "vendor_params", "write_params")
 
-_HOST = "host"
-
 # The Bazel platforms (undra/platforms) each target platform of `undra build` selects the Rust toolchain for. A platform
 # with several is built for all of them in one action: iOS is a device slice and a simulator slice, Android one per ABI.
 _PLATFORMS = {
@@ -27,6 +25,16 @@ _target_platforms = transition(
     inputs = ["//command_line_option:platforms"],
     outputs = ["//command_line_option:platforms"],
 )
+
+def _relative(path, base, label):
+    """`path` below `base`, both execution-root-relative directories (`.` is the root)."""
+    if path == base:
+        return "."
+    if base == ".":
+        return path
+    if not path.startswith(base + "/"):
+        fail("{}: undra.toml is in {}, which is not below the Cargo workspace root {} (`workspace`)".format(label, path, base))
+    return path[len(base) + 1:]
 
 def _undra_core_impl(ctx):
     platform = ctx.attr.platform
@@ -54,14 +62,13 @@ def _undra_core_impl(ctx):
         tool_files.append(info.all_files)
 
     config = ctx.file.config
-    if ctx.file.workspace:
-        app_root = ctx.file.workspace.dirname or "."
-    else:
-        app_root = config.dirname or "."
-    project = "."
-    if (config.dirname or ".") != app_root:
-        project = config.dirname[len(app_root) + 1:] if app_root != "." else config.dirname
-    lines += ["app_root=" + app_root, "project=" + project]
+    config_dir = config.dirname or "."
+    app_root = (ctx.file.workspace.dirname or ".") if ctx.file.workspace else config_dir
+    lines += [
+        "app_root=" + app_root,
+        "project=" + _relative(config_dir, app_root, ctx.label),
+        "namespace=" + namespace,
+    ]
 
     outputs = []
     out_symbols = None
@@ -183,14 +190,14 @@ def undra_core(
 
     Args:
         name: the filegroup of every platform's build.
-        namespace: the core's `[core] namespace` in undra.toml; the build fails if undra.toml says another.
+        namespace: the core's `[core] namespace` in undra.toml; the build fails, naming both, if undra.toml says another.
         config: the project's undra.toml.
         srcs: every file of the project the build reads: its Cargo manifests and lock file and the core's sources.
         workspace: the Cargo workspace's root `Cargo.toml` when it is above undra.toml's directory (default: the same directory).
         platforms: any of `host`, `web`, `ios`, `android`.
         release: build `host`, `ios` and `android` with the release profile (LTO, one codegen unit). `web` always is.
-        symbols: also write the symbol files of a release build (`undra build`'s default). The shipped bytes differ
-            by the order `wasm-opt` visits functions when the names are present, so this matches the CLI's default build.
+        symbols: also write the symbol files of a release build, as `undra build` does by default (the shipped web module differs
+            by about 0.1% when it does not: `wasm-opt` sees the names, ADR-046), so the default is the CLI's own bytes.
         wasm_opt: an executable `wasm-opt` (binaryen); without it the web module is not shrunk further, as the CLI says.
         extra_path: directories (absolute) put on the action's `PATH` for the `ios` and `android` builds, whose toolchains are the
             machine's: `cargo-ndk`'s directory, for one. `ANDROID_NDK_HOME` and `DEVELOPER_DIR` come in through `--action_env`.

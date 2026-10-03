@@ -291,7 +291,8 @@ documented, and not built: the Rust toolchain of an Android *platform* needs a C
 8. **`undra_core`'s platforms resolve their Rust toolchains by a split transition** on `current_rust_toolchain` (one target platform
    per iOS slice and per Android ABI), next to the exec-platform toolchain (`cfg = "exec"`), not by `toolchains = [..]`: a wasm
    build needs the host's standard library too, for build scripts and proc macros, and a rule resolves one target platform only.
-9. **The `undra_android_library` macro is in `android.bzl`**, not `defs.bzl`: loading `rules_kotlin`'s Android rules for every user of
+9. **SPEC 13's schema-extraction paragraph** names `--library` and the lint files (the one SPEC edit; no wire, ABI or schema text moves).
+10. **The `undra_android_library` macro is in `android.bzl`**, not `defs.bzl`: loading `rules_kotlin`'s Android rules for every user of
    `defs.bzl` would force the Android SDK's configuration on a Linux CI job.
 
 **Verified** (macOS, Apple silicon, Xcode 26.6, Bazel 8.8.1 from Bazelisk, a fresh clone and a fresh output root): the whole example

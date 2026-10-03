@@ -1,6 +1,6 @@
 # SDE: bazel: Bazel rules that run the undra CLI, an example workspace and the lint exclusions for generated code (ADR-061), 2026-10-02
 
-Branch `wt/bazel`, from `main` `b909739`. The binding text is ADR-061 ("Implementation note": nine differences from the design and
+Branch `wt/bazel`, from `main` `b909739`. The binding text is ADR-061 ("Implementation note": ten differences from the design and
 what was and was not verified). User feedback U3/T1: "No Bazel support ... Real integration means writing Bazel rules for Rust plus
 the generated bindings", and a host CI failing on repo-wide lint rules over the POC's Kotlin.
 
