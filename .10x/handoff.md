@@ -39,10 +39,12 @@ Landed: devtools, persistence, testkit, docs-v1x, ports (all reviewed) (ADR-037/
 piece lands unless CI is green on its pushed head (`scripts/wt.sh merge` enforces it; it also demands a Site run on
 the exact head when site paths changed — `gh workflow run site.yml --ref wt/<name>` when the filter skipped it);
 (2) Fable designs where the difficulty is in deciding, a cheaper model implements, an adversarial review follows;
-(3) **the founder protects `main` now: every change, state commits included, lands through a pull request.**
-`scripts/wt.sh merge` fast-forwards and pushes `main` directly — it must become "open the PR, let the checks run,
-merge the PR, then clean up" before it is used again (propose the change first; `docs/AGENT_WORKFLOW.md` and
-[[undra-ci-green-gate]] describe the gate). Landed today, in order: `ci-green` (`fc326d6`), `diagram-rn`
+(3) **`main` is protected: every change, state commits included, lands through a pull request** whose four required
+checks — `CI / All green`, `Bench / All green`, `Two cores / All green`, `Site / All green` (the roll-up job of each
+workflow, `pr-gate`) — are green on its head. `scripts/wt.sh merge <slug>` opens the pull request, waits for the
+checks, merges with a merge commit and cleans up; `scripts/wt.sh pr <slug>` opens a draft early. `--ff` is only
+for repositories without protection and the script tests. The `wt/**` push triggers are gone: CI runs on pull
+requests and on `main`. Section 4 of `docs/AGENT_WORKFLOW.md` is the reference. Landed today, in order: `ci-green` (`fc326d6`), `diagram-rn`
 (`b7efd61`), `generics-fn-obj` (`aa04821`), `generics-followups` (`3c279a6`). Main is `3c279a6` plus state commits.
 
 Landed after that: `test-pacing` (`14a4689`), `reload-handles` (`7e5d238`), `ts-runtime-16k` (`784c361`) —
