@@ -406,9 +406,10 @@ pub enum SchemaCommand {
         long_about = "Compares two schemas (the JSON `undra schema export` writes, or any file `undra bindgen --schema` reads) and \
 prints one line per difference an app can notice: records, fields, enums and their cases, objects, stores and their \
 signals, constructors, methods, functions, ports, callbacks, queries and mutations. Each line is marked `breaking` \
-(code written against the old bindings can stop compiling: a removed or changed signature, an added enum case, a \
-field added without a default) or `additive` (it cannot: an added function, method, store or object, a field with a \
-default). The rules are in docs/SPEC.md 2.6. The order of the output is fixed: types, objects and stores, \
+(code written against the old bindings can stop compiling in Swift, Kotlin or TypeScript: a removed or changed \
+signature, an added enum case, an added record field, even one with a default, which a TypeScript object literal \
+must name) or `additive` (it cannot: an added function, method, store, object or record). The rules are in \
+docs/SPEC.md 2.6. The order of the output is fixed: types, objects and stores, \
 functions, ports, callbacks, queries, by name, so the same two schemas print the same text. Doc comments and wire ids are \
 not compared.\n\n\
 With --against the old side is FILE as committed at a git ref (`git show <ref>:<path>`; nothing is built) and the new \

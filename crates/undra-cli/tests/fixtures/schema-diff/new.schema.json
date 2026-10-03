@@ -135,6 +135,23 @@
       "methods": [
         { "name": "cancelled", "method_id": 3653667198, "params": [], "returns": {"kind":"unit"}, "is_async": false, "takes_ctx": false }
       ]
+    },
+    {
+      "name": "Presence",
+      "port_id": 4125706869,
+      "kind": "event",
+      "methods": [
+        {
+          "name": "joined",
+          "method_id": 2173764859,
+          "params": [
+            { "name": "user", "ty": {"kind":"string"} }
+          ],
+          "returns": {"kind":"unit"},
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ]
     }
   ],
   "queries": [

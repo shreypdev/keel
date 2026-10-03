@@ -213,7 +213,7 @@ fn query(name: &str, kind: QueryKind, params: Vec<ParamDef>, returns: TypeRef) -
 /// Version 2: one change of every kind the rules tell apart, breaking and additive.
 fn new_schema() -> Schema {
     let mut s = old_schema();
-    // Todo: a defaulted field (additive) and a required one (breaking).
+    // Todo: a defaulted field and a required one (both breaking: a TypeScript object literal names every field).
     s.records[0]
         .fields
         .push(field("due", TypeRef::option(TypeRef::Timestamp), true));
@@ -249,7 +249,8 @@ fn new_schema() -> Schema {
         generic: None,
         docs: String::new(),
     });
-    // The port the app implements gains a method (breaking); a new callback (additive).
+    // The port the app implements gains a method (breaking); a new callback and a new event port, which
+    // the app sends events through and implements nothing of (additive).
     s.ports[0]
         .methods
         .push(method("Notifier", "dismiss", vec![], TypeRef::Unit));
@@ -259,6 +260,19 @@ fn new_schema() -> Schema {
         kind: PortKind::Callback,
         background: false,
         methods: vec![method("Cancel", "cancelled", vec![], TypeRef::Unit)],
+        docs: String::new(),
+    });
+    s.ports.push(PortDef {
+        name: "Presence".into(),
+        port_id: ids::port_id("Presence"),
+        kind: PortKind::Event,
+        background: false,
+        methods: vec![method(
+            "Presence",
+            "joined",
+            vec![param("user", TypeRef::String)],
+            TypeRef::Unit,
+        )],
         docs: String::new(),
     });
     // The query is cached longer (additive); the mutation is gone (breaking).
@@ -339,7 +353,8 @@ fn two_schema_files_print_the_report_locked_in_the_golden() {
     );
     // The report is the rules of SPEC 2.6 applied to every kind of change in the fixtures.
     for expected in [
-        "additive  field Todo.due: added (Option<Timestamp>, with a default)",
+        "breaking  field Todo.due: added (Option<Timestamp>, with a default): Swift and Kotlin initializers default it, \
+         but a TypeScript object literal that builds a `Todo` must name it",
         "breaking  field Todo.priority: added without a default",
         "breaking  case Filter.Archived: added",
         "additive  signal Todos.open_count: added (u32, computed)",
@@ -348,10 +363,11 @@ fn two_schema_files_print_the_report_locked_in_the_golden() {
         "breaking  method Todos.toggle: removed",
         "additive  function import_all: added",
         "breaking  method Notifier.dismiss: added",
+        "additive  port Presence: added (an event port",
         "additive  callback Cancel: added",
         "additive  query todo: stale time changed from none to 30000 ms",
         "breaking  mutation add_todo: removed",
-        "6 breaking, 6 additive.",
+        "7 breaking, 6 additive.",
     ] {
         assert!(text.contains(expected), "missing `{expected}` in:\n{text}");
     }
@@ -374,7 +390,7 @@ fn the_exit_status_follows_exit_code_and_only_then() {
     let gated = diff(&old, &new, &["--exit-code"]);
     assert_eq!(gated.status.code(), Some(1));
     assert!(
-        String::from_utf8_lossy(&gated.stdout).contains("6 breaking, 6 additive."),
+        String::from_utf8_lossy(&gated.stdout).contains("7 breaking, 6 additive."),
         "the report is printed before the exit"
     );
     // Only additive (the same file twice has nothing; a schema gaining a function is additive): 0.
@@ -489,7 +505,7 @@ fn a_schema_file_against_head_in_a_scratch_repository() {
         .output()
         .unwrap();
     assert_eq!(gated.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&gated.stdout).contains("6 breaking, 6 additive."));
+    assert!(String::from_utf8_lossy(&gated.stdout).contains("7 breaking, 6 additive."));
 
     // Once the new schema is committed there is nothing left to say against HEAD.
     git(repo.path(), &["commit", "-q", "-am", "the API at v2"]);
@@ -513,7 +529,7 @@ fn a_schema_file_against_head_in_a_scratch_repository() {
         "HEAD~1",
     ]));
     assert!(
-        String::from_utf8_lossy(&before.stdout).contains("6 breaking, 6 additive."),
+        String::from_utf8_lossy(&before.stdout).contains("7 breaking, 6 additive."),
         "{}",
         String::from_utf8_lossy(&before.stdout)
     );
@@ -549,7 +565,7 @@ fn the_default_file_is_schema_json_in_the_project_even_below_the_repository_root
         "HEAD",
     ]));
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("6 breaking, 6 additive."), "{text}");
+    assert!(text.contains("7 breaking, 6 additive."), "{text}");
     assert!(text.starts_with("Public API: HEAD:schema.json "), "{text}");
 }
 

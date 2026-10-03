@@ -231,7 +231,25 @@ fn a_record_added_is_additive_and_removed_is_breaking() {
 }
 
 #[test]
-fn a_field_with_a_default_is_additive_without_one_it_is_breaking() {
+fn a_field_added_without_a_default_breaks_every_initializer() {
+    let old = with_record(vec![field("title", TypeRef::String, false)]);
+    let required = with_record(vec![
+        field("title", TypeRef::String, false),
+        field("priority", TypeRef::U8, false),
+    ]);
+    assert_eq!(
+        lines(&old, &required),
+        [
+            "breaking  field Todo.priority: added without a default (u8): everything that builds a `Todo` must supply it"
+        ]
+    );
+}
+
+#[test]
+fn a_field_added_with_a_default_still_breaks_a_typescript_object_literal() {
+    // A TypeScript record is an interface whose every member is required: an object literal typed
+    // `Todo` that does not name the new field stops compiling, default or not. Swift's memberwise
+    // initializer and Kotlin's data class constructor default it, so they are not the reason.
     let old = with_record(vec![field("title", TypeRef::String, false)]);
     let defaulted = with_record(vec![
         field("title", TypeRef::String, false),
@@ -239,20 +257,188 @@ fn a_field_with_a_default_is_additive_without_one_it_is_breaking() {
     ]);
     assert_eq!(
         lines(&old, &defaulted),
-        ["additive  field Todo.due: added (Option<Timestamp>, with a default)"]
+        [
+            "breaking  field Todo.due: added (Option<Timestamp>, with a default): Swift and Kotlin initializers default it, \
+             but a TypeScript object literal that builds a `Todo` must name it"
+        ]
     );
-    let required = with_record(vec![
+}
+
+#[test]
+fn a_defaulted_field_inserted_before_another_shifts_kotlin_positional_arguments() {
+    // `Todo(id, "x", true)` meant `done = true`; with `pinned: Boolean = false` before `done` it
+    // means `pinned = true`, and `val (id, title, done) = todo` reads `pinned`.
+    let old = with_record(vec![
         field("title", TypeRef::String, false),
-        field("priority", TypeRef::U8, false),
+        field("done", TypeRef::Bool, true),
     ]);
-    let found = lines(&old, &required);
-    assert_eq!(found.len(), 1, "{found:?}");
+    let inserted = with_record(vec![
+        field("title", TypeRef::String, false),
+        field("pinned", TypeRef::Bool, true),
+        field("done", TypeRef::Bool, true),
+    ]);
+    assert_eq!(
+        lines(&old, &inserted),
+        [
+            "breaking  field Todo.pinned: added (bool, with a default) before `done`: Kotlin's positional arguments and \
+             destructuring of a `Todo` shift, and a TypeScript object literal that builds one must name it"
+        ]
+    );
+    // Two new fields at the end are both appended: neither moves an old one.
+    let appended = with_record(vec![
+        field("title", TypeRef::String, false),
+        field("done", TypeRef::Bool, true),
+        field("pinned", TypeRef::Bool, true),
+        field("rank", TypeRef::U8, true),
+    ]);
+    let found = lines(&old, &appended);
+    assert_eq!(found.len(), 2, "{found:?}");
     assert!(
-        found[0].starts_with(
-            "breaking  field Todo.priority: added without a default (u8): everything that builds a `Todo` must supply it"
-        ),
+        found
+            .iter()
+            .all(|l| l.contains("Swift and Kotlin initializers default it")),
         "{found:?}"
     );
+}
+
+#[test]
+fn a_defaulted_field_of_a_record_or_enum_type_has_no_generated_default() {
+    // Swift and Kotlin spell the default of a primitive, a string, an optional and a collection,
+    // never of a named type: the initializer requires it as if it had no default.
+    let old = with_record(vec![field("title", TypeRef::String, false)]);
+    let named = with_record(vec![
+        field("title", TypeRef::String, false),
+        field("priority", TypeRef::named("Priority"), true),
+    ]);
+    assert_eq!(
+        lines(&old, &named),
+        [
+            "breaking  field Todo.priority: added (Priority, with a default no generated initializer spells): everything \
+             that builds a `Todo` must supply it"
+        ]
+    );
+    // For the same reason, losing that default changes no initializer.
+    let undefaulted = with_record(vec![
+        field("title", TypeRef::String, false),
+        field("priority", TypeRef::named("Priority"), false),
+    ]);
+    assert_eq!(
+        lines(&named, &undefaulted),
+        ["additive  field Todo.priority: lost its default (no generated initializer spelled it)"]
+    );
+}
+
+/// The parameter lines of the initializer (Swift) or constructor (Kotlin) of the record `name`.
+fn initializer_lines(text: &str, open: &str, close: &str) -> Vec<String> {
+    let start = text.find(open).unwrap_or_else(|| panic!("no {open}")) + open.len();
+    let end = start + text[start..].find(close).expect("the block closes");
+    text[start..end]
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("/**") && !l.starts_with("*"))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn the_rule_for_a_defaulted_field_is_what_the_generators_emit() {
+    // One defaulted field of every kind a record can hold; the rules above say which of them a
+    // Swift initializer and a Kotlin constructor default. Generate both and compare, so the rule
+    // cannot drift from the generators. TypeScript never does: every interface member is required.
+    let kinds: Vec<(&str, TypeRef)> = vec![
+        ("flag", TypeRef::Bool),
+        ("small", TypeRef::U8),
+        ("wide", TypeRef::I64),
+        ("ratio", TypeRef::F64),
+        ("text", TypeRef::String),
+        ("blob", TypeRef::Bytes),
+        ("span", TypeRef::Duration),
+        ("at", TypeRef::Timestamp),
+        ("uid", TypeRef::Uuid),
+        ("amount", TypeRef::Decimal),
+        ("maybe", TypeRef::option(TypeRef::String)),
+        ("list", TypeRef::vec(TypeRef::String)),
+        ("table", TypeRef::map(TypeRef::String, TypeRef::U8)),
+        ("priority", TypeRef::named("Priority")),
+        ("point", TypeRef::named("Point")),
+    ];
+    let mut s = schema();
+    s.records.push(record(
+        "Defaults",
+        kinds
+            .iter()
+            .map(|(name, ty)| field(name, ty.clone(), true))
+            .collect(),
+    ));
+    s.records.push(record(
+        "Point",
+        vec![
+            field("x", TypeRef::I32, false),
+            field("y", TypeRef::I32, false),
+        ],
+    ));
+    s.enums.push(enumeration(
+        "Priority",
+        false,
+        vec![
+            variant("Low", 0, vec![], false),
+            variant("High", 1, vec![], false),
+        ],
+    ));
+    let generator = undra_bindgen::Generator::for_crate("demo-core");
+    let file = |files: Vec<undra_bindgen::GeneratedFile>, suffix: &str| {
+        files
+            .into_iter()
+            .find(|f| f.path.ends_with(suffix))
+            .unwrap_or_else(|| panic!("no {suffix}"))
+            .contents
+    };
+    let swift = file(generator.swift(&s).expect("Swift generates"), "Types.swift");
+    let kotlin = file(generator.kotlin(&s).expect("Kotlin generates"), "Types.kt");
+    let ts = file(
+        generator.typescript(&s).expect("TypeScript generates"),
+        "types.ts",
+    );
+    let swift_init = initializer_lines(
+        &swift[swift.find("public struct Defaults").unwrap()..],
+        "public init(",
+        ") {",
+    );
+    let kotlin_init = initializer_lines(
+        &kotlin[kotlin.find("data class Defaults(").unwrap()..],
+        "data class Defaults(",
+        ") :",
+    );
+    let ts_members = initializer_lines(
+        &ts[ts.find("export interface Defaults").unwrap()..],
+        "{",
+        "}",
+    );
+    for (name, ty) in &kinds {
+        let expected = has_generated_default(ty);
+        let swift_line = swift_init
+            .iter()
+            .find(|l| l.starts_with(&format!("{name}:")))
+            .unwrap_or_else(|| panic!("no Swift parameter {name} in {swift_init:?}"));
+        let kotlin_line = kotlin_init
+            .iter()
+            .find(|l| l.starts_with(&format!("val {name}:")))
+            .unwrap_or_else(|| panic!("no Kotlin parameter {name} in {kotlin_init:?}"));
+        assert_eq!(swift_line.contains(" = "), expected, "Swift {swift_line}");
+        assert_eq!(
+            kotlin_line.contains(" = "),
+            expected,
+            "Kotlin {kotlin_line}"
+        );
+        let ts_line = ts_members
+            .iter()
+            .find(|l| l.starts_with(*name))
+            .unwrap_or_else(|| panic!("no TypeScript member {name} in {ts_members:?}"));
+        assert!(
+            ts_line.starts_with(&format!("{name}: ")),
+            "a TypeScript member is required, never `{name}?:`: {ts_line}"
+        );
+    }
 }
 
 #[test]
@@ -524,9 +710,13 @@ fn every_change_to_a_signature_is_breaking() {
         change(&|f| f.is_async = true),
         ["breaking  function add: now `async`"]
     );
+    // `Ctx` is not a parameter on the wire and no generator reads `takes_ctx`: every generated
+    // function takes the core the same way, so the change is the core's own business.
     assert_eq!(
         change(&|f| f.takes_ctx = true),
-        ["breaking  function add: now takes a `Ctx`"]
+        [
+            "additive  function add: now takes a `Ctx` (inside the core: no generated signature shows it)"
+        ]
     );
     assert_eq!(
         change(&|f| {
@@ -714,13 +904,19 @@ fn signals_follow_the_rules_of_a_store() {
         change(&|s| s[0].ty = TypeRef::Decimal),
         ["breaking  signal Ledger.balance: type changed from i64 to Decimal"]
     );
+    // Every signal is read-only on the platforms and a key only changes how a list's changes travel:
+    // the generated property is the same either way.
     assert_eq!(
         change(&|s| s[0].computed = true),
-        ["breaking  signal Ledger.balance: is now computed (read-only)"]
+        [
+            "additive  signal Ledger.balance: is now computed (the platforms read it as before: every signal is read-only there)"
+        ]
     );
     assert_eq!(
         change(&|s| s[0].key = Some("id".into())),
-        ["breaking  signal Ledger.balance: key changed from none to `id`"]
+        [
+            "additive  signal Ledger.balance: key changed from none to `id` (how its changes travel; the property is the same)"
+        ]
     );
     let flags = change(&|s| {
         s[0].no_coalesce = true;
@@ -751,7 +947,7 @@ fn with_port(p: PortDef) -> Schema {
 }
 
 #[test]
-fn a_port_the_app_must_implement_is_breaking_to_add_a_standard_one_is_not() {
+fn a_port_the_app_must_implement_is_breaking_to_add() {
     let mine = with_port(port("Biometrics", PortKind::Async, vec![]));
     let found = lines(&schema(), &mine);
     assert_eq!(found.len(), 1, "{found:?}");
@@ -759,16 +955,102 @@ fn a_port_the_app_must_implement_is_breaking_to_add_a_standard_one_is_not() {
         found[0].starts_with("breaking  port Biometrics: added (the app must supply an adapter"),
         "{found:?}"
     );
-    let standard = with_port(port("Kv", PortKind::Async, vec![]));
-    let found = lines(&schema(), &standard);
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert!(
-        found[0].starts_with("additive  port Kv: added (a standard port"),
-        "{found:?}"
-    );
     assert_eq!(
         lines(&mine, &schema()),
         ["breaking  port Biometrics: removed"]
+    );
+    // A port that only shares a standard name is the app's own (SPEC 10.5: standard means the same
+    // name, id and shape), so the app implements it like any other.
+    let named_like_kv = with_port(port("Kv", PortKind::Async, vec![]));
+    let found = lines(&schema(), &named_like_kv);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].starts_with("breaking  port Kv: added (the app must supply an adapter"),
+        "{found:?}"
+    );
+}
+
+/// The schema every core has: the standard library of `undra-ports`, all opt-in ports included
+/// (the golden schema of `undra-bindgen`'s stdlib case, which its tests pin to the registrations).
+fn standard_library() -> Schema {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../undra-bindgen/tests/golden/stdlib/schema.json");
+    Schema::from_json(&std::fs::read_to_string(&path).expect("the stdlib golden schema"))
+        .expect("it parses")
+}
+
+fn without_port(mut s: Schema, name: &str) -> Schema {
+    s.ports.retain(|p| p.name != name);
+    s
+}
+
+#[test]
+fn a_standard_port_is_additive_to_add_but_an_opt_in_one_needs_a_web_adapter() {
+    let full = standard_library();
+    // A port of SPEC 8 (here as an Undra upgrade would bring one): every runtime registers it.
+    let found = lines(&without_port(full.clone(), "Clock"), &full);
+    assert_eq!(
+        found,
+        [
+            "additive  port Clock: added (a standard port: the runtimes ship and register its adapter)"
+        ]
+    );
+    // An opt-in port of SPEC 8.1 (a core that enables `websocket`): Swift's and Kotlin's platform
+    // defaults register its adapter, a web app has to pass one in `LoadOptions.ports`.
+    let found = lines(&without_port(full.clone(), "WebSocket"), &full);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].starts_with("breaking  port WebSocket: added (an opt-in standard port")
+            && found[0].contains("LoadOptions.ports"),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn the_app_sends_an_event_port_so_adding_one_or_a_method_of_one_is_additive() {
+    // An event port is host to core: the bindings give the app `ConnectivityEvents` to call, and
+    // there is nothing to implement.
+    let base = || {
+        with_port(port(
+            "Presence",
+            PortKind::Event,
+            vec![method(
+                "Presence",
+                "joined",
+                vec![param("user", TypeRef::String)],
+                TypeRef::Unit,
+            )],
+        ))
+    };
+    let found = lines(&schema(), &base());
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0]
+            .starts_with("additive  port Presence: added (an event port: the app sends its events"),
+        "{found:?}"
+    );
+    let mut more = base();
+    more.ports[0]
+        .methods
+        .push(method("Presence", "left", vec![], TypeRef::Unit));
+    assert_eq!(
+        lines(&base(), &more),
+        ["additive  method Presence.left: added (fn left()); the app sends it when it has one"]
+    );
+    // What the app already sends is still a signature it calls.
+    assert_eq!(
+        lines(&more, &base()),
+        ["breaking  method Presence.left: removed (was fn left())"]
+    );
+    let mut retyped = base();
+    retyped.ports[0].methods[0].params[0].ty = TypeRef::Uuid;
+    assert_eq!(
+        lines(&base(), &retyped),
+        ["breaking  method Presence.joined: parameter `user`: type changed from String to Uuid"]
+    );
+    assert_eq!(
+        lines(&base(), &schema()),
+        ["breaking  port Presence: removed"]
     );
 }
 

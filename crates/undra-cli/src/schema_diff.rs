@@ -4,8 +4,9 @@
 //! versioned. [`diff`] compares two of them and returns one [`Change`] per thing an app can notice,
 //! each marked [`Severity::Breaking`] or [`Severity::Additive`] by the rules of `docs/SPEC.md` 2.6:
 //! the question a line answers is whether code written against the old bindings still compiles and
-//! means the same against the new ones. A removed or changed signature is breaking; an added
-//! function, method, store, object or record, or a field the author gave a default, is additive.
+//! means the same against the new ones, in every one of the three languages. A removed or changed
+//! signature is breaking; an added function, method, store, object or record is additive; an added
+//! record field is breaking even with a default, since a TypeScript object literal must name it.
 //!
 //! The comparison is by name, never by position in a list (every list of a schema is unordered but
 //! for the ones that are part of the wire layout), and the output order is fixed: types, objects and
@@ -18,7 +19,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use undra_bindgen::stdlib::is_standard_port_name;
+use undra_bindgen::stdlib;
 use undra_meta::{
     EnumDef, FieldDef, FunctionDef, GenericOf, MethodDef, ObjectDef, ParamDef, PortDef, PortKind,
     QueryDef, QueryKind, RecordDef, Schema, SignalDef, TypeRef, VariantDef,
@@ -403,8 +404,8 @@ fn param_changes(old: &[ParamDef], new: &[ParamDef]) -> Vec<String> {
     reasons
 }
 
-/// The breaking changes between two callables of one name: parameters, return type, `async`,
-/// `Ctx`, generic label.
+/// The changes between two callables of one name: parameters, return type, `async` and generic
+/// label are breaking; `Ctx` is additive (no generated signature shows it).
 fn callable_changes(out: &mut Out, noun: &'static str, path: &str, old: &Callable, new: &Callable) {
     for reason in param_changes(old.params, new.params) {
         out.breaking(noun, path, reason);
@@ -428,13 +429,15 @@ fn callable_changes(out: &mut Out, noun: &'static str, path: &str, old: &Callabl
         };
         out.breaking(noun, path, text);
     }
+    // `Ctx` is not a wire parameter (SPEC 2.2) and no generator reads `takes_ctx`: every generated
+    // callable takes the core the same way, so this is visible inside the core only.
     if old.takes_ctx != new.takes_ctx {
         let text = if new.takes_ctx {
-            "now takes a `Ctx`"
+            "now takes a `Ctx` (inside the core: no generated signature shows it)"
         } else {
-            "no longer takes a `Ctx`"
+            "no longer takes a `Ctx` (inside the core: no generated signature shows it)"
         };
-        out.breaking(noun, path, text);
+        out.additive(noun, path, text);
     }
     if old.generic != new.generic {
         let label = |g: Option<&GenericOf>| g.map_or_else(|| "none".to_owned(), GenericOf::name);
@@ -450,16 +453,26 @@ fn callable_changes(out: &mut Out, noun: &'static str, path: &str, old: &Callabl
     }
 }
 
+/// What a callable added to a list means for the app.
+#[derive(Clone, Copy)]
+enum Added {
+    /// One more thing it may call (a function, an object's method, an event port's method).
+    Plain,
+    /// One more thing it may call, and why that is worth saying.
+    Additive(&'static str),
+    /// Something it implements and must now add (a sync or async port's method, a callback's), and why.
+    Breaking(&'static str),
+}
+
 /// Compares the callables of two lists by name. `noun` names them; `path` is the owner (`Todos`) or
-/// empty for a free function; an added one is `additive` unless `added_breaks` says the app has to
-/// implement it (a port or callback method).
+/// empty for a free function; what an added one means is `added`.
 fn callables(
     out: &mut Out,
     noun: &'static str,
     owner: &str,
     old: &BTreeMap<&str, Callable>,
     new: &BTreeMap<&str, Callable>,
-    added_breaks: Option<&str>,
+    added: Added,
 ) {
     for name in union(old, new) {
         let path = if owner.is_empty() {
@@ -470,9 +483,10 @@ fn callables(
         match (old.get(name), new.get(name)) {
             (None, Some(n)) => {
                 let text = format!("added ({})", n.signature());
-                match added_breaks {
-                    Some(why) => out.breaking(noun, &path, format!("{text}; {why}")),
-                    None => out.additive(noun, &path, text),
+                match added {
+                    Added::Plain => out.additive(noun, &path, text),
+                    Added::Additive(why) => out.additive(noun, &path, format!("{text}; {why}")),
+                    Added::Breaking(why) => out.breaking(noun, &path, format!("{text}; {why}")),
                 }
             }
             (Some(o), None) => {
@@ -535,28 +549,77 @@ fn record(out: &mut Out, old: &RecordDef, new: &RecordDef) {
     fields(out, name, &old.fields, &new.fields);
 }
 
-/// The fields of a record, by name; `owner` is `Todo` (`Todo.due`) or `Status.Done` for a case.
+/// Whether the generated Swift initializer and Kotlin constructor give a `#[undra(default)]` field
+/// of type `t` a default value: they spell the zero of a primitive, a string, bytes, a time, a
+/// UUID, a decimal, an optional and a collection, and nothing for a record or an enum (Rust's
+/// `Default` of a named type is not something they can know). TypeScript never does: a record is
+/// an interface whose every member is required. A test generates all three and checks this.
+fn has_generated_default(t: &TypeRef) -> bool {
+    matches!(
+        t,
+        TypeRef::Bool
+            | TypeRef::I8
+            | TypeRef::I16
+            | TypeRef::I32
+            | TypeRef::I64
+            | TypeRef::U8
+            | TypeRef::U16
+            | TypeRef::U32
+            | TypeRef::U64
+            | TypeRef::F32
+            | TypeRef::F64
+            | TypeRef::String
+            | TypeRef::Bytes
+            | TypeRef::Duration
+            | TypeRef::Timestamp
+            | TypeRef::Uuid
+            | TypeRef::Decimal
+            | TypeRef::Option(_)
+            | TypeRef::Vec(_)
+            | TypeRef::Map(..)
+    )
+}
+
+/// The fields of the record `owner`, by name (a case's payload is compared whole, in `case`).
+///
+/// A field added is breaking whatever its default: a TypeScript record is an interface, and an
+/// object literal that builds one must name every member. The text says why for the other two: a
+/// field without a default (or with one no initializer can spell) is required by Swift and Kotlin
+/// too, and one inserted before an existing field shifts Kotlin's positional arguments and
+/// `componentN` destructuring.
 fn fields(out: &mut Out, owner: &str, old: &[FieldDef], new: &[FieldDef]) {
     let (old_by, new_by) = (by_name(old, |f| &f.name), by_name(new, |f| &f.name));
     // The new definition's order first (it is what a reader sees), then what only the old one had.
-    for f in new {
+    for (at, f) in new.iter().enumerate() {
         let path = format!("{owner}.{}", f.name);
-        match old_by.get(f.name.as_str()) {
-            None if f.default => out.additive(
-                "field",
-                &path,
-                format!("added ({}, with a default)", ty(&f.ty)),
-            ),
-            None => out.breaking(
-                "field",
-                &path,
-                format!(
-                    "added without a default ({}): everything that builds a `{owner}` must supply it",
-                    ty(&f.ty)
+        let Some(o) = old_by.get(f.name.as_str()) else {
+            let shown = ty(&f.ty);
+            // The first field of the old definition that now comes after this one, if any.
+            let before = new[at + 1..]
+                .iter()
+                .find(|g| old_by.contains_key(g.name.as_str()));
+            let text = match (f.default && has_generated_default(&f.ty), before) {
+                _ if !f.default => format!(
+                    "added without a default ({shown}): everything that builds a `{owner}` must supply it"
                 ),
-            ),
-            Some(o) => field(out, &path, o, f),
-        }
+                (false, _) => format!(
+                    "added ({shown}, with a default no generated initializer spells): everything that builds a \
+                     `{owner}` must supply it"
+                ),
+                (true, Some(next)) => format!(
+                    "added ({shown}, with a default) before `{}`: Kotlin's positional arguments and destructuring \
+                     of a `{owner}` shift, and a TypeScript object literal that builds one must name it",
+                    next.name
+                ),
+                (true, None) => format!(
+                    "added ({shown}, with a default): Swift and Kotlin initializers default it, but a TypeScript \
+                     object literal that builds a `{owner}` must name it"
+                ),
+            };
+            out.breaking("field", &path, text);
+            continue;
+        };
+        field(out, &path, o, f);
     }
     for f in old {
         if !new_by.contains_key(f.name.as_str()) {
@@ -597,7 +660,15 @@ fn field(out: &mut Out, path: &str, old: &FieldDef, new: &FieldDef) {
     }
     match (old.default, new.default) {
         (false, true) => out.additive("field", path, "gained a default"),
-        (true, false) => out.breaking("field", path, "lost its default"),
+        // Only an initializer that spelled the default can lose it.
+        (true, false) if has_generated_default(&old.ty) => {
+            out.breaking("field", path, "lost its default");
+        }
+        (true, false) => out.additive(
+            "field",
+            path,
+            "lost its default (no generated initializer spelled it)",
+        ),
         _ => {}
     }
 }
@@ -729,7 +800,7 @@ fn object(out: &mut Out, old: &ObjectDef, new: &ObjectDef) {
             name,
             &method_callables(old_list),
             &method_callables(new_list),
-            None,
+            Added::Plain,
         );
     }
     if let (Some(o), Some(n)) = (&old.store, &new.store) {
@@ -798,23 +869,29 @@ fn signal(out: &mut Out, path: &str, old: &SignalDef, new: &SignalDef) {
             format!("type changed from {} to {}", ty(&old.ty), ty(&new.ty)),
         );
     }
+    // Every signal is a read-only property on the platforms, computed or not, and a key only decides
+    // whether a list's changes arrive as keyed patches: the generated declaration is the same.
     if old.computed != new.computed {
         let text = if new.computed {
-            "is now computed (read-only)"
+            "is now computed (the platforms read it as before: every signal is read-only there)"
         } else {
-            "is no longer computed"
+            "is no longer computed (the platforms read it as before: every signal is read-only there)"
         };
-        out.breaking("signal", path, text);
+        out.additive("signal", path, text);
     }
     if old.key != new.key {
         let key = |k: &Option<String>| {
             k.as_ref()
                 .map_or_else(|| "none".to_owned(), |k| format!("`{k}`"))
         };
-        out.breaking(
+        out.additive(
             "signal",
             path,
-            format!("key changed from {} to {}", key(&old.key), key(&new.key)),
+            format!(
+                "key changed from {} to {} (how its changes travel; the property is the same)",
+                key(&old.key),
+                key(&new.key)
+            ),
         );
     }
     if old.no_coalesce != new.no_coalesce {
@@ -851,7 +928,7 @@ fn functions(out: &mut Out, old: &Schema, new: &Schema) {
         "",
         &function_callables(&old.functions),
         &function_callables(&new.functions),
-        None,
+        Added::Plain,
     );
 }
 
@@ -866,14 +943,27 @@ fn kind_text(kind: PortKind) -> &'static str {
     }
 }
 
-/// Ports (`callbacks` false) or callback interfaces (`callbacks` true): both are traits the app
-/// implements, so a change to their methods breaks the implementer.
+/// Ports (`callbacks` false) or callback interfaces (`callbacks` true). The app implements a
+/// callback and a sync or async port, so a method added to one breaks the implementer; it calls an
+/// event port (the generated `<Port>Events` sends host-to-core events), so there a method added is
+/// one more thing it may send.
+///
+/// A standard port (SPEC 8, exactly as `undra-ports` declares it: the same test the generators use
+/// to leave it out, `stdlib::covered`) is implemented by the runtimes, and every runtime registers
+/// the ones of SPEC 8 by default; the opt-in ones of 8.1 a web app registers itself
+/// (`LoadOptions.ports`), so a core that enables one needs the web app to change.
 fn ports(out: &mut Out, old: &Schema, new: &Schema, callbacks: bool) {
     let is_callback = |p: &PortDef| p.kind == PortKind::Callback;
     let (old_by, new_by) = (
         by_name(&old.ports, |p| &p.name),
         by_name(&new.ports, |p| &p.name),
     );
+    let standard = stdlib::covered(new).ports;
+    let opt_in = |name: &str| {
+        stdlib::PORTS[stdlib::CORE_PORT_COUNT..]
+            .iter()
+            .any(|p| p.name == name)
+    };
     for name in union(&old_by, &new_by) {
         let (o, n) = (old_by.get(name), new_by.get(name));
         // An item belongs to the group of its new kind (its old one when it is gone); one that
@@ -888,10 +978,21 @@ fn ports(out: &mut Out, old: &Schema, new: &Schema, callbacks: bool) {
         let noun = if callbacks { "callback" } else { "port" };
         match (o, n) {
             (None, Some(_)) if callbacks => out.additive(noun, name, "added"),
-            (None, Some(_)) if is_standard_port_name(name) => out.additive(
+            (None, Some(_)) if standard.contains(name) && opt_in(name) => out.breaking(
                 noun,
                 name,
-                "added (a standard port: the runtimes ship its adapter)",
+                "added (an opt-in standard port: the Swift and Kotlin platform defaults register its adapter, \
+                 a web app must pass one in `LoadOptions.ports` or its calls fail as unavailable)",
+            ),
+            (None, Some(_)) if standard.contains(name) => out.additive(
+                noun,
+                name,
+                "added (a standard port: the runtimes ship and register its adapter)",
+            ),
+            (None, Some(n)) if n.kind == PortKind::Event => out.additive(
+                noun,
+                name,
+                "added (an event port: the app sends its events when it has them, and implements nothing)",
             ),
             (None, Some(_)) => out.breaking(
                 noun,
@@ -925,13 +1026,19 @@ fn port(out: &mut Out, noun: &'static str, name: &str, old: &PortDef, new: &Port
         };
         out.additive(noun, name, text);
     }
+    // The app implements a sync, async or callback port's methods and calls an event port's.
+    let added = if new.kind == PortKind::Event {
+        Added::Additive("the app sends it when it has one")
+    } else {
+        Added::Breaking("the app implements it, so its implementation must add it")
+    };
     callables(
         out,
         "method",
         name,
         &method_callables(&old.methods),
         &method_callables(&new.methods),
-        Some("the app implements it, so its implementation must add it"),
+        added,
     );
     let old_by = by_name(&old.methods, |m| &m.name);
     for m in &new.methods {
