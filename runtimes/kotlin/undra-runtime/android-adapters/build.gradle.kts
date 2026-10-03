@@ -30,9 +30,16 @@ android {
         // the file system and the Keystore are Android's own). They live in src/sharedTest.
         getByName("test").java.srcDir("src/sharedTest/kotlin")
         getByName("androidTest").java.srcDir("src/sharedTest/kotlin")
-        // FaultyFileSystem (a file system that fails on demand, ADR-049), shared with :runtime's tests.
+        // FaultyFileSystem (a file system that fails on demand, ADR-049), the Suite runner and the realtime test server shared with
+        // :runtime's tests.
         getByName("test").java.srcDir("../test-support/kotlin")
         getByName("androidTest").java.srcDir("../test-support/kotlin")
+        // The contracts every adapter of the Kotlin runtime meets (the Http one, the loopback server it runs against, RecordingCore):
+        // written once here and run again by :okhttp-adapters on the app's OkHttpClient (ADR-060).
+        getByName("test").java.srcDir("../adapter-contracts/kotlin")
+        getByName("androidTest").java.srcDir("../adapter-contracts/kotlin")
+        // What needs the instrumentation registry: the realtime contract's device half (the realtime server on the host).
+        getByName("androidTest").java.srcDir("../adapter-contracts/device")
     }
 
     testOptions {

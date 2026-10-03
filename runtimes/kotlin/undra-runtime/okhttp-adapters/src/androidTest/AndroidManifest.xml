@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The tests talk to loopback servers over http:// and ws:// (Android 9 blocks cleartext unless the app allows it). -->
+    <application android:usesCleartextTraffic="true" />
+
+</manifest>

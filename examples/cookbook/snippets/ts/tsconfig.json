@@ -18,6 +18,7 @@
     "paths": {
       "@cookbook/core": ["../../generated/ts/src/index.ts"],
       "@undra/runtime": ["../../../../runtimes/ts/@undra/runtime/src/index.ts"],
+      "@undra/runtime/realtime": ["../../../../runtimes/ts/@undra/runtime/src/realtime.ts"],
       "@undra/runtime/react": ["../../../../runtimes/ts/@undra/runtime/src/react.ts"],
       "react": ["../../../../runtimes/ts/@undra/runtime/node_modules/@types/react"],
       "react/jsx-runtime": ["../../../../runtimes/ts/@undra/runtime/node_modules/@types/react/jsx-runtime"]

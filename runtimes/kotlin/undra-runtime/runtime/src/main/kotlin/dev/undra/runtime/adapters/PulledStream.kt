@@ -1,5 +1,6 @@
 package dev.undra.runtime.adapters
 
+import dev.undra.runtime.UndraEmbeddingApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -172,12 +173,17 @@ internal class PulledStream<T : Any>(
 }
 
 /**
- * A connection of a default adapter whose reader thread can read ahead of its lazy flow: the binding tells it how many
+ * A connection of an adapter whose reader thread can read ahead of its lazy flow: the binding tells it how many
  * more items its buffer can take ([setRoom]), and the reader reads while fewer than that wait in the connection, so the
  * items in the connection and in the binding's buffer together stay within the window (ADR-047 §3) without a thread
  * hand-off per item. Without a binding (the flow collected directly) the room is one item: plainly lazy.
+ *
+ * Public for adapter authors (the default adapters and the OkHttp ones implement it, ADR-060): implement it on the
+ * [WebSocketConnection] or [SseStream] your adapter returns and the binding uses it. It is part of the embedding API: it may
+ * change between releases.
  */
-internal interface ReadAheadSource {
+@UndraEmbeddingApi
+public interface ReadAheadSource {
     /** The binding's buffer can take [room] more items (`Int.MAX_VALUE` once the binding closed it: stop waiting). */
-    fun setRoom(room: Int)
+    public fun setRoom(room: Int)
 }

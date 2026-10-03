@@ -12,6 +12,8 @@ import {
   createNote,
   outbox,
 } from "@cookbook/core";
+import { browserAdapters, fetchHttp } from "@undra/runtime";
+import { OptInPortIds, type WebSocketConstructorLike, browserWebSocket, fetchSse, ssePort, webSocketPort } from "@undra/runtime/realtime";
 import { useSignal } from "@undra/runtime/react";
 import type { ReactElement } from "react";
 
@@ -92,4 +94,29 @@ export async function notesScreen() {
   const waiting = (await outbox()).pending;               // "2 changes waiting to sync"
   return waiting;
 }
+// docs:end
+
+// scaffolding
+declare const session: { readonly accessToken: string; refresh(): Promise<void> };
+declare const AppWebSocket: WebSocketConstructorLike;
+
+// docs:begin network-ts
+// The app's fetch: a token on every request, a refresh when the server says 401. The core's requests go through it too.
+const appFetch: typeof fetch = async (input, init) => {
+  const send = () => {
+    const headers = new Headers(init?.headers);
+    headers.set("authorization", `Bearer ${session.accessToken}`);
+    return fetch(input, { ...init, headers });
+  };
+  const first = await send();
+  if (first.status !== 401) return first;
+  await session.refresh();
+  return send();
+};
+
+export const adapters = { ...browserAdapters(), http: fetchHttp({ fetch: appFetch }) };
+export const ports = {
+  [OptInPortIds.WebSocket.portId]: webSocketPort(browserWebSocket({ WebSocket: AppWebSocket })),
+  [OptInPortIds.Sse.portId]: ssePort(fetchSse({ fetch: appFetch })),
+};
 // docs:end

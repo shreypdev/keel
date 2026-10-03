@@ -35,7 +35,8 @@
       { "file": "cookbook/forms.html", "title": "Forms" },
       { "file": "cookbook/upload.html", "title": "File upload" },
       { "file": "cookbook/realtime.html", "title": "Real-time" },
-      { "file": "cookbook/offline.html", "title": "Offline-first" }
+      { "file": "cookbook/offline.html", "title": "Offline-first" },
+      { "file": "cookbook/network-stack.html", "title": "Your network stack" }
     ] },
     { "title": "Adopting Undra", "pages": [
       { "file": "cookbook/from-kmp.html", "title": "From Kotlin Multiplatform", "pager": "Cookbook, from Kotlin Multiplatform" },

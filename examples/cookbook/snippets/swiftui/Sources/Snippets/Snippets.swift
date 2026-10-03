@@ -3,6 +3,7 @@
 // makes the lines compile (`../../check.sh`).
 import CookbookCore
 import SwiftUI
+import UndraRuntime
 
 // MARK: scaffolding
 
@@ -110,5 +111,37 @@ struct UploadsView: View {
 
     let waiting = try outbox().pending                    // "2 changes waiting to sync"
     _ = waiting
+}
+// docs:end
+
+// MARK: network
+
+// docs:begin network-swift
+/// The app's session delegate: pinning and authentication challenges are answered here, for every request the core makes.
+final class AppSessionDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge
+    ) async -> (URLSession.AuthChallengeDisposition, URLCredential?) {
+        // Your pinning goes here: compare challenge.protectionSpace.serverTrust with the certificate you ship.
+        return (.performDefaultHandling, nil)
+    }
+}
+
+/// The ports that carry the core's traffic, over the app's own session. Event streams get a session of their own, with the
+/// same delegate and a configuration that lets a stream stay quiet.
+func appAdapters(configuration: URLSessionConfiguration, delegate: AppSessionDelegate) -> Adapters {
+    configuration.httpAdditionalHeaders = ["X-App-Version": "1.4.2"]   // on everything the core sends
+    let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+
+    let streaming = (configuration.copy() as? URLSessionConfiguration) ?? .default
+    streaming.timeoutIntervalForRequest = 24 * 60 * 60
+    streaming.httpMaximumConnectionsPerHost = 1_024
+    let streams = URLSession(configuration: streaming, delegate: delegate, delegateQueue: nil)
+
+    return Adapters.platformDefault
+        .replacing(HttpAdapter(session: session))
+        .replacing(URLSessionWebSocketAdapter(session: session))
+        .replacing(URLSessionSseAdapter(session: streams))
 }
 // docs:end

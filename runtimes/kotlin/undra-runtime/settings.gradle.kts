@@ -12,6 +12,9 @@
 //   :android-work      the optional WorkManager module (ADR-046): UndraWorker + UndraWork run the core's background
 //                      tasks in a window the OS grants. Its own module because WorkManager is a dependency
 //                      :runtime and :android-adapters must not carry; included under the same condition.
+//   :okhttp-adapters   the optional OkHttp module (ADR-060): the Http, WebSocket and Sse ports over the app's own OkHttpClient, so its
+//                      interceptors, authenticator, event listeners and certificate pinner apply to the core's traffic. Its own module
+//                      because OkHttp is a dependency :runtime and :android-adapters must not carry; included under the same condition.
 
 pluginManagement {
     repositories {
@@ -50,4 +53,5 @@ if (androidSdk() != null) {
     include(":android-adapters")
     include(":undra-compose")
     include(":android-work")
+    include(":okhttp-adapters")
 }

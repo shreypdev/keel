@@ -79,7 +79,8 @@ MAIN_SRC="$HERE/runtime/src/main/kotlin"
 TEST_SRC="$HERE/runtime/src/test/kotlin"
 KIT_SRC="$HERE/testkit/src/main/kotlin"
 KIT_TEST_SRC="$HERE/testkit/src/test/kotlin"
-# Test support shared with android-adapters' tests (FaultyFileSystem), compiled into the test build.
+# Test support shared with the Android modules' tests, compiled into the test build: FaultyFileSystem, the Suite runner and its
+# assertions, the realtime test server and the RealtimeAdapterContract that runs against every WebSocket and Sse adapter (ADR-060).
 SUPPORT_SRC="$HERE/test-support/kotlin"
 GOLDEN_SRC="$REPO/crates/undra-bindgen/tests/golden/full/kotlin/src/main/kotlin"
 GOLDEN_RUN="$REPO/crates/undra-bindgen/tests/fixtures/kotlin-run/full"
@@ -115,7 +116,7 @@ phase_check() {
       echo "error: $name extends Suite but TestMain.kt does not run it" >&2
       missing=1
     fi
-  done < <(grep -rhoE 'class [A-Za-z0-9_]+ : Suite\(\)' "$TEST_SRC" | awk '{print $2}')
+  done < <(grep -rhoE 'class [A-Za-z0-9_]+ : (Suite\(\)|RealtimeAdapterContract\()' "$TEST_SRC" | awk '{print $2}')
   [ "$missing" = "0" ] || exit 1
   local kit_main="$KIT_TEST_SRC/dev/undra/testkit/TestMain.kt"
   while read -r name; do
