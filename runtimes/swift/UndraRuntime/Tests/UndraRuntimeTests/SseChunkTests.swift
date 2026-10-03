@@ -344,6 +344,60 @@ final class SseChunkBackpressureTests: XCTestCase {
         XCTAssertEqual(control.calls.last, .resume)
     }
 
+    /// A `URLSessionTask` counts its suspends (each needs its own resume), so the stream must never suspend a task it suspended
+    /// already nor resume one it did not suspend. Over a seeded run of chunks of any size (some ending inside an event) and pulls
+    /// of any number, the calls alternate suspend, resume, suspend; after each step the task is suspended exactly when as many
+    /// events wait as the room allows; every event arrives in order; and `close` leaves as many resumes as suspends.
+    func testSuspendsAndResumesAlternateAndBalanceOverASeededRun() async throws {
+        var seed: UInt64 = 0x5EED_0000_2026_1002
+        func next(_ bound: Int) -> Int {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return Int((seed >> 33) % UInt64(bound + 1))
+        }
+        let room = 4
+        let control = RecordingControl()
+        let stream = URLSessionSseStream(lastEventId: nil, room: room, control: control)
+        var iterator = stream.events.makeAsyncIterator()
+        let body = eventBytes(0 ..< 600)
+        var sent = 0
+        var completed = 0
+        var seen: [SseEvent] = []
+        while sent < body.count {
+            if next(2) > 0 {
+                // A chunk of 0 to 120 bytes: from nothing to several events, cut anywhere.
+                let end = min(body.count, sent + next(120))
+                stream.receive(Data(body[sent ..< end]))
+                sent = end
+                completed = String(decoding: body[..<sent], as: UTF8.self).components(separatedBy: "\n\n").count - 1
+            } else {
+                // Pull some of what waits (never more, so no pull waits).
+                for _ in 0 ..< next(completed - seen.count) {
+                    if let event = try await iterator.next() {
+                        seen.append(event)
+                    }
+                }
+            }
+            let waiting = completed - seen.count
+            XCTAssertEqual(stream.isSuspended, waiting >= room, "after \(sent) bytes and \(seen.count) pulls, \(waiting) waiting")
+            for (index, call) in control.calls.enumerated() {
+                XCTAssertEqual(call, index % 2 == 0 ? .suspend : .resume, "call \(index) of \(control.calls)")
+            }
+        }
+        while seen.count < completed {
+            if let event = try await iterator.next() {
+                seen.append(event)
+            }
+        }
+        XCTAssertEqual(seen, expectedEvents(0 ..< 600), "every event, in order")
+        XCTAssertFalse(stream.isSuspended)
+        stream.receive(Data(eventBytes(600 ..< 610)))
+        XCTAssertTrue(stream.isSuspended)
+        await stream.close()
+        let calls = control.calls
+        XCTAssertEqual(calls.filter { $0 == .suspend }.count, calls.filter { $0 == .resume }.count, "\(calls.suffix(4))")
+        XCTAssertEqual(calls.suffix(3), [.suspend, .cancel, .resume])
+    }
+
     /// Closing a suspended stream cancels the request and resumes it, so a cancelled task that stays suspended cannot hold the
     /// connection (the server must see the client leave), and wakes the pull that waits.
     func testCloseCancelsAndResumesASuspendedTaskAndWakesThePull() async throws {
