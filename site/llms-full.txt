@@ -4604,107 +4604,131 @@ Source: https://shreypdev.github.io/undra/roadmap/
 
 Roadmap
 
-# What is shipped, in flight and next.
+# What is shipped, and what comes next.
 
-Undra v1 was finished on 30 September 2026, and the v1.x work since is merged on main; the first tag, v1.0.0, is still to cut. This page follows the project's working record, [.10x/handoff.md](https://github.com/shreypdev/undra/blob/main/.10x/handoff.md), and changes with it. Last updated 2 Oct 2026.
-
-Shipped
-
-## v1.0
-
-30 Sep 2026
-
-The framework you can build on today.
-
-- Records, enums, typed errors, objectsEvery public type comes from the schema and arrives in each language as that language would write it.
-- Stores, signals, computeds, keyed listsReactive state in the core; list changes cross as O(change) patches.
-- Ten ports with adapters and fakesHttp, Kv, SecureStore, Fs, Clock, Rng, Log, Timer, Connectivity and Lifecycle, with platform adapters and deterministic Rust fakes.
-- Queries and mutationsStaleness, dedup, retry, optimistic rollback, an offline queue and persistence.
-- Streams and cancellationStreams with backpressure; cancelling a call drops its future.
-- Snapshot and restoreStores snapshot for crash recovery.
-- Schema-hash gateChecked at load and at build; a mismatched UI and core refuse to talk.
-- undra devA live core over a WebSocket, rebuilt on save.
-- Teaching diagnosticsEvery macro error says what, why and how to fix it.
-- 17 contract scenarios on 3 platformsThe same wire-level scenarios run against the real core on Swift, Kotlin and TypeScript: 51 of 51 pass.
-- Adversarial reviews of every core crateSignals, runtime, macros and ffi were each reviewed by someone who did not write them.
+Shipped is what is on `main`. Next, Later and Exploring come only from what the repository records as planned or open: plans, not promises. This page follows the project's working record, [.10x/status.md](https://github.com/shreypdev/undra/blob/main/.10x/status.md), and changes with it. Last updated 3 Oct 2026.
 
 Shipped
 
-## Since v1.0
+## In 1.0
 
-30 Sep – 2 Oct 2026
+on main
 
-Landed in the two days after v1.0; the record of each piece is in the repository.
+What you can build on today, grouped. Each line has its page in the docs and its decision record in the repository.
 
-- The contract grid, grown to every featureThirty-five scenarios run against the real core, 101 of 101 cells passing at the last merge (the web-only two on TypeScript alone).
-- Frame-coalesced delivery (ADR-031)The platform mirrors merge queued change-set entries once per frame, bound their backlog and re-observe on overflow; keyed-list firehoses cost ~10x less per frame on the web. Contract scenario S18 proves a 1,000-transaction burst applies in one drain on all three platforms.
-- Harsh-conditions benchmark suite and the live stress screenFirehose, event firehose, keyed churn, fan-out, stream backpressure, concurrent completions and a soak, with CI budgets that pass on the GitHub runner; the playground's stress screen shows the same numbers live in your browser.
-- Swift error channel (ADR-032)Generated Swift never traps: calls throw the method's own error, CancellationError or UndraCallError; commands report through onError.
-- A schema loader that survives dead-stripping (ADR-029)The loaded host core keeps its schema and JNI exports whatever else touched the target directory.
-- The name (ADR-030) and the wire magic (ADR-033)Keel became Undra before anything was published; the envelope's magic bytes read UNDR.
-- Measured on devicesThe benchmark rows come from the playground's bench hooks on the iPhone simulator, the Android emulator and Chromium, labelled as such; real-device rows the moment hardware is attached.
-- Android remote mode and auto-reconnect (ADR-051)The Kotlin runtime has the WebSocket transport; all three runtimes reconnect with backoff and resume a session after a rebuild, with the status visible in the app.
-- Every macro error teaches44 codes, each with what, why, fix and a link, each with a compile-fail test; the error-codes page regenerates from the catalogue.
-- The whole schema in undra_schema_json (ADR-050)The dlopen route keeps doc comments, and the Swift Port types are public, so custom ports need no fallback.
-- One error channel on every platform (ADR-032)Kotlin and TypeScript calls fail with the same closed UndraCallError set as Swift; commands report instead of throwing; a lost connection is state, not an error event.
-- No manual build stepA Gradle task, an Xcode build phase and a Vite plugin run undra build; undra init emits CI; undra upgrade moves a project in lockstep; undra doctor names every fix.
-- The web bundle under its budget (ADR-052)The hello-world core ships under its 120 KB gzipped budget, measured and gated in CI, and the JavaScript a page loads up front has a gate of its own; the numbers on this site come from the record.
-- State-preserving reload (ADR-053)undra dev snapshots the old core and restores into the rebuilt one; the dev bar says whether the state was kept, and why not when it was not.
-- Derived keyed lists (ADR-039)A filtered, sorted view over a 10,000-row list costs what changed: one row edit is 158 bytes on the wire where it was 353 KB.
-- Devtools (ADR-054)A page served by undra dev: live stores, a change-set timeline with time travel, port and query logs, counters; behind a per-run token.
-- Persisted-state migrations and typed storage (ADR-037, ADR-049)A changed schema still restores what the last version stored; storage ports fail with typed errors on every platform; a crashed web core restarts from its last snapshot.
-- A testing kit for apps (ADR-055)Previews run the real core in process with scripted ports and a manual clock; a session recorded once with undra dev --record replays deterministically in tests on every platform.
-- WebSocket, SSE and Db ports (ADR-047, ADR-048)Real-time streams with the core's credit as backpressure, and SQL over SQLite on every platform with the same deterministic fake; opt-in, so nothing grows for apps that do not use them.
-- Objects as parameters, host callbacks (ADR-040, ADR-041)Generated classes cross the boundary as themselves, one wrapper per handle; the core calls back into app code through typed callback interfaces that never unwind into it.
-- Production operations (ADR-046)Every contained panic becomes a structured report the app receives with symbolicable frames; background runs drain the queue under a deadline; release builds keep symbols beside the binary and undra symbolicate reads them.
-- Newtypes, generics, Decimal; paged and lazy lists; polling (ADR-042, ADR-043)The boundary types a production app reaches for, each read as native on every platform; a lazy list pages 10,000 rows from the core on demand; polling pauses when the app does.
-- A runtime ends when its owner lets go (ADR-034)Tasks hold a WeakCtx; off-core writes are refused in every build (ADR-035); a panicking computed poisons only itself; stream errors are typed on the wire (ADR-036).
-- Real Android adaptersKv, SecureStore, Fs, Http, Connectivity and Lifecycle backed by the platform, installed with one call.
-- React Native (ADR-038)@undra/react-native: a TurboModule over the C ABI under the same TypeScript mirror, for teams that keep React Native for the UI.
-- Migration guidesFrom Kotlin Multiplatform and from UniFFI, a cookbook of recipes, and Fieldbook, a production-shaped sample beyond the playground.
-- Several cores in one app (ADR-044)Each core is a self-contained image with one namespaced entry point, so two Undra libraries share a process without sharing anything, storage included.
-- iOS 15 and 16 (ADR-045)A lower deployment target generates ObservableObject stores and the iOS 17 output is unchanged; the mode is proven by compilation and a runtime probe on iOS 26.5, not yet on an iOS 15 or 16 runtime.
-- Generic functions, objects and stores (ADR-058)A function lists the types it crosses for and arrives as overloads; a generic object or store is a template, and each alias is an ordinary class with its own type id. Instantiations are declared, not open-ended; native generics, and generic queries, ports and callbacks, are not there.
-- The web call path (ADR-056)A generated TypeScript call went from 3.2–3.5 µs to 0.47–0.68 µs in headless Chromium, and React Native's mirror work at 100,000 updates a second from about 22 ms to about 5 ms a frame on the iPhone simulator.
-- Query handles across a reload (ADR-059)A query handle keeps working on the same handle across an undra dev reload, a devtools time travel, a web crash restart and an app's own restore, with no app code for the handle.
-- The JavaScript runtime at 16 KB (ADR-057)What a hello-world page loads up front of @undra/runtime went from 22.1 KB to 15.8 KB gzipped without removing behaviour: what a page cannot run or has not asked for loads with the thing that needs it, the production build says error codes with a link where the development build says sentences, and the page that uses every feature loads less than before.
+### Core and bindings
 
-Now
+- **Records, enums and typed errors**From one schema, written as each language writes them.
+- **Stores, signals and computeds**Reactive state in the core; one change-set per transaction.
+- **Keyed and derived lists (ADR-039)**A filtered view of 10,000 rows sends 158 bytes for one edit, not 353 KB.
+- **Objects and host callbacks (ADR-040, ADR-041)**Classes cross as themselves; the core calls back through typed interfaces.
+- **Newtypes, Decimal, generic types (ADR-042)**Read as native types on every platform.
+- **Generic functions, objects and stores (ADR-058)**Declared instantiations arrive as overloads and ordinary classes.
+- **One error channel (ADR-032)**Calls fail with a typed error; generated Swift never traps.
+- **Several cores in one app (ADR-044)**Each core is self-contained, storage included.
 
-## Open items
+### Platforms
 
-owed
+- **SwiftUI, Compose and React**Plus Vue, Svelte and Solid adapters for the web runtime.
+- **React Native (ADR-038)**A TurboModule over the C ABI under the same TypeScript mirror.
+- **iOS 15 and 16 (ADR-045)**ObservableObject stores below iOS 17; proven by compilation and a probe on iOS 26.5.
+- **No manual build step**A Gradle task, an Xcode build phase and a Vite plugin run undra build.
+- **Bazel rules (ADR-061)**undra_core and undra_bindings, hermetic and offline; JVM, Node and Swift tested.
 
-Built and merged, with these still open; each is a known limit that the default-choice post and the docs name too.
+### Data
 
-- Rows from physical devicesThe device benchmarks run on the iPhone simulator, the Android emulator and headless Chromium, and are labelled so; rows from real phones are owed, and no device target is claimed as met.
-- Android module tests in CIThe undra-compose and android-adapters tests pass locally and on the emulator but do not run in CI yet.
+- **Queries and mutations**Staleness, dedup, retry and optimistic updates with rollback.
+- **Offline queue and persistence**Queued writes replay on reconnect and survive a restart.
+- **Paged and lazy lists, polling (ADR-043)**A lazy list pages 10,000 rows on demand; polling pauses with the app.
+- **Migrations and typed storage (ADR-037, ADR-049)**A changed schema still restores what the last version stored.
+- **Snapshot, restore and web recovery**A crashed web core restarts from its last snapshot.
+
+### Ports
+
+- **Ten ports, with adapters and fakes**Http, Kv, SecureStore, Fs, Clock, Rng, Log, Timer, Connectivity, Lifecycle.
+- **WebSocket, SSE and Db (ADR-047, ADR-048)**Streams with backpressure, and SQL over SQLite, each with a deterministic fake.
+- **Your own network stack (ADR-060)**OkHttp, URLSession and fetch as the app configured them.
+- **Android adapters**Backed by the platform, installed with one call.
+
+### Dev loop and tooling
+
+- **State-preserving reload (ADR-053, ADR-059)**undra dev rebuilds on save and keeps the state and query handles.
+- **Devtools (ADR-054)**Live stores, a change-set timeline with time travel, port and query logs.
+- **undra schema diff (ADR-062)**Each API change marked breaking or additive, for review and CI.
+- **init, doctor and upgrade**A project with CI, every missing tool with its fix, pins moved in one step.
+- **Teaching diagnostics**Every macro error says what, why and how to fix it.
+- **Reconnect everywhere (ADR-051)**Apps on all three platforms reconnect to undra dev by themselves.
+
+### Testing
+
+- **A testing kit for apps (ADR-055)**Previews on the real core; recorded sessions replay in tests.
+- **The contract grid**The same scenarios against the real core on Swift, Kotlin and TypeScript, every cell passing.
+- **Adversarial reviews**Every core crate and every feature, reviewed by someone who did not write it.
+
+### Size and speed
+
+- **The JavaScript runtime at 16 KB (ADR-057)**What a page loads up front went from 22.1 KB to 15.8 KB gzipped.
+- **The web core under 120 KB (ADR-052)**The hello-world wasm, measured and gated in CI.
+- **Native size profile and gates (ADR-052)**Release builds tuned for size; opt_level chooses smaller or faster.
+- **The web call path (ADR-056)**A generated TypeScript call went from 3.2–3.5 µs to 0.47–0.68 µs.
+- **Frame-coalesced delivery (ADR-031)**Each mirror applies what arrived once per frame.
+- **Harsh-conditions benchmarks**Firehose, churn, fan-out, backpressure and a soak, with CI gates.
+
+### Production
+
+- **Panic reports and symbols (ADR-046)**A contained panic reaches the app with frames undra symbolicate reads.
+- **Background runs (ADR-046)**The offline queue drains under the OS's deadline.
+- **A runtime ends when its owner lets go (ADR-034)**Off-core writes are refused; a panicking computed poisons only itself.
+
+### Docs and samples
+
+- **Cookbook and migration guides**Recipes, and the way over from Kotlin Multiplatform and UniFFI.
+- **Fieldbook**A production-shaped sample beyond the playground.
+- **API reference**Swift, Kotlin and TypeScript from the generated code; Rust from rustdoc.
 
 Next
 
-## Release and reach
+## Planned next
 
-planned
+recorded as open
 
-Needs a release, an account or a decision rather than more code; the order may change.
+Each of these is recorded as open in the repository, with the work done around it. A plan, not a promise; the order may change.
 
-- The v1.0.0 release channelsbrew, npm and the curl installer go live with the first tagged release, which needs the npm organisation, the Homebrew tap and the tag, all the maintainer's to create; the pipeline is built, reviewed and proved by a green dry run.
-- crates.io and Maven CentralPublish the crates under a registry-safe prefix (its own ADR) and the Kotlin runtime without a local build.
+- Benchmarks on physical phonesEvery device row so far is from a simulator, an emulator or headless Chromium. Real-phone rows next, then budgets for them and a CI job.
+- The Swift package and Maven CentralPublish the Swift and Kotlin runtimes, so the iOS and Android apps undra init makes build without a checkout of Undra. crates.io follows, under a registry-safe prefix.
+- Android modules tested in CIundra-compose, android-adapters and android-work pass locally and on the emulator; an emulator job in CI runs them.
+- Android under Bazel, verifiedThe rules declare Android; a build and a test run prove it.
+- Byte-reproducible undra buildToday the same core built in two directories differs, because cargo hashes the absolute path into crate names.
+- The examples on schema diffCommit each example's schema.json, so the repository reviews its own API changes the way it asks apps to.
+- Cancelled port calls reach the platformA cancelled call is abandoned in the core today while the platform's request runs on. Its own decision record first.
+- Your network stack, proved furtherCertificate pinning through OkHttp end to end, a build against OkHttp 5, and the iOS WebSocket adapter refusing a background session as the SSE adapter does.
+- Smaller Android librariesRelocation packing saves about 3%, once a load test on API 23 passes.
 - Windows CLIRelease binaries and docs for the undra command on Windows.
-- Flutter and DartNot started: decided after React Native, which has shipped.
-- A custom domainA home for the site and docs that is ours.
+- A custom domainA home for the site and docs that is the project's own.
 
 Later
 
-## Horizon
+## Later
 
-exploring
+approved, not started
 
-Directions under consideration, not scheduled.
+Decided in direction and waiting their turn.
 
-- Desktop targetsmacOS, Windows and Linux over the same C ABI.
-- A sync engineA separate package, not part of the core.
-- Compose Multiplatform interopUse an Undra core under a Compose Multiplatform UI.
+- Dart and Flutter bindingsA fourth host after React Native, which proved the pattern. Not started.
+- Desktop as a first-class targetCompose Desktop and macOS samples built in CI over the runtimes that exist; Windows and Linux over the same C ABI.
+- Xcode 27The Swift test target was reported not to build on Xcode 27. This Mac and CI run Xcode 26; it is fixed once it reproduces.
+
+Exploring
+
+## Exploring
+
+ideas, not scheduled
+
+Questions the project is asking, not plans.
+
+- A GraphQL storyUndra has no GraphQL layer; an app built around Apollo keeps Apollo on the platform side.
+- A sync engineIf it comes, a separate package, not part of the core.
+- Compose Multiplatform interopAn Undra core under a Compose Multiplatform UI.
 
 Not planned
 

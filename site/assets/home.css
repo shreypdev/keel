@@ -1,10 +1,10 @@
-/* Undra site, landing page. v1's arc with less text: hero, thesis, live demo, numbers, how it works (code collapsed),
-   features, receipts, principles, compared, roadmap, final call to action. */
+/* Undra site, landing page: hero with the diagram, live demo, numbers, how it works (code collapsed), receipts,
+   why Undra, what is still open, start. The design reasoning is .10x/specs/2026-10-03-launch-site-design.md. */
 .section { padding: clamp(64px, 9vw, 112px) 0 0; position: relative; }
 .kicker { display: inline-flex; align-items: center; gap: 10px; font: 500 .74rem/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
 .kicker::before { content: ""; width: 22px; height: 1px; background: var(--accent); }
 .h2 { font-size: clamp(2rem, 4.6vw, 3.25rem); margin: 14px 0 0; max-width: 26ch; letter-spacing: -.03em; line-height: 1.08; }
-.h2 em, .hero h1 em, .thesis p.big em { font-style: normal; color: var(--accent); }
+.h2 em, .hero h1 em { font-style: normal; color: var(--accent); }
 .section .lede { font-size: clamp(1.02rem, 1.4vw, 1.15rem); max-width: 58ch; margin: 16px 0 0; }
 .fine { margin: 22px 0 0; font-size: .85rem; line-height: 1.6; color: var(--text-3); }
 .fine a { color: var(--text-2); }
@@ -17,10 +17,7 @@
 .hero { padding-top: clamp(44px, 7vw, 88px); overflow: clip; position: relative; }
 .hero::before { content: ""; position: absolute; inset: -140px 0 auto 0; height: 720px; pointer-events: none; background: radial-gradient(60% 55% at 78% 8%, var(--glow), transparent 70%), radial-gradient(40% 40% at 8% 30%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%); }
 .hero > .wrap { position: relative; }
-.hero .eyebrow { display: inline-flex; align-items: center; gap: 10px; margin: 0; padding: 6px 13px 6px 10px; border: 1px solid var(--line-strong); border-radius: 999px; font: 400 .82rem/1.4 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--text-2); background: color-mix(in srgb, var(--surface) 70%, transparent); text-decoration: none; }
-.hero .eyebrow i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
-.hero .eyebrow:hover { color: var(--text); border-color: var(--text-3); }
-.hero h1 { font-size: clamp(2.7rem, 8.4vw, 6.6rem); margin-top: 24px; letter-spacing: -.035em; line-height: 1.02; }
+.hero h1 { font-size: clamp(2.7rem, 8.4vw, 6.6rem); margin-top: 0; letter-spacing: -.035em; line-height: 1.02; }
 .hero h1 span, .hero h1 em { display: block; }
 @media (min-width: 440px) { .hero h1 span, .hero h1 em { white-space: nowrap; } }
 .hero-grid { display: grid; gap: 28px; margin-top: clamp(26px, 4vw, 44px); grid-template-columns: minmax(0, 1fr); align-items: center; }
@@ -37,16 +34,6 @@
 .cmd code::-webkit-scrollbar { display: none; }
 .cmd code::before { content: "$ "; color: var(--accent); user-select: none; }
 .cmd .copy { height: 32px; padding: 0 10px; border-color: var(--line); background: var(--surface); }
-/* what is new since v1: one row of short links under the call to action */
-.whatsnew { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; margin-top: clamp(26px, 4vw, 40px); padding: 13px 0; border-block: 1px solid var(--line); font: 400 .84rem/1.5 var(--font-body); }
-.whatsnew .wn-k { color: var(--accent); font: 500 .72rem/1.5 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
-.whatsnew a { color: var(--text-2); text-decoration: none; transition: color .15s; }
-.whatsnew a:hover { color: var(--text); text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 3px; }
-.whatsnew .wn-more { color: var(--accent); }
-.whatsnew .wn-more::after { content: " →"; }
-.whatsnew a:not(.wn-more) + .wn-more { margin-left: auto; }
-@media (max-width: 599px) { .whatsnew a:not(.wn-more) + .wn-more { margin-left: 0; } }
-.install-note { margin: 10px 2px 0; font: 400 .78rem/1.5 var(--font-mono); color: var(--text-3); }
 
 /* the stage (hero diagram, driven by hero.js) */
 .stage-wrap { margin-top: clamp(40px, 6vw, 72px); }
@@ -132,9 +119,6 @@
 .legend i::before { counter-increment: l; content: counter(l); }
 .legend i { flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font: 700 .7rem/1 var(--font-body); display: grid; place-items: center; transform: translateY(-1px); }
 
-/* thesis */
-.thesis { padding: clamp(56px, 8vw, 96px) 0 0; }
-.thesis p.big { margin: 0; max-width: 24ch; font: 600 clamp(1.9rem, 4.2vw, 3.1rem)/1.1 var(--font-body); letter-spacing: -.03em; color: var(--text); text-wrap: balance; }
 
 /* live demo */
 .live { display: grid; gap: 20px; margin-top: 36px; grid-template-columns: minmax(0, 1fr); }
@@ -194,16 +178,6 @@ html:not(.js) .live-fallback > span { display: none; }
 .panel .code { margin: 0; border: 0; border-radius: 0; }
 .panel .code pre { font-size: clamp(.76rem, 1.2vw, .86rem); padding: 20px 22px; }
 
-/* features: one line each */
-.feats { display: grid; gap: 12px; margin-top: 36px; grid-template-columns: minmax(0, 1fr); }
-@media (min-width: 560px) { .feats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (min-width: 1040px) { .feats { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-.feat { display: grid; grid-template-columns: 38px 1fr; gap: 2px 14px; align-items: center; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); text-decoration: none; transition: border-color .2s, background .2s; }
-.feat:hover { border-color: var(--accent-line); background: var(--surface-2); }
-.feat .ic { grid-row: span 2; width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent); }
-.feat .ic svg { width: 19px; height: 19px; }
-.feat b { font-weight: 600; color: var(--text); font-size: .98rem; }
-.feat > span:last-child { font-size: .86rem; color: var(--text-3); line-height: 1.4; }
 
 /* receipts */
 .trust { display: grid; gap: 14px; margin-top: 36px; grid-template-columns: minmax(0, 1fr); }
@@ -231,19 +205,11 @@ html:not(.js) .live-fallback > span { display: none; }
   .reveal-ready .in .gridcells i:not(.na) { opacity: .85; transition-delay: calc(var(--i) * 18ms); }
 }
 .rev-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 8px; }
-.rev-list li::after { content: "✓"; grid-column: 2; grid-row: 1; justify-self: end; color: var(--ok); font: 600 .8rem/1 var(--font-mono); }
+.rev-list li::after { content: "✓"; grid-column: 2; grid-row: 1; justify-self: end; color: var(--accent); font: 600 .8rem/1 var(--font-mono); }
 .rev-list li span { grid-column: 2; grid-row: 1; margin-right: 22px; }
 .rev-list li { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: .9rem; color: var(--text); }
 .rev-list li span { color: var(--text-3); font: 400 .72rem/1 var(--font-mono); text-align: right; }
 
-/* principles */
-.rules { counter-reset: r; display: grid; gap: 1px; margin-top: 36px; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--line); }
-@media (min-width: 720px) { .rules { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (min-width: 1040px) { .rules { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-.rule { display: grid; grid-template-columns: 38px 1fr; gap: 10px; align-items: baseline; padding: 16px 18px; background: var(--surface); text-decoration: none; transition: background .2s; }
-.rule:hover { background: var(--surface-2); }
-.rule::before { counter-increment: r; content: "R" counter(r); font: 400 .78rem/1 var(--font-mono); color: var(--accent); }
-.rule b { color: var(--text); font-weight: 500; font-size: .95rem; }
 
 /* compared, roadmap */
 .cards4 { display: grid; gap: 12px; margin-top: 32px; grid-template-columns: minmax(0, 1fr); }
@@ -257,8 +223,8 @@ html:not(.js) .live-fallback > span { display: none; }
 .card:hover .go i { transform: translateX(3px); }
 .now3 { list-style: none; margin: 32px 0 0; padding: 0; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 800px) { .now3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-.now3 li { display: flex; align-items: center; gap: 14px; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--text); font-size: .97rem; }
-.st { flex: none; padding: 3px 9px; border-radius: 999px; font: 500 .68rem/1.4 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-line); }
+.now3 a { display: flex; align-items: center; gap: 14px; height: 100%; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--text); font-size: .97rem; text-decoration: none; transition: border-color .2s, background .2s; }
+.now3 a:hover { border-color: var(--accent-line); background: var(--surface-2); }
 
 /* final call to action */
 .final { padding-top: clamp(72px, 10vw, 128px); }
@@ -266,5 +232,22 @@ html:not(.js) .live-fallback > span { display: none; }
 .final-card h2 { font-size: clamp(2.1rem, 5vw, 3.6rem); max-width: 16ch; margin-inline: auto; }
 .final-card .install { max-width: 620px; margin: 28px auto 0; }
 .final-card .install .tabs-head { justify-content: center; }
-.final-card .install-note { text-align: center; }
 .final-card .cta-row { justify-content: center; }
+.final-card .then { max-width: 620px; margin: 14px auto 0; }
+.final-card .then pre { font-size: .84rem; }
+
+/* the comparison block: three cards on wide screens */
+@media (min-width: 1040px) { .cards3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.harsh { margin-top: 28px; }
+.harsh > .stats { margin-top: 18px; }
+
+/* the diagram answers a tap: each screen is a button once hero.js runs (it says so in the stage head) */
+html:not(.js) .tap-hint { display: none; }
+.tap-hint { color: var(--text-3); }
+.dg-live [data-node] { cursor: pointer; outline: none; }
+.dg-live [data-node]:hover .frame { stroke: var(--accent-line); }
+.dg-live [data-node]:focus-visible .frame { stroke: var(--accent); stroke-width: 2.4; }
+.dg .t-meas { fill: var(--text-2); }
+.dg a:hover .t-meas { text-decoration: underline; }
+.dg .t-meas .on { fill: var(--accent); }
+.dg.is-static .t-meas tspan { fill: var(--accent); }

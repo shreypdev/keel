@@ -54,7 +54,7 @@ Undra is open source (MIT OR Apache-2.0) and ships an `undra` CLI (`undra init`,
 
 ## Roadmap
 
-- [Undra roadmap: shipped, now, next and later](https://shreypdev.github.io/undra/roadmap/): The Undra roadmap: what shipped in v1.0, what is in flight for v1.x, what is planned next and what is on the horizon. Updated with the project record.
+- [Undra roadmap: shipped, next, later and exploring](https://shreypdev.github.io/undra/roadmap/): The Undra roadmap: what is in 1.0, what is planned next and later, and what is only being explored. Updated with the project record.
 
 ## Blog
 

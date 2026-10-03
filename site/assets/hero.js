@@ -3,7 +3,11 @@
    8-second loop: a write leaves one UI, crosses the boundary once, the core commits one
    change-set, and it fans out to every local mirror. The origin rotates through the UIs
    (the [data-node] groups: SwiftUI, Compose, React, React Native), one per loop.
-   Under prefers-reduced-motion the labelled still diagram stays put; the button starts it. */
+   Each screen is a button: a tap (or Enter) makes the next write leave that screen, and the measured
+   costs in the core (a core call, a change-set, filled from bench.json at build time) light up as the
+   write crosses and the change-set is built.
+   Under prefers-reduced-motion the labelled still diagram stays put; the button starts it, and a tap
+   shows the moment the change has reached every screen, without motion. */
 (function () {
   "use strict";
   const stage = document.querySelector("[data-stage]");
@@ -32,7 +36,7 @@
     const k = svg.classList.contains("dg-narrow") ? 0.72 : 1;
     const gp = q("[data-role=pulses]");
     const by = parseFloat(svg.getAttribute("data-by"));
-    const rig = { svg, k, nodes: [], chips: {}, cells: [], write: [], change: [], rings: [], commit: null, coreGlow: q("[data-role=core-glow]") };
+    const rig = { svg, k, nodes: [], chips: {}, cells: [], write: [], change: [], rings: [], commit: null, coreGlow: q("[data-role=core-glow]"), mCall: q("[data-role=m-call]"), mCs: q("[data-role=m-cs]") };
 
     const count = svg.querySelectorAll("[data-node]").length;
     for (let i = 0; i < count; i++) {
@@ -105,7 +109,7 @@
   const setOp = (node, v) => { if (node) node.style.opacity = v.toFixed(3); };
 
   function frame(rig, T) {
-    const loop = Math.floor(T / LOOP), t = T - loop * LOOP, origin = loop % rig.nodes.length, k = rig.k;
+    const count = rig.nodes.length, loop = Math.floor(T / LOOP), t = T - loop * LOOP, origin = ((loop % count) + count) % count, k = rig.k;
 
     // 1. the write
     const wH = ease(win(t, 0.7, 2.2)), wD = win(t, 2.2, 2.6);
@@ -150,6 +154,12 @@
       if (n.badge.textContent !== txt) n.badge.textContent = txt;
     });
 
+    // the measured costs: the call as the write crosses, the change-set while it is built
+    const setOn = (node, on) => { if (node && node.classList.contains("on") !== on) node.classList.toggle("on", on); };
+    const wp = rig.write[origin];
+    setOn(rig.mCall, t >= wp.tc - 0.15 && t < 3.0);
+    setOn(rig.mCs, t >= 3.05 && t < 4.6);
+
     // steps under the stage
     const on = t >= 0.3 && t < 2.4 ? 0 : t >= 2.4 && t < 4.9 ? 1 : t >= 4.9 && t < 7.4 ? 2 : -1;
     steps.forEach((li, i) => li.classList.toggle("on", i === on));
@@ -167,7 +177,8 @@
   function tick(now) {
     raf = 0;
     if (!playing || !inView) return;
-    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    // rAF can stamp a frame a hair before the performance.now() that play() took: never step backwards.
+    const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now;
     T += dt;
     frame(ensureRig(), T);
     raf = requestAnimationFrame(tick);
@@ -184,6 +195,24 @@
     if (toggle) { toggle.setAttribute("aria-pressed", "true"); toggle.querySelector("span").textContent = started ? "Play" : "Play animation"; }
   }
   if (toggle) toggle.addEventListener("click", () => (playing ? pause() : play()));
+  // A tap on a screen: the next write leaves from it. With reduced motion, jump to the moment every screen has the change.
+  function tap(i) {
+    if (reduce && !playing) { stage.seek(i * LOOP + 5.3); return; }
+    T = i * LOOP + 0.2;
+    if (!playing) play();
+  }
+  stage.querySelectorAll("svg.dg").forEach((svg) => {
+    const titles = Array.from(svg.querySelectorAll("[data-node] .t-title"));
+    svg.classList.add("dg-live");
+    svg.setAttribute("role", "group");
+    svg.querySelectorAll("[data-node]").forEach((g, i) => {
+      g.setAttribute("tabindex", "0");
+      g.setAttribute("role", "button");
+      g.setAttribute("aria-label", "Write from " + (titles[i] ? titles[i].textContent : "this screen"));
+      g.addEventListener("click", () => tap(i));
+      g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(i); } });
+    });
+  });
   // Scrub to a moment of the loop (seconds). Used by the pause button's neighbours and for checking frames.
   stage.seek = (sec) => { pause(); if (!started) { started = true; stage.querySelectorAll("svg.dg").forEach((s) => s.classList.remove("is-static")); } T = sec; frame(ensureRig(), T); };
   mqNarrow.addEventListener("change", () => { if (started) { ensureRig(); frame(rig, T); } });
