@@ -20,8 +20,16 @@ import Foundation
 /// It is also the `Sse` adapter of ``Adapters/platformDefault`` (served by the binding of
 /// ``SsePortAdapter``).
 ///
-/// The `session`'s delegate queue must be serial, which is what URLSession makes of the queue
-/// it creates itself (the default session's, and any session made without one).
+/// Each stream is its data task's own delegate (`URLSessionTask.delegate`) for the response, the
+/// body and the end only; URLSession forwards every other callback to the `session`'s delegate, so
+/// an app's session keeps its certificate pinning (`urlSession(_:didReceive:completionHandler:)`
+/// or the task-level challenge), its HTTP authentication, its redirects and its metrics on event
+/// streams (`SseSessionDelegateTests`).
+///
+/// The chunks are parsed on the `session`'s delegate queue, which must be serial, as Apple asks of
+/// any delegate queue and as URLSession makes the queue it creates itself (the default session's,
+/// and any session made without one). Give the adapter a session whose queue is not the main one,
+/// or the main thread parses the event streams.
 public final class URLSessionSseAdapter: SseAdapter, UndraAdapter, @unchecked Sendable {
     private let session: URLSession
     private let bindings = BindingSet<SseBinding>()
