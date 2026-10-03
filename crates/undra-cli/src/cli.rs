@@ -438,13 +438,14 @@ NO schema.json YET
         long_about = "Builds the core as a host library, loads it and writes its schema as JSON, every type and every small definition on one \
 line so a changed field is one changed line: the same document `undra bindgen` generates from, without the doc comments unless you ask for them (so fixing a comment is not an API change). Commit the file; a \
 pull request then shows the API change as a few lines of JSON, `undra schema diff --against <base>` says what they mean, and \
-a CI step `undra schema export -o schema.json && git diff --exit-code schema.json` keeps it as current as `undra bindgen --check` \
-keeps the bindings. Without -o the JSON goes to stdout.",
+a CI step `undra schema export --check` keeps it as current as `undra bindgen --check` keeps the bindings (it builds the \
+core and fails when the file is not what it would write). Without -o the JSON goes to stdout.",
         after_long_help = "\
 EXAMPLES
     undra schema export -o schema.json           write the schema to schema.json
     undra schema export > schema.json            the same through the shell
-    undra schema export --docs -o docs/schema.json    with the doc comments"
+    undra schema export --docs -o docs/schema.json    with the doc comments
+    undra schema export --check                  fail when schema.json is not the core's schema (CI)"
     )]
     Export(SchemaExportArgs),
 }
@@ -479,6 +480,11 @@ pub struct SchemaExportArgs {
     /// Extract the schema from a release build of the core.
     #[arg(long)]
     pub release: bool,
+
+    /// Write nothing: fail when the file (-o, or `schema.json` in the project directory) is not
+    /// exactly what this command would write (for CI, as `undra bindgen --check` is for the bindings).
+    #[arg(long)]
+    pub check: bool,
 }
 
 /// Arguments of `undra build`.
@@ -835,7 +841,15 @@ mod tests {
             panic!("not schema export")
         };
         assert_eq!(args.output, Some(PathBuf::from("schema.json")));
-        assert!(args.docs && !args.release);
+        assert!(args.docs && !args.release && !args.check);
+        let cli = Cli::try_parse_from(["undra", "schema", "export", "--check"]).unwrap();
+        let Command::Schema(SchemaArgs {
+            command: SchemaCommand::Export(args),
+        }) = cli.command
+        else {
+            panic!("not schema export")
+        };
+        assert!(args.check && args.output.is_none());
         assert!(
             Cli::try_parse_from(["undra", "schema"]).is_err(),
             "a subcommand is needed"

@@ -3,10 +3,11 @@
 
 use std::path::{Path, PathBuf};
 
+use undra_bindgen::provenance;
 use undra_meta::Schema;
 
 use crate::cli::{SchemaArgs, SchemaCommand, SchemaDiffArgs, SchemaExportArgs};
-use crate::error::{CliError, Result};
+use crate::error::{CliError, Code, Result};
 use crate::fsutil;
 use crate::project::Project;
 use crate::schema::parse_schema_json;
@@ -60,19 +61,63 @@ pub fn run_diff(env: &Env<'_>, args: &SchemaDiffArgs) -> Result<bool> {
     for line in report.lines() {
         ui.line(line);
     }
-    Ok(!(args.exit_code && diff.has_breaking()))
+    // The file is what was compared and nothing was built, so a file nobody exported again after
+    // an API change makes a report that is not the API change. The bindings beside it say which
+    // schema they were generated from; where the two disagree, say so.
+    let mut stale_now = false;
+    if let Some(check) = &sides.bindings {
+        if let Some(hash) = check.now
+            && hash != new.hash()
+        {
+            stale_now = true;
+            ui.warn(&format!(
+                "{file} (schema {:#018x}) is not the schema the bindings in {dir} were generated from \
+                 (schema {hash:#018x}): one of them is stale, so this report is not the API change; \
+                 `undra schema export -o {file}` (and `undra bindgen`) bring both up to date",
+                new.hash(),
+                file = sides.new_label,
+                dir = check.dir,
+            ));
+        }
+        if let Some(hash) = check.then
+            && hash != old.hash()
+        {
+            ui.warn(&format!(
+                "at {git_ref}, {file} (schema {:#018x}) is not the schema of the bindings committed beside it \
+                 (schema {hash:#018x}): it was not exported there, so this report also counts changes made \
+                 before {git_ref}, or misses them",
+                old.hash(),
+                git_ref = check.git_ref,
+                file = sides.new_label,
+            ));
+        }
+    }
+    Ok(!(args.exit_code && (diff.has_breaking() || stale_now)))
 }
 
-/// Runs `undra schema export`: builds the core, reads its schema and writes it.
+/// Runs `undra schema export`: builds the core, reads its schema and writes it, or with `--check`
+/// compares it with the file instead.
 ///
 /// # Errors
 ///
-/// `C0001` outside a project, `C0004`/`C0006` when the core cannot be built or its schema read, and
-/// `C0010` when the file cannot be written.
+/// `C0001` outside a project, `C0004`/`C0006` when the core cannot be built or its schema read,
+/// `C0010` when the file cannot be written, and with `--check` `C0007` when the file is not what
+/// the export would write.
 pub fn run_export(env: &Env<'_>, args: &SchemaExportArgs) -> Result<()> {
     let session = env.session()?;
     let schema = super::bindgen::schema_from_core(&session, args.release, args.docs)?;
     let text = crate::schema_file::render(&schema);
+    if args.check {
+        let start = env.start_dir()?;
+        let (path, shown) = match &args.output {
+            Some(path) => (resolve(&start, path), path.display().to_string()),
+            None => (
+                session.project.root.join(DEFAULT_FILE),
+                DEFAULT_FILE.to_owned(),
+            ),
+        };
+        return check_export(env, &path, &shown, &text, &schema, args.docs);
+    }
     match &args.output {
         Some(path) => {
             let path = resolve(&env.start_dir()?, path);
@@ -89,6 +134,63 @@ pub fn run_export(env: &Env<'_>, args: &SchemaExportArgs) -> Result<()> {
     Ok(())
 }
 
+/// `undra schema export --check`: the file at `path` is exactly `text`, what the export would write.
+///
+/// # Errors
+///
+/// `C0007` when it is not (another schema, the same one written with other flags, a hand edit) or
+/// is not there, as `undra bindgen --check` reports bindings that are out of date.
+fn check_export(
+    env: &Env<'_>,
+    path: &Path,
+    shown: &str,
+    text: &str,
+    schema: &Schema,
+    docs: bool,
+) -> Result<()> {
+    let export = format!(
+        "undra schema export -o {shown}{}",
+        if docs { " --docs" } else { "" }
+    );
+    let Ok(found) = std::fs::read_to_string(path) else {
+        return Err(CliError::new(
+            Code::Bindgen,
+            format!("{shown} does not exist"),
+            "`--check` compares the committed schema file with the core's schema, and there is no file to compare",
+            format!("run `{export}` and commit the file"),
+        ));
+    };
+    if found == text {
+        env.ui.line(&format!(
+            "{shown} is up to date (schema hash {:#018x}).",
+            schema.hash()
+        ));
+        return Ok(());
+    }
+    // Say whether the API moved or only the text did (flags, a hand edit, an older `undra`).
+    let detail = match parse_schema_json(&found, &schema.crate_name) {
+        Ok(committed) if committed.hash() == schema.hash() => format!(
+            "  the file has the core's API (schema {:#018x}) in other text: exported with other flags \
+             (`--docs` keeps the doc comments), by another `undra`, or edited by hand",
+            schema.hash()
+        ),
+        Ok(committed) => format!(
+            "  {shown}: schema {:#018x}\n  the core: schema {:#018x}",
+            committed.hash(),
+            schema.hash()
+        ),
+        Err(_) => format!("  {shown} is not a schema file"),
+    };
+    Err(CliError::new(
+        Code::Bindgen,
+        format!("{shown} is not the schema of the core"),
+        "the file is what `undra schema diff --against` reads and what a review sees, and it was exported before the \
+         core's public API last changed (or with other flags, or edited by hand)",
+        format!("run `{export}` and commit the file"),
+    )
+    .with_detail(detail))
+}
+
 /// The two schemas of a comparison, as text, with the words that name them.
 #[derive(Debug)]
 struct Sides {
@@ -96,6 +198,73 @@ struct Sides {
     old_label: String,
     new_text: String,
     new_label: String,
+    /// With `--against` in a project that commits its bindings: the schema hashes they carry.
+    bindings: Option<BindingsCheck>,
+}
+
+/// The schema hashes the project's generated bindings carry in their headers
+/// (`undra_bindgen::provenance::schema_hash_in`), in the working tree and at the ref: what a schema
+/// file that was exported when the bindings were generated has too.
+#[derive(Debug)]
+struct BindingsCheck {
+    /// The bindings' directory as shown (`generated/`).
+    dir: String,
+    /// The ref of `--against`.
+    git_ref: String,
+    /// The working tree's bindings' hash, when there are bindings.
+    now: Option<u64>,
+    /// The hash of the bindings committed at the ref, when it has them.
+    then: Option<u64>,
+}
+
+/// Whether a manifest entry is a Swift, Kotlin or TypeScript source, whose first line names the
+/// schema hash (`Package.swift` does not depend on the schema and has none).
+fn is_bindings_source(path: &str) -> bool {
+    (path.ends_with(".swift") && !path.ends_with("Package.swift"))
+        || path.ends_with(".kt")
+        || path.ends_with(".ts")
+}
+
+/// The schema hash of a tree of bindings, `read` giving the text of a path relative to its
+/// directory: the manifest `undra bindgen` writes (`.undra-generated`) names the files, and the
+/// first source among them names the hash. `None` without a manifest or a header with a hash.
+fn bindings_hash(read: impl Fn(&str) -> Option<String>) -> Option<u64> {
+    let manifest = read(crate::bindgen::MANIFEST)?;
+    manifest
+        .lines()
+        .map(str::trim)
+        .filter(|p| is_bindings_source(p))
+        // The first source has the header; a tree of an older generator has none in any, so a few
+        // reads are enough to tell.
+        .take(3)
+        .find_map(|p| read(p).as_deref().and_then(provenance::schema_hash_in))
+}
+
+/// The bindings of the project that holds `file`, in the working tree and as committed at `git_ref`
+/// (`git show <ref>:./<generated>/..` from the project's directory). `None` outside a project, or
+/// when neither has bindings: then there is nothing to compare the file with.
+fn bindings_check(sys: &dyn Sys, git: &Path, file: &Path, git_ref: &str) -> Option<BindingsCheck> {
+    let project = Project::discover(file.parent()?).ok()?;
+    let generated = project.config.generated.trim_end_matches('/').to_owned();
+    let dir = project.generated_dir();
+    let now = bindings_hash(|rel| std::fs::read_to_string(dir.join(rel)).ok());
+    let root = project.root.to_str()?;
+    let then = if Path::new(&generated).is_absolute() {
+        None
+    } else {
+        bindings_hash(|rel| {
+            let object = format!("{git_ref}:./{generated}/{rel}");
+            sys.run(git, &["-C", root, "show", &object], &[])
+                .filter(|out| out.success)
+                .map(|out| out.stdout)
+        })
+    };
+    (now.is_some() || then.is_some()).then(|| BindingsCheck {
+        dir: format!("{generated}/"),
+        git_ref: git_ref.to_owned(),
+        now,
+        then,
+    })
 }
 
 /// `path` as the command sees it: relative paths are relative to where `-C` (or the shell) says.
@@ -127,6 +296,7 @@ fn two_files(start: &Path, files: &[PathBuf]) -> Result<Sides> {
         old_label: old.display().to_string(),
         new_text: read(&new_path)?,
         new_label: new.display().to_string(),
+        bindings: None,
     })
 }
 
@@ -149,16 +319,31 @@ fn against(env: &Env<'_>, start: &Path, git_ref: &str, files: &[PathBuf]) -> Res
     };
     let new_text = read(&file)?;
     let old_text = schema_at_ref(env.sys, &file, git_ref)?;
+    // Relative to where the command runs: the default file is found through the canonical project
+    // root, so a relative or symlinked `-C` is compared in its canonical form too.
+    let canonical_start = start.canonicalize().ok();
     let shown = file
         .strip_prefix(start)
+        .ok()
+        .or_else(|| {
+            canonical_start
+                .as_deref()
+                .and_then(|s| file.strip_prefix(s).ok())
+        })
         .unwrap_or(&file)
         .display()
         .to_string();
+    // `schema_at_ref` found git, or it would have failed.
+    let bindings = env
+        .sys
+        .which("git", &[])
+        .and_then(|git| bindings_check(env.sys, &git, &file, git_ref));
     Ok(Sides {
         old_text,
         old_label: format!("{git_ref}:{shown}"),
         new_text,
         new_label: shown,
+        bindings,
     })
 }
 

@@ -569,6 +569,115 @@ fn the_default_file_is_schema_json_in_the_project_even_below_the_repository_root
     assert!(text.starts_with("Public API: HEAD:schema.json "), "{text}");
 }
 
+/// `undra schema diff --against HEAD` in `project` (the repository is its parent directory).
+fn against_head(project: &common::Project, extra: &[&str]) -> std::process::Output {
+    undra_in(project.dir.path())
+        .arg("-C")
+        .arg(&project.root)
+        .args(["schema", "diff", "--against", "HEAD"])
+        .args(extra)
+        .output()
+        .unwrap()
+}
+
+/// `schema.json` in `project` set to `schema`, and, when `bindings` says so, the bindings
+/// regenerated from it (`undra bindgen --schema`: nothing is built).
+fn set_schema(project: &common::Project, schema: &Path, bindings: bool) {
+    std::fs::copy(schema, project.root.join("schema.json")).unwrap();
+    if bindings {
+        run_ok(project.undra().args(["bindgen", "--schema"]).arg(schema));
+    }
+}
+
+#[test]
+fn a_schema_file_the_bindings_disagree_with_is_called_stale_at_either_end() {
+    // The file is what `--against` reads, and nothing is built: a file nobody re-exported after an
+    // API change would make the report say "No changes". The bindings beside it carry the hash of
+    // the schema they were generated from (and `undra bindgen --check` keeps them honest in CI), so
+    // the command compares the two, in the working tree and at the ref.
+    if common::skip_unless(has_tool("git", "--version"), "git is not installed") {
+        return;
+    }
+    let (old, new) = fixtures();
+    let project = init_project("against-stale", "web");
+    let repo = project.dir.path();
+    git(repo, &["init", "-q"]);
+    set_schema(&project, &old, true);
+    git(repo, &["add", "-A"]);
+    git(
+        repo,
+        &[
+            "commit",
+            "-q",
+            "-m",
+            "v1: the schema file and the bindings agree",
+        ],
+    );
+
+    // Both ends agree with their bindings: the report and nothing else.
+    set_schema(&project, &new, true);
+    let out = against_head(&project, &[]);
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    assert!(out.status.success(), "{stderr}");
+    assert!(stdout.contains("7 breaking, 6 additive."), "{stdout}");
+    assert!(!stderr.contains("warning"), "{stderr}");
+
+    // The API changed and the bindings followed, but the file was not exported again: the report
+    // has nothing to say, and the command says why that is not the answer.
+    set_schema(&project, &old, false);
+    let out = against_head(&project, &[]);
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    assert!(out.status.success(), "{stderr}");
+    assert!(stdout.contains("No changes"), "{stdout}");
+    let new_hash = format!("{:#018x}", read_schema(&new).hash());
+    assert!(
+        stderr.contains("warning: schema.json (schema 0x")
+            && stderr.contains("is not the schema the bindings in generated/ were generated from")
+            && stderr.contains(&new_hash)
+            && stderr.contains("undra schema export -o schema.json"),
+        "{stderr}"
+    );
+    // As a gate it fails: a stale file proves nothing.
+    let gated = against_head(&project, &["--exit-code"]);
+    assert_eq!(gated.status.code(), Some(1), "{gated:?}");
+
+    // Committed like that, the ref is the stale end: the file there is behind its own bindings, so
+    // the report counts changes from before the ref too. The working tree is right again.
+    git(repo, &["add", "-A"]);
+    git(
+        repo,
+        &[
+            "commit",
+            "-q",
+            "-m",
+            "v2: the bindings moved and the file did not",
+        ],
+    );
+    set_schema(&project, &new, false);
+    let out = against_head(&project, &[]);
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    assert!(stdout.contains("7 breaking, 6 additive."), "{stdout}");
+    assert!(
+        stderr.contains("warning: at HEAD, schema.json (schema 0x")
+            && stderr.contains("is not the schema of the bindings committed beside it")
+            && stderr.contains(&new_hash),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("is not the schema the bindings in generated/"),
+        "the working tree agrees: {stderr}"
+    );
+}
+
 #[test]
 fn a_ref_without_the_file_and_a_file_outside_a_repository_say_what_to_do() {
     if common::skip_unless(has_tool("git", "--version"), "git is not installed") {
@@ -704,6 +813,61 @@ fn export_writes_the_schema_of_the_built_core_and_diff_reads_it_back() {
         "--exit-code",
     ]));
     assert!(String::from_utf8_lossy(&diff.stdout).contains("No changes"));
+
+    // --check is the CI gate, as `undra bindgen --check` is for the bindings: the default file is
+    // `schema.json` in the project, and it is current.
+    let checked = run_ok(project.undra().args(["schema", "export", "--check"]));
+    assert!(
+        String::from_utf8_lossy(&checked.stdout).contains("schema.json is up to date")
+            && String::from_utf8_lossy(&checked.stdout)
+                .contains(&format!("{:#018x}", schema.hash())),
+        "{}",
+        String::from_utf8_lossy(&checked.stdout)
+    );
+    // Another schema in the file (an API change nobody exported) fails it, naming both hashes and
+    // the command that fixes it, and nothing is written.
+    let (old_fixture, _) = fixtures();
+    std::fs::copy(&old_fixture, &file).unwrap();
+    let (code, stderr) = run_err(project.undra().args(["schema", "export", "--check"]));
+    assert_eq!(code, 1);
+    assert!(
+        stderr.contains("error[undra::C0007]: schema.json is not the schema of the core")
+            && stderr.contains(&format!("{:#018x}", read_schema(&old_fixture).hash()))
+            && stderr.contains(&format!("{:#018x}", schema.hash()))
+            && stderr.contains("undra schema export -o schema.json"),
+        "{stderr}"
+    );
+    assert_eq!(
+        read_schema(&file),
+        read_schema(&old_fixture),
+        "--check writes nothing"
+    );
+    // The same schema exported with other flags is other text: the gate checks what export writes.
+    run_ok(
+        project
+            .undra()
+            .args(["schema", "export", "-o", "schema.json"]),
+    );
+    let (_, stderr) = run_err(
+        project
+            .undra()
+            .args(["schema", "export", "--check", "--docs"]),
+    );
+    assert!(
+        stderr.contains("is not the schema of the core") && stderr.contains("--docs"),
+        "{stderr}"
+    );
+    // A file that is not there is named.
+    let (_, stderr) =
+        run_err(
+            project
+                .undra()
+                .args(["schema", "export", "--check", "-o", "api/missing.json"]),
+        );
+    assert!(
+        stderr.contains("error[undra::C0007]: api/missing.json does not exist"),
+        "{stderr}"
+    );
 
     // The bindings generated from it are the bindings of the core: the hash is the same.
     let bindgen = run_ok(project.undra().args(["bindgen", "--check"]));
