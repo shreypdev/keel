@@ -48,6 +48,8 @@ jobs:
         run: bash runtimes/swift/scripts/sync-vectors.sh --check
       - name: Device bench report (RESULTS.md's device tables are what the result files say; the blueprint targets match)
         run: node --test scripts/bench-device-report.test.mjs
+      - name: Generated-code measurement (scripts/generated-weight.mjs classifies the lines of a tree, ADR-062)
+        run: node --test scripts/generated-weight.test.mjs
       - name: wt.sh merge's CI check (its parsing of `gh run list`, against fixtures)
         run: bash scripts/wt-ci-check.test.sh
       - name: wt.sh merge and clean (the push, the verification and the deletions, against scratch repositories)
