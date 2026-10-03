@@ -14,7 +14,7 @@ the integrator writes to it.
 ```text
   brief ──▶ implement in a worktree ──▶ adversarial review ──▶ fix ──▶ re-review
                                                                         │
-  push the branch ──▶ CI green on its exact head ──▶ fast-forward main ◀┘
+  push the branch ──▶ pull request, four "All green" checks on its head ──▶ merge ◀┘
                                                               │
                               clean up ◀── full matrix green on main
 ```
@@ -78,24 +78,33 @@ No piece merges on its author's word. A reviewer who did not write the code atta
 For small pieces the review can be a focused pass by the integrator; for core crates it
 is a full cycle. The four v1 cycles in `.10x/reviews/` are the reference for depth.
 
-### 4. Merge — integrator only
+### 4. Merge — integrator only, through a pull request
 
-**No piece lands on `main` unless CI is green on that branch's exact head.** The order is: the review is
-done, the branch contains `main` (`git merge main` in the worktree), `git push origin wt/my-piece`, and the
-workflows that gate code (`ci.yml`, `bench.yml`, `two-cores.yml`, and `site.yml` when the branch touches the
-files it watches) run on that push; when every one is green on the head's sha, `main` is fast-forwarded to
-it, and the worktree is cleaned up. A piece is not done until that run is green: an author whose run is red
-fixes the cause (not the test) and pushes again; a newer push cancels the run it supersedes, on `wt/**` only
-(`main`'s runs are never cancelled). `scripts/wt.sh merge` enforces it: it refuses unless `main` is an ancestor
-of the branch and `gh run list --branch wt/<slug> --commit <head sha>` shows each required workflow
-completed with success, and says which is missing or red and how to push. `--no-ci` is an explicit, loud
-override for commits that only change state files; code never uses it. The site's deploy job stays `main`-only.
+**`main` is protected: nothing lands except through a pull request whose required checks are green on its exact
+head.** The required checks are the "All green" job of each gating workflow — `CI / All green`, `Bench / All
+green`, `Two cores / All green`, `Site / All green` — a roll-up that succeeds only when every job of its workflow
+succeeded (a failed, cancelled or skipped job fails it, and it always reports, so a red run never leaves a check
+"expected" forever). The workflows run on every push to a pull request's branch (and on `main`); a newer push
+cancels the run it supersedes. Site always builds and checks on a pull request (minutes); its deploy stays
+`main`-only. A piece is not done until those four are green on its head: an author whose run is red fixes the
+cause (not the test) and pushes again.
+
+The order is: the review is done, the branch contains `main` (`git merge main` in the worktree), the branch is
+pushed, and `scripts/wt.sh merge <slug>` from the primary checkout does the rest: opens the pull request if none is
+open (`scripts/wt.sh pr <slug>` opens a draft early, so CI runs from the first push), marks it ready, waits for the
+checks, requires the four "All green" on the head (`scripts/wt-ci-check.sh pr-verdict`), merges with a merge commit
+(the tree that lands is the tree CI tested), verifies that `origin/main` contains the head, and cleans up (section
+5). GitHub refuses a merge whose checks are not green or whose branch is behind `main` when "require branches to
+be up to date" is on: then merge `main` in, push, and run it again. State commits (`.10x/status.md`,
+`.10x/handoff.md`) ride in the piece's pull request, pushed before its last run, or in a small pull request of
+their own. `--ff` is the fast-forward path for a repository without branch protection and for the scratch
+repositories of the tests; `--no-ci` goes with it only.
 
 From the primary checkout, on `main`:
 
 ```bash
-git push origin wt/my-piece     # then wait for its runs: gh run list --branch wt/my-piece
-scripts/wt.sh merge my-piece    # refuses unless CI is green on the head; fast-forward, push, verify, clean up (section 5)
+scripts/wt.sh pr my-piece       # optional, early: a draft pull request, so every push runs CI
+scripts/wt.sh merge my-piece    # the pull request, its four "All green" checks, the merge, verify, clean up (section 5)
 ```
 
 Then the integrator runs the **full matrix**, not just the touched crate:
@@ -138,7 +147,7 @@ After the matrix is green: update `.10x/status.md` (what landed, new totals, deb
 4. **prints the final state**: `git worktree list`, the remaining `wt/*` branches local and on `origin`.
 
 ```bash
-scripts/wt.sh merge my-piece                      # gate, fast-forward, push, verify, clean up, list
+scripts/wt.sh merge my-piece                      # pull request, checks, merge, verify, clean up, list
 scripts/wt.sh merge my-piece --also spike/probe   # a helper branch with another name, swept if merged
 ```
 

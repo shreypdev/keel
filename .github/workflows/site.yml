@@ -9,7 +9,7 @@ name: Site
 
 on:
   push:
-    branches: [main, "wt/**"]
+    branches: [main]
     paths:
       - "site/**"
       - "examples/playground/**"
@@ -24,19 +24,7 @@ on:
       - "README.md"
       - ".github/workflows/site.yml"
   pull_request:
-    paths:
-      - "site/**"
-      - "examples/playground/**"
-      - "examples/cookbook/**"
-      - "examples/fieldbook/**"
-      - "runtimes/ts/**"
-      - "crates/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "bench/results/**"
-      - "contract-tests/scenarios.md"
-      - "README.md"
-      - ".github/workflows/site.yml"
+
   workflow_dispatch:
 
 env:
@@ -154,3 +142,20 @@ jobs:
       - name: Submit the sitemap's URLs to IndexNow
         continue-on-error: true
         run: node site/scripts/indexnow.mjs
+
+  # The one check branch protection requires: green only when the build and its checks succeeded (the deploy runs on main only) (a failed, cancelled or
+  # skipped job fails it). `if: always()` so it reports after failures too; without it a failed job leaves the
+  # check "expected" forever and a pull request can never merge. Name and job id are the same in every workflow.
+  all-green:
+    name: All green
+    if: always()
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' >/dev/null

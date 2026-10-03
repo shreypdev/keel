@@ -2,16 +2,19 @@
 # Worktree helper for parallel work on Undra (humans and agents).
 #
 #   scripts/wt.sh new <slug>      create <repo-parent>/.work/<slug> on branch wt/<slug> from main
-#   scripts/wt.sh merge <slug> [--no-ci] [--no-push] [--also <branch>]...
-#                                 from the main checkout: fast-forward main to wt/<slug>. Refuses unless the branch contains
-#                                 main and CI (CI, Bench, Two cores, and Site when the branch touches its paths) is green on
-#                                 the branch's exact head: push it first (`git push origin wt/<slug>`). Then it pushes main,
-#                                 verifies that origin/main contains the head, and leaves nothing behind: the remote branch,
-#                                 the local branch, the worktree with its build output, the ci-local.sh clone, and the piece's
-#                                 helper branches (proto/<slug>, wt/<slug>-*, and each --also <branch>) when they are merged;
-#                                 anything not merged is kept and named, with why. It ends by listing worktrees and wt/* branches.
-#                                 --no-ci skips the CI check, loudly: for commits that only change state files.
-#                                 --no-push merges locally only and deletes nothing: push main, then run `clean`.
+#   scripts/wt.sh merge <slug> [--also <branch>]... [--ff [--no-ci] [--no-push]]
+#                                 from the main checkout: land wt/<slug> on main. Refuses unless the branch contains main and
+#                                 is pushed. By default it goes through a pull request: opens one if none is open, waits for
+#                                 its checks, requires the "All green" check of CI, Bench, Two cores and Site on the exact head,
+#                                 and merges with a merge commit (main is protected; GitHub refuses anything else). Then it
+#                                 verifies that origin/main contains the head and leaves nothing behind: the remote branch, the
+#                                 local branch, the worktree with its build output, the ci-local.sh clone, and the piece's helper
+#                                 branches (proto/<slug>, wt/<slug>-*, and each --also <branch>) when they are merged; anything
+#                                 not merged is kept and named, with why. It ends by listing worktrees and wt/* branches.
+#                                 --ff is the fast-forward-and-push path for a repository without branch protection (and the
+#                                 scratch repositories of the tests): it checks the runs on the head itself; --no-ci skips that
+#                                 check, loudly, for commits that only change state files; --no-push merges locally only.
+#   scripts/wt.sh pr <slug>       open a draft pull request for wt/<slug> early (CI runs on every push to it from then on)
 #   scripts/wt.sh rm <slug>       remove the worktree AND delete wt/<slug> if fully merged
 #   scripts/wt.sh clean           the same sweep for every wt/* branch (local and on origin) already merged into origin/main:
 #                                 its worktree, build output, branches, ci-local clone. Branches with commits of their own
@@ -176,6 +179,54 @@ ci_green() {
   exit 2
 }
 
+# The pull request of wt/$1 (open, into main): its number, or nothing.
+pr_number() { gh pr list --head "wt/$1" --base main --state open --json number --jq '.[0].number // empty' 2>/dev/null; }
+
+# Lands wt/$1 at head $2 through a pull request: opens one if none is open (title and body from the piece's own
+# commits), marks it ready, waits for its checks, requires the "All green" check of CI, Bench, Two cores and Site
+# on that exact head, and merges with a merge commit so the tree that lands is the tree CI tested. Branch
+# protection on main makes GitHub refuse anything else; this script only says what is missing and how to get it.
+pr_land() {
+  local slug="$1" head="$2" num remote_head title body checks
+  command -v gh >/dev/null || die "gh is needed to land wt/$slug through a pull request (or --ff on a repository without branch protection)"
+  remote_reachable || die "$REMOTE is not reachable"
+  remote_head="$(git ls-remote "$REMOTE" "refs/heads/wt/$slug" | cut -f1)"
+  [ -n "$remote_head" ] || die "wt/$slug is not on $REMOTE: git push $REMOTE wt/$slug, then run merge again"
+  [ "$remote_head" = "$head" ] || die "$REMOTE/wt/$slug is at ${remote_head:0:12}, the local branch at ${head:0:12}: push (or pull) first"
+  num="$(pr_number "$slug")"
+  if [ -z "$num" ]; then
+    title="$slug: $(git log --no-merges --format=%s -1 "main..wt/$slug")"
+    body="$(printf 'Piece `%s` at %s.\n\n%s\n\nRecords: `.10x/decisions/sde/%s.md`, `.10x/reviews/`.\n' "$slug" "${head:0:12}" "$(git log --no-merges --format='- %s' "main..wt/$slug" | head -60)" "$slug")"
+    num="$(gh pr create --base main --head "wt/$slug" --title "$title" --body "$body" | grep -oE '[0-9]+$')"
+    [ -n "$num" ] || die "gh pr create did not return a pull request number"
+    echo "wt.sh: opened pull request #$num for wt/$slug"
+  else
+    echo "wt.sh: pull request #$num is open for wt/$slug"
+  fi
+  gh pr ready "$num" >/dev/null 2>&1 || true   # a draft cannot merge; already-ready is not an error worth stopping for
+  echo "wt.sh: waiting for the checks of #$num on ${head:0:12} (every workflow's \"All green\")"
+  gh pr checks "$num" --watch >/dev/null 2>&1 || true   # the verdict below says what is red; --watch only waits
+  checks="$(mktemp)"
+  gh pr checks "$num" --json name,workflow,state,bucket > "$checks" \
+    || { rm -f "$checks"; die "gh could not read the checks of #$num"; }
+  if ! "$MAIN/scripts/wt-ci-check.sh" pr-verdict "$checks" CI Bench "Two cores" Site >&2; then
+    rm -f "$checks"
+    {
+      echo "wt.sh: not merging: a required check is not green on ${head:0:12} (pull request #$num)."
+      echo "  Fix the cause on the branch, push, and run merge again; a check that never reports is a workflow that did not run"
+      echo "  (gh run list --branch wt/$slug --commit $head)."
+    } >&2
+    exit 2
+  fi
+  rm -f "$checks"
+  [ "$(gh pr view "$num" --json headRefOid --jq .headRefOid)" = "$head" ] \
+    || die "pull request #$num moved past ${head:0:12} while the checks ran: run merge again"
+  gh pr merge "$num" --merge --delete-branch \
+    || die "GitHub refused to merge #$num (branch protection: is main merged in and every required check green?); nothing was deleted"
+  echo "wt.sh: merged pull request #$num (a merge commit of ${head:0:12})"
+  git pull -q --ff-only "$REMOTE" main || die "main is merged on $REMOTE but the local main did not fast-forward: fix the local checkout, then run scripts/wt.sh clean"
+}
+
 case "$cmd" in
   new)
     need_slug new "${2:-}"; slug="$2"
@@ -187,16 +238,18 @@ case "$cmd" in
     ;;
   merge)
     need_slug merge "${2:-}"; slug="$2"; shift 2
-    no_ci=0; no_push=0; also=()
+    mode=pr; no_ci=0; no_push=0; also=()
     while [ $# -gt 0 ]; do
       case "$1" in
+        --ff) mode=ff ;;
         --no-ci) no_ci=1 ;;
         --no-push) no_push=1 ;;
         --also) [ -n "${2:-}" ] || die "--also needs a branch name"; also+=("$2"); shift ;;
-        *) die "usage: wt.sh merge <slug> [--no-ci] [--no-push] [--also <branch>]..." ;;
+        *) die "usage: wt.sh merge <slug> [--also <branch>]... [--ff [--no-ci] [--no-push]]" ;;
       esac
       shift
     done
+    [ "$mode" = ff ] || [ "$no_ci$no_push" = 00 ] || die "--no-ci and --no-push go with --ff: a pull request's checks are GitHub's to skip"
     cd "$MAIN"
     [ "$(git branch --show-current)" = "main" ] || die "run merge from the main checkout on main"
     [ -z "$(git -C "$WORK/$slug" status --porcelain 2>/dev/null)" ] \
@@ -204,21 +257,29 @@ case "$cmd" in
     head="$(git rev-parse "wt/$slug")"
     git merge-base --is-ancestor main "wt/$slug" \
       || die "wt/$slug does not contain main: run \`git merge main\` in $WORK/$slug, push the branch, and wait for CI on its new head"
-    if [ "$no_ci" = 1 ]; then
-      echo "wt.sh: !!! --no-ci: merging wt/$slug at ${head:0:12} WITHOUT a green CI run on that commit (state-only commits only) !!!" >&2
+    if [ "$mode" = pr ]; then
+      # The default: a pull request, its "All green" checks, GitHub's merge (a merge commit of the exact head CI ran
+      # on, so the tree that lands is the tree that was tested), then the same verification and clean-up as --ff.
+      pr_land "$slug" "$head"
     else
-      ci_green "$slug" "$head"
+      # Fast-forward and push: for a repository without branch protection, and for the scratch repositories of
+      # scripts/wt-cleanup.test.sh.
+      if [ "$no_ci" = 1 ]; then
+        echo "wt.sh: !!! --no-ci: merging wt/$slug at ${head:0:12} WITHOUT a green CI run on that commit (state-only commits only) !!!" >&2
+      else
+        ci_green "$slug" "$head"
+      fi
+      git merge --ff-only "wt/$slug"
+      echo "wt.sh: merged wt/$slug (fast-forward to ${head:0:12})"
+      if [ "$no_push" = 1 ]; then
+        echo "wt.sh: --no-push: main is merged locally and NOT pushed; nothing was deleted."
+        echo "       After \`git push $REMOTE main\`, run: scripts/wt.sh clean   (it removes this piece and every other merged one)"
+        exit 0
+      fi
+      echo "wt.sh: pushing main to $REMOTE"
+      git push -q "$REMOTE" main \
+        || die "main is merged locally but the push to $REMOTE failed; nothing was deleted. Fix the push, then run scripts/wt.sh clean"
     fi
-    git merge --ff-only "wt/$slug"
-    echo "wt.sh: merged wt/$slug (fast-forward to ${head:0:12})"
-    if [ "$no_push" = 1 ]; then
-      echo "wt.sh: --no-push: main is merged locally and NOT pushed; nothing was deleted."
-      echo "       After \`git push $REMOTE main\`, run: scripts/wt.sh clean   (it removes this piece and every other merged one)"
-      exit 0
-    fi
-    echo "wt.sh: pushing main to $REMOTE"
-    git push -q "$REMOTE" main \
-      || die "main is merged locally but the push to $REMOTE failed; nothing was deleted. Fix the push, then run scripts/wt.sh clean"
     # (a) verify: the branch is in main, and the pushed main contains the head.
     git merge-base --is-ancestor "wt/$slug" main || die "wt/$slug is not an ancestor of main after the merge: nothing was deleted"
     fetch_remote_main
@@ -268,6 +329,19 @@ case "$cmd" in
     echo "wt.sh: clean done ($removed piece(s) removed, $kept kept)"
     show_state
     ;;
+  pr)
+    need_slug pr "${2:-}"; slug="$2"
+    cd "$MAIN"
+    command -v gh >/dev/null || die "gh is needed to open a pull request"
+    git show-ref --verify --quiet "refs/heads/wt/$slug" || die "no branch wt/$slug"
+    git push -q -u "$REMOTE" "wt/$slug" || die "could not push wt/$slug to $REMOTE"
+    if num="$(pr_number "$slug")" && [ -n "$num" ]; then
+      echo "wt.sh: pull request #$num is already open for wt/$slug"
+    else
+      gh pr create --draft --base main --head "wt/$slug" --title "$slug (draft)" \
+        --body "$(printf 'Piece `%s`, in progress. CI runs on every push; `scripts/wt.sh merge %s` lands it when it is green and reviewed.' "$slug" "$slug")"
+    fi
+    ;;
   list)
     cd "$MAIN"
     git worktree list
@@ -276,6 +350,6 @@ case "$cmd" in
     done
     ;;
   *)
-    die "usage: wt.sh new|merge|rm|clean|list [<slug>] (merge takes --no-ci, --no-push, --also <branch>)"
+    die "usage: wt.sh new|merge|pr|rm|clean|list [<slug>] (merge takes --also <branch>, and --ff with --no-ci/--no-push)"
     ;;
 esac
