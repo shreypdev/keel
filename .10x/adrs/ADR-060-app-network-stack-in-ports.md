@@ -1,6 +1,7 @@
 # ADR-060: the app's network stack inside the ports: `okhttp-adapters` for Android, the app's `URLSession` for Apple, the app's `fetch` for the web
 
-Status: **proposed** (2026-10-02; implemented on the same branch, `wt/okhttp-adapters`; the adversarial review is pending). Touches SPEC 8
+Status: **proposed** (2026-10-02; implemented on the same branch, `wt/okhttp-adapters`; reviewed the same day,
+`.10x/reviews/2026-10-02-okhttp-adapters-review.md`, whose fixes are in the notes at the end). Touches SPEC 8
 and 11 (a new optional Kotlin module and its public shape), 17 (the Kotlin adapter interfaces gain two building blocks behind
 `@UndraEmbeddingApi`), `runtimes/kotlin` (module `okhttp-adapters`; `SseStreamReader` and `ReadAheadSource` of `:runtime` become
 public), the Swift runtime (`URLSessionWebSocketAdapter(session:)`), the docs and the cookbook. **No wire, envelope, C ABI, wasm
@@ -60,9 +61,11 @@ So the gap is Android (nothing to hand the app's client to), and on Apple the We
    again), event listeners, `CertificatePinner`, `Dns`, proxy, cookie jar, cache, connection pool and dispatcher apply, with
    nothing Undra-specific configured.
 
-   `installWithOkHttp` is the one call: `AndroidPlatformDefaults.install(...)`, then the three ports re-registered over the
-   client, on the same thread before any request can be made (replacing a port runs the replaced one's `detach`). To keep one of
-   the platform's, pass it (`webSocket = ClientWebSocketAdapter()`).
+   `installWithOkHttp` is the one call: `AndroidPlatformDefaults.install(...)` with the three network ports over the client in place
+   of the platform's, through `AndroidPlatformDefaults.installWithNetworkPorts` (`:android-adapters`, behind `@UndraEmbeddingApi`),
+   which registers them before `Kv`: a core replays its offline queue as soon as `Kv` answers, so the platform's network adapters
+   are never registered, not even for the length of the install. To keep one of the platform's, pass it
+   (`webSocket = ClientWebSocketAdapter()`).
 
 2. **The contract is the same, and one suite checks it for every adapter** (R4). The Http cases of `AndroidHttpAdapterTest` become
    `HttpAdapterContract` (`runtimes/kotlin/undra-runtime/adapter-contracts`), run by `AndroidHttpAdapterTest` and by
@@ -107,8 +110,9 @@ So the gap is Android (nothing to hand the app's client to), and on Apple the We
      the adapter never sees the bytes (RFC 6455 section 8.1 wants 1007). The shared suite marks this adapter
      `rejectsMalformedText = false` and a case of its own pins what happens. An app that needs the check keeps `ClientWebSocketAdapter`
      for the port. OkHttp also has no inbound size limit, and a message over its 16 MiB outgoing queue closes the connection with 1001.
-   * OkHttp opens a WebSocket on a client it derives from the app's with **no event listener** (measured: the app's listener
-     receives nothing for a WebSocket); interceptors, the authenticator, the pinner, `Dns` and the proxy apply.
+   * OkHttp opens a WebSocket on a client it derives from the app's with **no event listener** (`EventListener.NONE` in
+     `RealWebSocket.connect`) and runs the upgrade **without the client's network interceptors**: OkHttp's rules, not the adapter's,
+     pinned by a test. Application interceptors, the authenticator, the pinner, `Dns` and the proxy apply.
    * A connection the network silently dropped is noticed only by sending: unless the client has a ping interval, the adapter gives
      the connection 30 s (the default adapter's silence limit); `pingIntervalMillis` overrides, `0` disables.
 
@@ -205,3 +209,27 @@ What the implementation found or decided where the text above left room:
 * **Docs**: `okhttp-adapters/README.md`, the Android and Swift READMEs, `docs/SPEC.md` (8, 11, 17.2, 17.3), the ports page, the
   cookbook recipe "Your network stack" (the Kotlin lines are compiled and run in `:okhttp-adapters`, which has OkHttp; the Swift and
   TypeScript lines by `snippets/check.sh`), the test table of `docs/ONBOARDING.md`.
+
+## Review fixes (2026-10-02)
+
+The adversarial review (`.10x/reviews/2026-10-02-okhttp-adapters-review.md`) changed four things, each with a test that failed first:
+
+* **`installWithOkHttp` let the platform's adapters serve a request.** It called `install`, which registered `Kv` and then the
+  platform's `Http`, and replaced the network ports only when `install` returned; a core replays its offline queue as soon as `Kv`
+  answers, so a queued request could go out through `HttpURLConnection`, without the app's token or pin. `:android-adapters` gains
+  `AndroidPlatformDefaults.installWithNetworkPorts(core, context, http: PortImpl, webSocket: WebSocketPortAdapter, sse:
+  SsePortAdapter, ..)` behind `@UndraEmbeddingApi` (its `AndroidPlatform.http` is an `AndroidHttpAdapter` that is not registered),
+  and `install` registers the three network ports before `Kv` (for the defaults too: a replay no longer meets an `Http` port that is
+  not there yet).
+* **`OkHttpSseAdapter` refused an event id that is not ASCII** (OkHttp's checked header), so such a stream could not resume. It sends
+  `Last-Event-ID` as its UTF-8 bytes (`Headers.Builder.addUnsafeNonAscii`), as the fetch standard and Android's `HttpURLConnection`
+  do. The contract has the case; the desktop JVM's `java.net.http`, which writes header values as US-ASCII, declares that it cannot
+  (`sendsNonAsciiLastEventId = false`).
+* **A `GET` or `HEAD` with an empty body** was `InvalidUrl` on OkHttp and a `POST` on `HttpURLConnection` (`doOutput`); both send the
+  method without a body now.
+* **`undra upgrade` left `dev.undra:okhttp-adapters` behind** the runtime it is compiled against; it moves it with the others.
+
+Contract cases added: the core's close racing the peer's close frame (the pending receive is answered once, the stream then ends
+cleanly), the core's close reaching a server it stopped reading (code and reason), a non-ASCII `Last-Event-ID`, the empty-body
+`GET`/`HEAD`; and for OkHttp: cancelled and timed-out calls leave nothing in the dispatcher or the pool, a quiet WebSocket outlives
+the client's read and call timeouts, and the upgrade is seen by application interceptors only.

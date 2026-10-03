@@ -28,9 +28,9 @@ import okio.ByteString.Companion.toByteString
 
 /**
  * The `WebSocket` port over the app's own [OkHttpClient] (ADR-060, ADR-047): every connection is opened through [client], so
- * its interceptors, `Authenticator`, certificate pinner, `Dns`, proxy and connection pool apply to the upgrade request with nothing
- * Undra-specific configured, and its dispatcher runs the connection's threads. Serve it with `WebSocketPortAdapter`, which owns the
- * ids, the pull and the read-ahead.
+ * its application interceptors, `Authenticator`, certificate pinner, `Dns`, proxy and connection pool apply to the upgrade request
+ * with nothing Undra-specific configured, and its dispatcher runs the connection's threads. Serve it with `WebSocketPortAdapter`,
+ * which owns the ids, the pull and the read-ahead.
  *
  * It keeps the contract of `ClientWebSocketAdapter` (the default), and the shared suite that checks it
  * (`RealtimeAdapterContract`) runs on this one, with the differences below, which are OkHttp's:
@@ -51,8 +51,9 @@ import okio.ByteString.Companion.toByteString
  *  - **Text is not checked for UTF-8**: OkHttp decodes a text frame itself and replaces a malformed sequence with U+FFFD, where the
  *    default adapter closes with 1007 and ends the stream with `Protocol` (RFC 6455 section 8.1). It has no limit on the size of an
  *    inbound message either. An app that needs either keeps `ClientWebSocketAdapter` for this port.
- *  - OkHttp opens a WebSocket on a client of its own derived from the app's: HTTP/1.1 only, and with **no event listener** (the
- *    app's tracing sees the upgrade as an interceptor does, not as events). Everything else of the app's client is used.
+ *  - OkHttp opens a WebSocket on a client of its own derived from the app's: HTTP/1.1 only, with **no event listener**
+ *    (`EventListener.NONE`), and runs the upgrade **without the client's network interceptors**: the app's tracing sees it only as
+ *    an application interceptor. Everything else of the app's client is used.
  *  - **Liveness**: a connection the network silently dropped is only noticed by sending something, so unless the client has a ping
  *    interval of its own the adapter gives it one ([pingIntervalMillis]), as the default adapter pings a silent server.
  *

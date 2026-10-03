@@ -34,8 +34,9 @@ class MyApp : Application() {
 ```
 
 `installWithOkHttp(core, context, client, http, webSocket, sse, requireValidatedNetwork, reportLifecycle, onBackgroundWorkPending)`
-is `AndroidPlatformDefaults.install` with the three network ports registered over `client` (on the same thread, before any request
-can be made, so the platform's adapters never serve one). It returns an `OkHttpPlatform`: the platform of `install` (`.platform`),
+is `AndroidPlatformDefaults.install` with the three network ports registered over `client` in place of the platform's (through
+`installWithNetworkPorts`, before `Kv`: a core replays its offline queue as soon as `Kv` answers, and that request goes through your
+client too; the platform's network adapters are never registered). It returns an `OkHttpPlatform`: the platform of `install` (`.platform`),
 the adapters that took the three ports (`.http`, `.webSocket`, `.sse`) and a `close()` that stops the event sources and closes
 what is open.
 
@@ -51,8 +52,8 @@ every request: `OkHttpHttpAdapter { appGraph.okHttpClient }`.
 | Port | Adapter | Through your client |
 |---|---|---|
 | `Http` | `OkHttpHttpAdapter(client, maxResponseBytes = 64 MiB)` | the call itself: application and network interceptors, `Authenticator`, event listener, pinner, `Dns`, proxy, cookie jar, cache, pool, dispatcher |
-| `WebSocket` (ADR-047) | `OkHttpWebSocketAdapter(client, pingIntervalMillis)`, served by `WebSocketPortAdapter` | the upgrade request: interceptors, `Authenticator`, pinner, `Dns`, proxy, pool, dispatcher. OkHttp derives the client it opens a WebSocket on and gives it **no event listener** |
-| `Sse` (ADR-047) | `OkHttpSseAdapter(client)`, served by `SsePortAdapter` | the request, on a client derived from yours (`newBuilder`: same pool, dispatcher, interceptors, `Authenticator`, pinner and listener) with **no read timeout, no call timeout and HTTP/1.1**, which a stream needs |
+| `WebSocket` (ADR-047) | `OkHttpWebSocketAdapter(client, pingIntervalMillis)`, served by `WebSocketPortAdapter` | the upgrade request: application interceptors, `Authenticator`, pinner, `Dns`, proxy, pool, dispatcher. OkHttp runs a WebSocket's upgrade **without your network interceptors and without your event listener** (below) |
+| `Sse` (ADR-047) | `OkHttpSseAdapter(client)`, served by `SsePortAdapter` | the request, on a client derived from yours (`newBuilder`: same pool, dispatcher, interceptors, `Authenticator`, pinner and listener) with **no read timeout, no call timeout and HTTP/1.1**, which a stream needs. `Last-Event-ID` goes out as its UTF-8 bytes, so an id that is not ASCII resumes too |
 
 **The contract is the other adapters'** and the same suites check it (below): an error status is a response; failures are typed
 (`InvalidUrl`, `Timeout`, `Cancelled`, `Network`; for the realtime ports `Refused`, `Network`, `Protocol`, `Closed`, `Ended`); the
@@ -64,13 +65,20 @@ stops pulling stalls the server (TCP pushes back).
 follows `https` to `http`, which the other adapters never do: `followSslRedirects(false)` gives the same rule), `retryOnConnectionFailure`,
 the `Authenticator` on a `401`, transparent gzip, the client's cache and cookie jar if it has them, its connect, read, write and call
 timeouts when the request has none of its own, and the `Dispatcher`'s limits (the core's requests wait their turn with yours).
-A header value must be printable ASCII (OkHttp's rule); anything else is `InvalidUrl`, naming the header.
+A header value must be printable ASCII (OkHttp's rule); anything else is `InvalidUrl`, naming the header. Your interceptors run on
+OkHttp's threads: one that throws anything but an `IOException` is rethrown there by OkHttp (it crashes an Android app, as it does for
+your own calls), and the core's request ends `Cancelled`.
 
 **What OkHttp's WebSocket cannot do** (ADR-060, decision 6), so it is not what the adapter does either:
 
 * a text frame that is not UTF-8 arrives with U+FFFD for the bad bytes; the default adapter fails it with `Protocol` (RFC 6455, 1007).
   An app that needs the check keeps `ClientWebSocketAdapter` for the port;
-* no limit on the size of an inbound message, and a message over OkHttp's 16 MiB outgoing queue closes the connection with 1001;
+* no network interceptor and no event listener on the upgrade: OkHttp opens a WebSocket on a client it derives with
+  `EventListener.NONE` and leaves network interceptors out of a WebSocket's call. Application interceptors, the `Authenticator`, the
+  pinner, `Dns` and the proxy do apply. Tracing that is a network interceptor or an `EventListener` does not see the core's WebSockets;
+  a test pins this, so an OkHttp that changes it is noticed;
+* no limit on the size of an inbound message (OkHttp offers `permessage-deflate`, so a small frame can inflate to a large one), and a
+  message over OkHttp's 16 MiB outgoing queue closes the connection with 1001;
 * reading cannot pause: the adapter holds OkHttp's reader thread while the binding's buffer is full, which stalls the server, with
   one frame read beyond the window. A core that stops reading for longer than the ping interval loses the connection to OkHttp's
   missing-pong timeout (`pingIntervalMillis = 0`, or a client with `pingInterval(0)` and your own dead-connection policy, avoids it);
@@ -95,15 +103,17 @@ OkHttp does.
     cases of `AndroidHttpAdapterTest`) on a plain client, then what the module is for: an interceptor sees every request (the
     application one each call, the network one each hop) and changes a header, an `Authenticator` refreshes a token and the request,
     its body included, goes again, an event listener sees each call, a client provider is asked every time, a client's call timeout and
-    redirect policy are respected, gzip is decoded, a header that is not ASCII is refused naming it;
+    redirect policy are respected, gzip is decoded, a header that is not ASCII is refused naming it, cancelled and timed-out calls leave
+    no call running in the dispatcher and no connection in use;
   * `OkHttpRealtimeAdapterTest`: `RealtimeAdapterContract` (`../test-support`, the failure-injection suite `:runtime` runs on the default
     adapters) through `WebSocketPortAdapter` and `SsePortAdapter` against `contract-tests/servers/realtime-server.mjs` (Node; skipped,
     saying why, without it, failed with `UNDRA_REQUIRE_TOOLCHAINS=1`), then: malformed text is repaired, an interceptor tags the
-    upgrade and the stream, a client provider is asked at every connect, the ping interval, a client's read and call timeouts do not
-    end a quiet stream, the derived clients share the app's pool, dispatcher and interceptors;
+    upgrade and the stream, a network interceptor and the event listener do not see the upgrade (OkHttp's rule, pinned), a client
+    provider is asked at every connect, the ping interval, a client's read and call timeouts end neither a quiet stream nor a quiet
+    WebSocket, the derived clients share the app's pool, dispatcher and interceptors;
   * `OkHttpRulesTest`: the pure decisions (URLs, headers, how OkHttp's exceptions become the port's typed errors, a pin that does not match).
 * **Instrumented tests** (`./gradlew :okhttp-adapters:connectedDebugAndroidTest`, on a booted emulator or device; set `ANDROID_SERIAL`
   when several are attached): the shared Http cases again on the device, `OkHttpHttpOnDeviceTest` (a request from the main thread does
   its work on another thread, `localhost` resolves), `OkHttpPlatformDefaultsOnDeviceTest` (`installWithOkHttp`: the ports, `Http` and an
-  event stream through the app's client) and `OkHttpRealtimeOnDeviceTest` (`RealtimeOnDeviceContract`, with the host's realtime server
+  event stream through the app's client, and a request the core makes while the install runs goes through it too) and `OkHttpRealtimeOnDeviceTest` (`RealtimeOnDeviceContract`, with the host's realtime server
   started first and its port passed, as in the [android-adapters README](../android-adapters/README.md#tests)).

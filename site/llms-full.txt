@@ -689,7 +689,7 @@ The defaults above are the platform's own. If your app has a network stack of it
 
 | Platform | You pass | Your stack applies |
 | --- | --- | --- |
-| Android | your `OkHttpClient`, to the optional `okhttp-adapters` module | interceptors, `Authenticator` (a `401` is answered with a refreshed token and the request goes again), event listeners, `CertificatePinner`, `Dns`, proxy, cookie jar, dispatcher |
+| Android | your `OkHttpClient`, to the optional `okhttp-adapters` module | interceptors, `Authenticator` (a `401` is answered with a refreshed token and the request goes again), event listeners, `CertificatePinner`, `Dns`, proxy, cookie jar, dispatcher (a WebSocket's upgrade is the exception OkHttp makes: your application interceptors see it, your network interceptors and event listener do not) |
 | iOS and macOS | your `URLSession`, to `HttpAdapter`, `URLSessionWebSocketAdapter` and `URLSessionSseAdapter` | its configuration and `URLProtocol` classes, its delegate (server trust and pinning, authentication challenges), proxy, cookies |
 | Web | your `fetch` and `WebSocket`, to `fetchHttp`, `fetchSse` and `browserWebSocket` | whatever your wrapper does to a request: a token, a retry on `401`, a trace header |
 | React Native | nothing: `reactNativeHttp()` is React Native's `fetch` | React Native's own networking module, so what the app configures there |
@@ -720,7 +720,7 @@ const ports = {
 };
 ```
 
-The pieces and the places they differ from the defaults are documented where they live: the [okhttp-adapters README](https://github.com/shreypdev/undra/blob/main/runtimes/kotlin/undra-runtime/okhttp-adapters/README.md) (redirects, retries and timeouts are your client's; a WebSocket on OkHttp repairs malformed UTF-8 in a text frame instead of failing the connection, and OkHttp tells your event listener nothing about WebSockets; a stream is opened on a client derived from yours with no read timeout and HTTP/1.1), and the [cookbook recipe](https://shreypdev.github.io/undra/docs/cookbook/network-stack.html), with the code of all three. The decision is [ADR-060](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-060-app-network-stack-in-ports.md).
+The pieces and the places they differ from the defaults are documented where they live: the [okhttp-adapters README](https://github.com/shreypdev/undra/blob/main/runtimes/kotlin/undra-runtime/okhttp-adapters/README.md) (redirects, retries and timeouts are your client's; a WebSocket on OkHttp repairs malformed UTF-8 in a text frame instead of failing the connection, and OkHttp tells neither your event listener nor your network interceptors about a WebSocket's upgrade; a stream is opened on a client derived from yours with no read timeout and HTTP/1.1), and the [cookbook recipe](https://shreypdev.github.io/undra/docs/cookbook/network-stack.html), with the code of all three. The decision is [ADR-060](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-060-app-network-stack-in-ports.md).
 
 ## When a port is missing
 
@@ -1866,7 +1866,7 @@ The core never makes a request; the platform does, through the `Http` port (and 
 
 ## The recipe
 
-- **Android:** add the optional `dev.undra:okhttp-adapters` module and call `AndroidPlatformDefaults.installWithOkHttp(core, context, client)` in place of `install`. `Http`, `WebSocket` and `Sse` go through your `OkHttpClient`: its interceptors, its `Authenticator` (a `401` is answered with a refreshed token and the request goes again), its event listeners, its `CertificatePinner`.
+- **Android:** add the optional `dev.undra:okhttp-adapters` module and call `AndroidPlatformDefaults.installWithOkHttp(core, context, client)` in place of `install`. `Http`, `WebSocket` and `Sse` go through your `OkHttpClient`: its interceptors, its `Authenticator` (a `401` is answered with a refreshed token and the request goes again), its event listeners, its `CertificatePinner`. One exception is OkHttp's own: a WebSocket's upgrade is seen by your application interceptors, not by your network interceptors or your event listener.
 - **iOS:** pass your `URLSession` to `HttpAdapter`, `URLSessionWebSocketAdapter` and `URLSessionSseAdapter`. Its configuration, its delegate (server trust and the pinning built on it, authentication challenges) and its `URLProtocol` classes apply. Give event streams a session with the same delegate and a configuration that lets a stream stay quiet.
 - **Web:** pass your `fetch` and `WebSocket` to `fetchHttp`, `fetchSse` and `browserWebSocket`. Whatever your wrapper does to a request, it does to the core's.
 - **React Native:** nothing to pass. `reactNativeHttp()` is React Native's `fetch`, which is the app's networking module, so what the app configures there applies.
