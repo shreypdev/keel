@@ -527,10 +527,14 @@ impl Steps<'_> {
                     self.rel(&app.dir, dir)
                 ));
             }
+            // ADR-063: the runtime is the release's asset, installed by URL; the bindings are used from their sources, as in
+            // the web app `undra init` writes (the generated package is not built, and from outside the app its import of
+            // `@undra/runtime` would not find the app's node_modules: hence the alias, `dedupe` and the `paths`).
             RuntimeRef::Release { version, dist } => {
                 let url = dist.npm_url("undra-runtime", version);
+                let allow = self.rel(&app.dir, self.undra_dir);
                 text.push_str(&format!(
-                    "1. **Install the runtime and the bindings.** The runtime is an asset of the Undra release on GitHub (ADR-063): npm, pnpm\n   and yarn install its URL without a registry.\n\n   ```sh\n   npm install {url} {generated}\n   ```\n\n   (`{generated}` is the generated package, `{ts_package}`; it imports `@undra/runtime` as a peer dependency.)\n"
+                    "1. **Install the runtime.** It is an asset of the Undra release on GitHub (ADR-063): npm, pnpm and yarn install its URL\n   without a registry.\n\n   ```sh\n   npm install {url}\n   ```\n\n   **Resolve the bindings from their sources** (`{ts_package}`, in `{generated}`), so there is no build step between a core change\n   and the browser. They live outside the app and import `@undra/runtime`: point the bundler at them and have it resolve the runtime\n   from this app (Vite shown; webpack: `resolve.alias` and `resolve.modules`):\n\n   ```ts\n   resolve: {{\n     alias: {{ \"{ts_package}\": fileURLToPath(new URL(\"{generated}/src/index.ts\", import.meta.url)) }},\n     dedupe: [\"@undra/runtime\"],\n   }},\n   server: {{ fs: {{ allow: [\".\", \"{allow}\"] }} }},\n   ```\n\n   and in `tsconfig.json`, under `compilerOptions`:\n\n   ```json\n   \"paths\": {{\n     \"{ts_package}\": [\"{generated}/src/index.ts\"],\n     \"@undra/runtime\": [\"./node_modules/@undra/runtime\"]\n   }}\n   ```\n"
                 ));
             }
         }
@@ -663,6 +667,19 @@ mod tests {
         assert!(
             guide.contains("../undra/build/web/myapp_core.wasm")
                 && guide.contains("await UndraMyappCore.load({ mode: \"wasm-main\""),
+            "{guide}"
+        );
+        // A released project (ADR-063): the runtime by the release asset's URL, the bindings from their sources with the
+        // runtime resolved from the app, as `undra init`'s web app does. The generated package is never installed: it is
+        // not built, and from outside the app its `@undra/runtime` would not resolve.
+        assert!(
+            guide.contains(&format!(
+                "npm install https://github.com/shreypdev/undra/releases/download/v{v}/undra-runtime-{v}.tgz\n",
+                v = crate::config::UNDRA_VERSION
+            )) && guide.contains("\"@app/myapp-core\": fileURLToPath(new URL(\"../undra/generated/ts/src/index.ts\", import.meta.url))")
+                && guide.contains("dedupe: [\"@undra/runtime\"],")
+                && guide.contains("\"@undra/runtime\": [\"./node_modules/@undra/runtime\"]")
+                && !guide.contains("tgz ../undra/generated/ts"),
             "{guide}"
         );
         let _ = std::fs::remove_dir_all(root.parent().unwrap());
