@@ -22,7 +22,7 @@ export default defineConfig(({ command }) => ({
       // build step between a core change and the browser.
       "@@TS_PACKAGE@@": here("@@GENERATED_TS_PATH@@/src/index.ts"),
 @@RUNTIME_ALIAS@@    },
-  },
+@@RUNTIME_DEDUPE@@  },
   server: {
     // The wasm core (`undra build --platform web`) lives outside this directory.
     fs: { allow: [here("@@PROJECT_ROOT_PATH@@")@@EXTRA_FS_ALLOW@@] },

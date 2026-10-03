@@ -332,6 +332,7 @@ pub(super) fn variables(setup: &Setup) -> Vars {
                 "EXTRA_FS_ALLOW",
                 format!(", here(\"{}\")", rel(&web_dir, dir)),
             );
+            vars.set("RUNTIME_DEDUPE", "");
         }
         // ADR-063: the runtime's tarball, an asset of the release on GitHub.
         RuntimeRef::Release { version, dist } => {
@@ -344,7 +345,17 @@ pub(super) fn variables(setup: &Setup) -> Vars {
                 ),
             );
             vars.set("RUNTIME_ALIAS", "");
-            vars.set("RUNTIME_PATHS", "");
+            // The generated bindings live outside web/ (`generated/ts`) and import `@undra/runtime`, which is installed in
+            // web/node_modules: Node's lookup from their directory would never get there. TypeScript is pointed at the
+            // installed package, and Vite resolves it from this app whoever imports it.
+            vars.set(
+                "RUNTIME_PATHS",
+                ",\n      \"@undra/runtime\": [\"./node_modules/@undra/runtime\"]",
+            );
+            vars.set(
+                "RUNTIME_DEDUPE",
+                "    // The generated bindings (outside web/) import @undra/runtime: resolve it from this app's node_modules.\n    dedupe: [\"@undra/runtime\"],\n",
+            );
             vars.set("EXTRA_FS_ALLOW", "");
         }
     }
@@ -1038,6 +1049,15 @@ mod tests {
             )),
             "{pkg}"
         );
+        // The generated bindings (outside web/) find the installed runtime: TypeScript through `paths`, Vite by `dedupe`
+        // (without them `npm run build` fails to resolve `@undra/runtime` from generated/ts; the launch rehearsal found it).
+        let tsconfig = read("web/tsconfig.json");
+        assert!(
+            tsconfig.contains("\"@undra/runtime\": [\"./node_modules/@undra/runtime\"]"),
+            "{tsconfig}"
+        );
+        let vite = read("web/vite.config.ts");
+        assert!(vite.contains("dedupe: [\"@undra/runtime\"],"), "{vite}");
         let readme = read("README.md");
         assert!(
             readme.contains(&format!("com.github.shreypdev.undra:runtime:v{v}")),
