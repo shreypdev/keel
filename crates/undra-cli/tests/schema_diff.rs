@@ -287,8 +287,9 @@ fn fixtures() -> (PathBuf, PathBuf) {
     );
     if updating() {
         std::fs::create_dir_all(fixtures_dir()).unwrap();
-        std::fs::write(&old, old_schema().to_json_pretty() + "\n").unwrap();
-        std::fs::write(&new, new_schema().to_json_pretty() + "\n").unwrap();
+        // In the form `undra schema export` writes, so the fixtures are schema files as a project commits them.
+        std::fs::write(&old, undra_cli::schema_file::render(&old_schema())).unwrap();
+        std::fs::write(&new, undra_cli::schema_file::render(&new_schema())).unwrap();
     }
     (old, new)
 }

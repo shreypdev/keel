@@ -6,27 +6,9 @@
       "name": "Todo",
       "type_id": 2995082141,
       "fields": [
-        {
-          "name": "id",
-          "ty": {
-            "kind": "u32"
-          },
-          "default": false
-        },
-        {
-          "name": "title",
-          "ty": {
-            "kind": "string"
-          },
-          "default": false
-        },
-        {
-          "name": "done",
-          "ty": {
-            "kind": "bool"
-          },
-          "default": true
-        }
+        { "name": "id", "ty": {"kind":"u32"}, "default": false },
+        { "name": "title", "ty": {"kind":"string"}, "default": false },
+        { "name": "done", "ty": {"kind":"bool"}, "default": true }
       ],
       "docs": "An item."
     }
@@ -37,20 +19,8 @@
       "type_id": 4104765591,
       "is_error": false,
       "variants": [
-        {
-          "name": "All",
-          "index": 0,
-          "fields": [],
-          "tuple": false,
-          "message": null
-        },
-        {
-          "name": "Open",
-          "index": 1,
-          "fields": [],
-          "tuple": false,
-          "message": null
-        }
+        { "name": "All", "index": 0, "fields": [], "tuple": false, "message": null },
+        { "name": "Open", "index": 1, "fields": [], "tuple": false, "message": null }
       ]
     },
     {
@@ -58,13 +28,7 @@
       "type_id": 787313993,
       "is_error": true,
       "variants": [
-        {
-          "name": "NotFound",
-          "index": 0,
-          "fields": [],
-          "tuple": false,
-          "message": "not found"
-        }
+        { "name": "NotFound", "index": 0, "fields": [], "tuple": false, "message": "not found" }
       ]
     }
   ],
@@ -77,10 +41,7 @@
           "name": "new",
           "method_id": 898850282,
           "params": [],
-          "returns": {
-            "kind": "named",
-            "of": "Todos"
-          },
+          "returns": {"kind":"named","of":"Todos"},
           "is_async": false,
           "takes_ctx": true
         }
@@ -90,26 +51,9 @@
           "name": "add",
           "method_id": 3510467287,
           "params": [
-            {
-              "name": "title",
-              "ty": {
-                "kind": "string"
-              }
-            }
+            { "name": "title", "ty": {"kind":"string"} }
           ],
-          "returns": {
-            "kind": "result",
-            "of": [
-              {
-                "kind": "named",
-                "of": "Todo"
-              },
-              {
-                "kind": "named",
-                "of": "TodoError"
-              }
-            ]
-          },
+          "returns": {"kind":"result","of":[{"kind":"named","of":"Todo"},{"kind":"named","of":"TodoError"}]},
           "is_async": false,
           "takes_ctx": false
         },
@@ -117,45 +61,17 @@
           "name": "toggle",
           "method_id": 482630968,
           "params": [
-            {
-              "name": "id",
-              "ty": {
-                "kind": "u32"
-              }
-            }
+            { "name": "id", "ty": {"kind":"u32"} }
           ],
-          "returns": {
-            "kind": "unit"
-          },
+          "returns": {"kind":"unit"},
           "is_async": false,
           "takes_ctx": false
         }
       ],
       "store": {
         "signals": [
-          {
-            "name": "items",
-            "signal_id": 0,
-            "ty": {
-              "kind": "vec",
-              "of": {
-                "kind": "named",
-                "of": "Todo"
-              }
-            },
-            "computed": false,
-            "key": "id"
-          },
-          {
-            "name": "filter",
-            "signal_id": 1,
-            "ty": {
-              "kind": "named",
-              "of": "Filter"
-            },
-            "computed": false,
-            "key": null
-          }
+          { "name": "items", "signal_id": 0, "ty": {"kind":"vec","of":{"kind":"named","of":"Todo"}}, "computed": false, "key": "id" },
+          { "name": "filter", "signal_id": 1, "ty": {"kind":"named","of":"Filter"}, "computed": false, "key": null }
         ]
       }
     }
@@ -165,13 +81,7 @@
       "name": "export_all",
       "method_id": 1799698235,
       "params": [],
-      "returns": {
-        "kind": "vec",
-        "of": {
-          "kind": "named",
-          "of": "Todo"
-        }
-      },
+      "returns": {"kind":"vec","of":{"kind":"named","of":"Todo"}},
       "is_async": false,
       "takes_ctx": false
     }
@@ -186,16 +96,9 @@
           "name": "notify",
           "method_id": 901195882,
           "params": [
-            {
-              "name": "text",
-              "ty": {
-                "kind": "string"
-              }
-            }
+            { "name": "text", "ty": {"kind":"string"} }
           ],
-          "returns": {
-            "kind": "unit"
-          },
+          "returns": {"kind":"unit"},
           "is_async": false,
           "takes_ctx": false
         }
@@ -210,16 +113,9 @@
           "name": "update",
           "method_id": 3402924665,
           "params": [
-            {
-              "name": "percent",
-              "ty": {
-                "kind": "u8"
-              }
-            }
+            { "name": "percent", "ty": {"kind":"u8"} }
           ],
-          "returns": {
-            "kind": "unit"
-          },
+          "returns": {"kind":"unit"},
           "is_async": false,
           "takes_ctx": false
         }
@@ -233,26 +129,9 @@
       "kind": "query",
       "key": "todo/{id}",
       "params": [
-        {
-          "name": "id",
-          "ty": {
-            "kind": "u32"
-          }
-        }
+        { "name": "id", "ty": {"kind":"u32"} }
       ],
-      "returns": {
-        "kind": "result",
-        "of": [
-          {
-            "kind": "named",
-            "of": "Todo"
-          },
-          {
-            "kind": "named",
-            "of": "TodoError"
-          }
-        ]
-      },
+      "returns": {"kind":"result","of":[{"kind":"named","of":"Todo"},{"kind":"named","of":"TodoError"}]},
       "stale_ms": null,
       "persist": false,
       "idempotent": false
@@ -263,26 +142,9 @@
       "kind": "mutation",
       "key": "add_todo/{id}",
       "params": [
-        {
-          "name": "title",
-          "ty": {
-            "kind": "string"
-          }
-        }
+        { "name": "title", "ty": {"kind":"string"} }
       ],
-      "returns": {
-        "kind": "result",
-        "of": [
-          {
-            "kind": "named",
-            "of": "Todo"
-          },
-          {
-            "kind": "named",
-            "of": "TodoError"
-          }
-        ]
-      },
+      "returns": {"kind":"result","of":[{"kind":"named","of":"Todo"},{"kind":"named","of":"TodoError"}]},
       "stale_ms": null,
       "persist": false,
       "idempotent": false
