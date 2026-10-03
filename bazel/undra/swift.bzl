@@ -24,13 +24,21 @@ def undra_swift_library(name, bindings, module_name, ffi_module, deps = [], runt
         **kwargs: passed to `swift_library` (`visibility`, `tags`, ..).
     """
     tags = kwargs.pop("tags", []) + ["requires-darwin"]
-    compatible = kwargs.pop("target_compatible_with", ["@platforms//os:macos", "@platforms//os:ios"])
+
+    # Every target of the macro carries it, so a `bazel test //...` on Linux skips them all instead of analysing the Swift
+    # toolchain (which fails there without clang). Apple platforms only, unless the caller says otherwise.
+    compatible = kwargs.pop("target_compatible_with", None) or select({
+        "@platforms//os:macos": [],
+        "@platforms//os:ios": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    })
     for group in ["swift_sources", "swift_ffi_sources", "swift_ffi_headers", "swift_ffi_modulemap"]:
         native.filegroup(
             name = "{}_{}".format(name, group),
             srcs = [bindings],
             output_group = group,
             tags = tags,
+            target_compatible_with = compatible,
             testonly = kwargs.get("testonly", False),
         )
 
@@ -39,6 +47,7 @@ def undra_swift_library(name, bindings, module_name, ffi_module, deps = [], runt
         module_map = ":{}_swift_ffi_modulemap".format(name),
         module_name = ffi_module,
         tags = tags,
+        target_compatible_with = compatible,
     )
     # The generated C source includes its header as "<ns>_undra.h", from the `include` directory of its tree (SwiftPM adds that
     # directory itself): the declared files keep the tree's layout below `<bindings>_swift_files/`.
@@ -51,6 +60,7 @@ def undra_swift_library(name, bindings, module_name, ffi_module, deps = [], runt
         aspect_hints = [":" + name + "_ffi_hint"],
         copts = ["-I$(BINDIR)/" + include],
         tags = tags,
+        target_compatible_with = compatible,
     )
     swift_library(
         name = name,
@@ -59,5 +69,6 @@ def undra_swift_library(name, bindings, module_name, ffi_module, deps = [], runt
         module_name = module_name,
         deps = [":" + name + "_ffi", runtime] + deps,
         tags = tags,
+        target_compatible_with = compatible,
         **kwargs
     )

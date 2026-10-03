@@ -6,11 +6,19 @@ load("@rules_swift//swift:swift_library.bzl", "swift_library")
 
 package(default_visibility = ["//visibility:public"])
 
+# Apple platforms only: elsewhere the targets are skipped, never analysed (the Swift toolchain needs Xcode's clang).
+_APPLE = select({
+    "@platforms//os:macos": [],
+    "@platforms//os:ios": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
 # The C ABI types of SPEC 6 (undra.h declares types, no function), as the module `UndraFFI` the runtime and the bindings import.
 swift_interop_hint(
     name = "UndraFFI_hint",
     module_map = "_runtime/Sources/UndraFFI/include/module.modulemap",
     module_name = "UndraFFI",
+    target_compatible_with = _APPLE,
 )
 
 cc_library(
@@ -22,6 +30,7 @@ cc_library(
     ],
     aspect_hints = [":UndraFFI_hint"],
     includes = ["_runtime/Sources/UndraFFI/include"],
+    target_compatible_with = _APPLE,
 )
 
 swift_library(
@@ -33,5 +42,6 @@ swift_library(
     ],
     module_name = "UndraRuntime",
     package_name = "UndraRuntime",
+    target_compatible_with = _APPLE,
     deps = [":UndraFFI"],
 )
