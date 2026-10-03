@@ -8,6 +8,13 @@ import Foundation
 /// (and which subprotocol the server chose) and the code and reason of the peer's close frame.
 /// The subprotocols go out as `Sec-WebSocket-Protocol` on a `URLRequest` that carries the headers.
 ///
+/// **An app that has a network stack of its own passes its `URLSession`** (``init(session:maximumMessageSize:)``,
+/// ADR-060): the connections are tasks of that session, so its configuration (`httpAdditionalHeaders`, `protocolClasses`,
+/// proxy, cookie storage), its delegate (server trust and the pinning built on it, authentication challenges) and its
+/// delegate queue apply to the upgrade request, and the adapter never invalidates it. The adapter is the task's delegate for
+/// the handshake and the close frame (`URLSessionTask.delegate`, iOS 15), which leaves the session's delegate to answer
+/// everything else.
+///
 /// Inbound messages are pulled: `messages` calls `receive()` once per message the binding asks
 /// for, and the binding asks only while the core's window has room, so a core that stops reading
 /// stops the socket and TCP pushes back on the server.
@@ -21,14 +28,33 @@ import Foundation
 /// It is also the `WebSocket` adapter of ``Adapters/platformDefault`` (served by the binding of
 /// ``WebSocketPortAdapter``).
 public final class URLSessionWebSocketAdapter: WebSocketAdapter, UndraAdapter, @unchecked Sendable {
-    private let configuration: URLSessionConfiguration
+    /// Where a connection's session comes from.
+    private enum Source {
+        /// A session of its own per connection, made from this configuration.
+        case configuration(URLSessionConfiguration)
+        /// The app's session, which the adapter does not own.
+        case session(URLSession)
+    }
+
+    private let source: Source
     private let maximumMessageSize: Int
     private let bindings = BindingSet<WebSocketBinding>()
 
     /// Opens connections with sessions made from `configuration` (copied), accepting messages up
     /// to `maximumMessageSize` bytes (URLSession's default is 1 MiB).
     public init(configuration: URLSessionConfiguration = .default, maximumMessageSize: Int = 16 * 1024 * 1024) {
-        self.configuration = configuration.copy() as? URLSessionConfiguration ?? .default
+        self.source = .configuration(configuration.copy() as? URLSessionConfiguration ?? .default)
+        self.maximumMessageSize = maximumMessageSize
+    }
+
+    /// Opens connections as tasks of `session`, the app's own, accepting messages up to `maximumMessageSize` bytes.
+    ///
+    /// The session's delegate, configuration and delegate queue apply to every connection (a delegate that pins certificates or
+    /// answers authentication challenges sees the upgrade request as it sees any other); the adapter takes the connection's task
+    /// delegate for the handshake and the close frame and never invalidates `session`. The session must not be a background
+    /// session (those do not support WebSocket tasks).
+    public init(session: URLSession, maximumMessageSize: Int = 16 * 1024 * 1024) {
+        self.source = .session(session)
         self.maximumMessageSize = maximumMessageSize
     }
 
@@ -47,12 +73,17 @@ public final class URLSessionWebSocketAdapter: WebSocketAdapter, UndraAdapter, @
         if !protocols.isEmpty {
             request.setValue(protocols.joined(separator: ", "), forHTTPHeaderField: "Sec-WebSocket-Protocol")
         }
-        let configuration = self.configuration.copy() as? URLSessionConfiguration ?? .default
-        let connection = URLSessionWebSocketConnection(
-            request: request,
-            configuration: configuration,
-            maximumMessageSize: maximumMessageSize
-        )
+        let connection: URLSessionWebSocketConnection
+        switch source {
+        case .configuration(let configuration):
+            connection = URLSessionWebSocketConnection(
+                request: request,
+                configuration: configuration.copy() as? URLSessionConfiguration ?? .default,
+                maximumMessageSize: maximumMessageSize
+            )
+        case .session(let session):
+            connection = URLSessionWebSocketConnection(request: request, session: session, maximumMessageSize: maximumMessageSize)
+        }
         try await connection.open()
         return connection
     }
@@ -72,7 +103,7 @@ public final class URLSessionWebSocketAdapter: WebSocketAdapter, UndraAdapter, @
     }
 }
 
-/// One `URLSessionWebSocketTask` and the delegate of its session.
+/// One `URLSessionWebSocketTask` and its delegate: of its own session, or of the app's.
 final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSessionWebSocketDelegate, @unchecked Sendable {
     private struct State {
         var opening: CheckedContinuation<Result<String, WsError>, Never>?
@@ -89,7 +120,11 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
     private var session: URLSession!
     private var task: URLSessionWebSocketTask!
 
+    /// Whether `session` is this connection's own, to be invalidated when the connection ends. The app's never is.
+    private let ownsSession: Bool
+
     init(request: URLRequest, configuration: URLSessionConfiguration, maximumMessageSize: Int) {
+        ownsSession = true
         super.init()
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
@@ -98,6 +133,30 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
         session = URLSession(configuration: configuration, delegate: self, delegateQueue: queue)
         task = session.webSocketTask(with: request)
         task.maximumMessageSize = maximumMessageSize
+    }
+
+    /// A connection that is a task of the app's `session` (ADR-060): the session's delegate keeps answering challenges and the
+    /// like, this object is the task's delegate for the handshake and the close frame.
+    init(request: URLRequest, session: URLSession, maximumMessageSize: Int) {
+        ownsSession = false
+        super.init()
+        self.session = session
+        task = session.webSocketTask(with: request)
+        task.maximumMessageSize = maximumMessageSize
+        task.delegate = self
+    }
+
+    /// Lets go of what the connection holds after it ended: its own session (the app's is left alone).
+    private func release(cancelling: Bool = false) {
+        if ownsSession {
+            if cancelling {
+                session.invalidateAndCancel()
+            } else {
+                session.finishTasksAndInvalidate()
+            }
+        } else if cancelling {
+            task.cancel()
+        }
     }
 
     /// Starts the handshake and waits for its outcome.
@@ -112,7 +171,7 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
         case .success:
             return
         case .failure(let error):
-            session.invalidateAndCancel()
+            release(cancelling: true)
             throw error
         }
     }
@@ -160,7 +219,7 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
         let closeCode = URLSessionWebSocketTask.CloseCode(rawValue: Int(code)) ?? .normalClosure
         task.cancel(with: closeCode, reason: reason.isEmpty ? nil : Data(reason.utf8))
         // Lets the close frame go out, then releases the delegate.
-        session.finishTasksAndInvalidate()
+        release()
     }
 
     // MARK: Receiving
@@ -264,7 +323,7 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
             opening.resume(returning: .failure(URLSessionWebSocketConnection.refusal(task: task, error: error)))
         }
         // The task is over: let the session (and with it this delegate) go.
-        session.finishTasksAndInvalidate()
+        release()
     }
 
     /// Why a handshake failed: the HTTP status of a refused upgrade, else a network failure.
