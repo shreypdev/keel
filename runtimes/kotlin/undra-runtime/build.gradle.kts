@@ -8,6 +8,10 @@ plugins {
 }
 
 allprojects {
-    group = "dev.undra"
-    version = "0.1.0-SNAPSHOT"
+    // The repository's own identity: what a checkout's composite build substitutes (`includeBuild`), and the Maven Central
+    // name for later. A release is published by JitPack from its tag with the group and version JitPack asks for
+    // (`com.github.shreypdev.undra`, `v1.0.0`): jitpack.yml at the repository root runs scripts/jitpack-install.sh, which
+    // passes them as -PundraGroup and -PundraVersion (ADR-063).
+    group = providers.gradleProperty("undraGroup").getOrElse("dev.undra")
+    version = providers.gradleProperty("undraVersion").getOrElse("0.1.0-SNAPSHOT")
 }

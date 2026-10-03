@@ -1,0 +1,8 @@
+# JitPack builds Undra's Kotlin runtime from a release tag (ADR-063). An app depends on
+# com.github.shreypdev.undra:<module>:v<version> with https://jitpack.io as a repository for that group;
+# the first request for a tag runs the build below, and its log is
+# https://jitpack.io/com/github/shreypdev/undra/v<version>/build.log (docs/RELEASING.md).
+jdk:
+  - openjdk17
+install:
+  - bash runtimes/kotlin/undra-runtime/scripts/jitpack-install.sh
