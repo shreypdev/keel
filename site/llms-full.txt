@@ -4750,7 +4750,7 @@ Decided in direction and waiting their turn.
 
 - Dart and Flutter bindingsA fourth host after React Native, which proved the pattern. Not started.
 - Desktop as a first-class targetCompose Desktop and macOS samples built in CI over the runtimes that exist; Windows and Linux over the same C ABI.
-- Xcode 27The Swift test target was reported not to build on Xcode 27. This Mac and CI run Xcode 26; it is fixed once it reproduces.
+- Xcode 27The Swift test target was reported not to build on Xcode 27. Our machines and CI run Xcode 26; it is fixed once it reproduces.
 
 Exploring
 

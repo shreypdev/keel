@@ -129,7 +129,7 @@
       "items": [
         { "title": "Dart and Flutter bindings", "text": "A fourth host after React Native, which proved the pattern. Not started.", "teaser": true, "source": ".10x/specs/2026-10-01-v1x-default-choice-design.md §2 G4 and Amendment A" },
         { "title": "Desktop as a first-class target", "text": "Compose Desktop and macOS samples built in CI over the runtimes that exist; Windows and Linux over the same C ABI.", "source": ".10x/specs/2026-10-01-v1x-default-choice-design.md §2 C5; .10x/specs/2026-09-30-launch-v2-design.md §2 Later" },
-        { "title": "Xcode 27", "text": "The Swift test target was reported not to build on Xcode 27. This Mac and CI run Xcode 26; it is fixed once it reproduces.", "source": ".10x/status.md checkpoint 34 (U2, not taken on: needs the crash log)" }
+        { "title": "Xcode 27", "text": "The Swift test target was reported not to build on Xcode 27. Our machines and CI run Xcode 26; it is fixed once it reproduces.", "source": ".10x/status.md checkpoint 34 (U2, not taken on: needs the crash log)" }
       ]
     },
     {

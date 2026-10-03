@@ -244,6 +244,9 @@ html:not(.js) .live-fallback > span { display: none; }
 /* the diagram answers a tap: each screen is a button once hero.js runs (it says so in the stage head) */
 html:not(.js) .tap-hint { display: none; }
 .tap-hint { color: var(--text-3); }
+.tap-hint::before { content: " · "; }
+.dg-toggle { flex: none; white-space: nowrap; }
+@media (max-width: 479px) { .tap-hint { display: block; margin-top: 6px; } .tap-hint::before { content: none; } }
 .dg-live [data-node] { cursor: pointer; outline: none; }
 .dg-live [data-node]:hover .frame { stroke: var(--accent-line); }
 .dg-live [data-node]:focus-visible .frame { stroke: var(--accent); stroke-width: 2.4; }
