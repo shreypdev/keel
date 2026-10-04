@@ -11,16 +11,16 @@ import type { WireErrorDetail } from "./wire/errors.js";
 /** The errors page every code links to (`site/docs/errors.html`, "Runtime messages"). */
 const PAGE = "https://shreypdev.github.io/undra/docs/errors.html";
 
-/** `T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017`: the code, the values it says, the link. */
+/** `T0017: callSync, remote; see https://shreypdev.github.io/undra/docs/errors.html#T0017`: the code, the values it says, the link. */
 export function msg(code: number, ...values: readonly unknown[]): string {
   const id = `T${String(code).padStart(4, "0")}`;
-  return `${id}${values.length > 0 ? `: ${values.join(", ")}` : ""} — ${PAGE}#${id}`;
+  return `${id}${values.length > 0 ? `: ${values.join(", ")}` : ""}; see ${PAGE}#${id}`;
 }
 
-/** `wire: code=unexpected_eof at=12 needed=3 — https://…/errors.html#wire-unexpected_eof`: the code of a wire failure and its fields. */
+/** `wire: code=unexpected_eof at=12 needed=3; see https://…/errors.html#wire-unexpected_eof`: the code of a wire failure and its fields. */
 export function wireText(detail: WireErrorDetail): string {
   const { code, ...fields } = detail;
-  return `wire: code=${code}${Object.entries(fields).map(([key, value]) => ` ${key}=${String(value)}`).join("")} — ${PAGE}#wire-${code}`;
+  return `wire: code=${code}${Object.entries(fields).map(([key, value]) => ` ${key}=${String(value)}`).join("")}; see ${PAGE}#wire-${code}`;
 }
 
 /** Whether the module has the one export that makes it an Undra core: its ABI version says the rest. */

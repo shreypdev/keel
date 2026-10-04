@@ -1,4 +1,4 @@
-# Onboarding — build and test Undra on your machine
+# Onboarding: build and test Undra on your machine
 
 Everything here was exercised end to end on a clean Apple-Silicon Mac. Linux notes are
 inline where the path differs; Windows is untested. Time to a green core suite: ~10
@@ -243,7 +243,7 @@ Every suite is local; nothing needs the network after install (the Bazel suite f
 | Lints (CI-equivalent) | `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings` | clean |
 | TypeScript runtime | `cd runtimes/ts/@undra/runtime && npm ci && npm test`, then `npm run test:dist` (the same suite against the production build, ADR-057: it builds first; the other packages take `UNDRA_TS_DIST=<runtime>/dist/index.js`) | 2,025 pass (1 skipped); 1,983 on the production build |
 | Kotlin runtime | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 784 cases, 0 failed (2 skipped without a native library); the Kotlin testkit adds 32 |
-| Kotlin runtime under CI's compiler | `kotlinc` 2.0.21 on PATH (CI downloads it; brew's is newer and infers more) — `PATH=<kotlin-2.0.21>/bin:$PATH runtimes/kotlin/undra-runtime/scripts/test-local.sh` | same count; a passing run under brew's Kotlin alone is not proof |
+| Kotlin runtime under CI's compiler | `kotlinc` 2.0.21 on PATH (CI downloads it; brew's is newer and infers more): `PATH=<kotlin-2.0.21>/bin:$PATH runtimes/kotlin/undra-runtime/scripts/test-local.sh` | same count; a passing run under brew's Kotlin alone is not proof |
 | Kotlin over the real JNI core | `cargo build --manifest-path crates/undra-ffi/tests/fixture/Cargo.toml` (the fixture core, namespace `undra_fixture`), then `UNDRA_NATIVE_LIB_DIR=$PWD/crates/undra-ffi/tests/fixture/target/debug runtimes/kotlin/undra-runtime/scripts/test-local.sh`; `bash crates/undra-ffi/tests/jni/run.sh` is the end-to-end leg | the JNI smoke cases run (1 skipped: the one that needs the library absent) |
 | Android adapters, JVM unit tests (needs the Android SDK) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:test` | 304 results, 2 skipped (152 cases; the debug and release variants both run) |
 | Android adapters, instrumented tests (needs a booted emulator or device; set `ANDROID_SERIAL` if several are attached) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:connectedAndroidTest` | 149 pass, 1 skipped (the test that switches the device's network off runs only with `-Pandroid.testInstrumentationRunnerArguments.undra.networkToggle=true`) |
@@ -481,14 +481,14 @@ host dylib and in an iOS simulator process linked with the prelinked core.
 
 ## 4. Read before you write code
 
-1. [`CLAUDE.md`](../CLAUDE.md) — the constitution (R1–R12) and engineering standards.
+1. [`CLAUDE.md`](../CLAUDE.md): the constitution (R1–R12) and engineering standards.
    These are enforced in review, not aspirational.
-2. [`docs/SPEC.md`](SPEC.md) — the binding spec. Code that disagrees with it is wrong
+2. [`docs/SPEC.md`](SPEC.md): the binding spec. Code that disagrees with it is wrong
    until an ADR changes it.
-3. [`.10x/adrs/`](../.10x/adrs/) — why the big decisions were made (ADR-014 through 028).
-4. [`.10x/status.md`](../.10x/status.md) and [`.10x/handoff.md`](../.10x/handoff.md) —
+3. [`.10x/adrs/`](../.10x/adrs/): why the big decisions were made (ADR-014 through 028).
+4. [`.10x/status.md`](../.10x/status.md) and [`.10x/handoff.md`](../.10x/handoff.md):
    where the work stands and what v1.x holds.
-5. [`docs/AGENT_WORKFLOW.md`](AGENT_WORKFLOW.md) — how changes are made here: one
+5. [`docs/AGENT_WORKFLOW.md`](AGENT_WORKFLOW.md): how changes are made here, one
    worktree per piece, adversarial review before merge, cleanup after. It applies to
    humans and AI agents alike.
 
@@ -497,7 +497,7 @@ host dylib and in an iOS simulator process linked with the prelinked core.
 Every piece lands whole (R4): unit tests next to the code, integration tests in
 `tests/`, a contract scenario if the wire is touched, a benchmark if the boundary is
 touched, docs on every `pub` item, `clippy -D warnings` clean, and the *full* matrix
-green — not just the crate you touched. If your change alters the wire, the runtime
+green, not just the crate you touched. If your change alters the wire, the runtime
 model, the threading model or a generated public shape, write the ADR first (R11).
 
 **Reviewing generated code.** Do not read the generated Swift, Kotlin and TypeScript of a core

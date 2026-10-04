@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# rename-keel-to-undra.sh — the mechanical product rename (working name -> Undra).
+# rename-keel-to-undra.sh: the mechanical product rename (working name -> Undra).
 #
 #   scripts/rename-keel-to-undra.sh [--dry-run] [PATH ...]
 #
 # With no PATH the whole repository is renamed, except the exclusions below. With PATHs
 # (files or directories, relative to the current directory) only tracked files under them are
-# touched — that is how a branch is brought across the rename after it merged `main`, and how
+# touched. That is how a branch is brought across the rename after it merged `main`, and how
 # an area the default run leaves alone (`site/blog`) is renamed on request. Naming a PATH lifts
 # the default-only exclusion of `site/`; the immutable-history exclusions always apply.
 #
@@ -17,7 +17,7 @@
 #
 # Idempotent: the rules never produce text they match, so a second run is a no-op. It works on
 # tracked files only: `git add` new files first (untracked ones that need the rename are
-# listed as a warning). Lockfiles are not rewritten — regenerate them (`cargo build`,
+# listed as a warning). Lockfiles are not rewritten: regenerate them (`cargo build`,
 # `npm install`). Written for bash 3.2 (the macOS default) and perl 5.
 #
 # Ordered content rules (earlier rules are more specific; the last three are the general case):
@@ -40,7 +40,7 @@
 #
 # NOT touched (by design):
 #   site/ and the launch-v2 planning records .10x/specs/** and .10x/decisions/*/launch-v2.md
-#   (they describe the rename, so "Keel -> Undra" would become nonsense; default run only —
+#   (they describe the rename, so "Keel -> Undra" would become nonsense; default run only;
 #   naming them lifts this) · .10x/reviews/** · .10x/adrs/ADR-018 … ADR-030 (immutable
 #   history; ADR-030 states the mapping) · this script · .10x/decisions/sde/rename-undra.md
 #   (the record of this rename names the old name on purpose) · Cargo.lock, package-lock.json
@@ -220,7 +220,7 @@ for f in ${SORTED[@]+"${SORTED[@]}"}; do
 done
 
 # Tidy: drop the emptied old directories; report the ones that still hold ignored/untracked
-# content (node_modules, build output) — those are stale and safe to delete by hand.
+# content (node_modules, build output): those are stale and safe to delete by hand.
 LEFTOVER=()
 if [ "$DRY_RUN" = 0 ] && [ ${#OLD_DIRS[@]} -gt 0 ]; then
   while IFS= read -r d; do
@@ -296,6 +296,6 @@ if [ -s "$BINARY_LIST" ]; then
   sed 's/^/  /' "$BINARY_LIST"
 fi
 if [ ${#UNTRACKED[@]} -gt 0 ]; then
-  echo "rename: WARNING untracked files were NOT renamed — 'git add' them and run again:"
+  echo "rename: WARNING untracked files were NOT renamed; 'git add' them and run again:"
   printf '  %s\n' "${UNTRACKED[@]}"
 fi

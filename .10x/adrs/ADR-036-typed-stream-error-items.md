@@ -28,12 +28,12 @@ guess:
 * **Swift** decodes `E`, falls back to the string on failure, and maps a `"cancelled: "` prefix to
   `UndraCallError.cancelledByCore`, everything else to `.panicked` (`Core/CallError.swift:120-146`, `:176-185`).
   Correct by string matching; its own doc comment notes that the two encodings can overlap ("`E` wins") and that
-  "a distinct wire flag for core-ended streams is a v2 item (ADR-032, Risks)" — this ADR is that item, brought
+  "a distinct wire flag for core-ended streams is a v2 item (ADR-032, Risks)" - this ADR is that item, brought
   forward while it is still free.
 * **Kotlin and TypeScript** decode `E` only (`fromReply` on a flag-2 failure; Kotlin `ConnectedCore.kt:444-447`,
   golden `Errors.kt:82-84`; TS `core.ts:745-748`). A core string's `u32` length is read as the `u16` variant tag:
-  usually an invalid tag, so the consumer gets `WireException`/`WireError` — outside `UndraException`/`UndraError`
-  — instead of "cancelled"; in principle a wrong variant. For a stream without `E` the consumer gets a raw
+  usually an invalid tag, so the consumer gets `WireException`/`WireError` (outside `UndraException`/`UndraError`)
+  instead of "cancelled"; in principle a wrong variant. For a stream without `E` the consumer gets a raw
   "typed error" reply exception whose string body is never read.
 
 Separately, a stream cannot end with its domain error **mid-flight**: `impl Stream<Item = Result<T, E>>` is
@@ -61,7 +61,7 @@ E0005 (a `Result` nested in a return type), and `__UndraOpening` only maps a fai
    detail String)`. Decoders reject other flags (`InvalidTag`).
 4. **Typed errors mid-stream.** The macro accepts `impl Stream<Item = Result<T, E>>` (alone, or as the `Ok` of
    `Result<…, E>` with the *same* `E`; a different `E` is E0005 with a message naming both) and records it in the
-   schema as `Result<Stream<T>, E>` — the shape bindgen and the platforms already handle, so the canonical form,
+   schema as `Result<Stream<T>, E>` - the shape bindgen and the platforms already handle, so the canonical form,
    the hash rules and the generated code do not change. The dispatcher maps an `Ok(t)` item to flag 0 and an
    `Err(e)` item to flag 2 with `e`, after which the stream ends (its future is dropped). `E` must be a
    `#[undra::error]` enum, as for every `Result`.

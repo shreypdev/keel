@@ -10,7 +10,7 @@ architect, `wt/boundary-adrs` · **Inputs:** Amendments B and C of `.10x/specs/2
 | ADR | Decision in one line | Size |
 |---|---|---|
 | 040 | Objects cross as parameters (`&T`, `Arc<T>`, borrowed) and returns (`Arc<T>`, `Option`/`Vec` of it); every handle the core hands out is one owned host reference, interned so an object has one live handle and one wrapper; issued handles roll back with a failed call; derived handles are transient; handles repartition to 24-bit slot / 40-bit generation | L |
-| 041 | `#[undra::callback]` traits are port instances: the host passes `Arc<dyn Trait>`, calls are port calls prefixed by an instance handle, fire-and-forget or async-with-`Result`, delivered off the core lock (main thread through the mirror's drain by default, or a serial background executor), released and cancelled by reserved fire-and-forget methods — no ABI change | L |
+| 041 | `#[undra::callback]` traits are port instances: the host passes `Arc<dyn Trait>`, calls are port calls prefixed by an instance handle, fire-and-forget or async-with-`Result`, delivered off the core lock (main thread through the mirror's drain by default, or a serial background executor), released and cancelled by reserved fire-and-forget methods - no ABI change | L |
 | 042 | One-field tuple structs are transparent newtypes (Swift `RawRepresentable` struct, Kotlin `value class`, TS branded type); generic structs/enums are templates instantiated by `#[undra::api] pub type X = T<A>;` into plain named records; a `Decimal` wire leaf; opt-in `uuid`/`chrono`/`time`/`rust_decimal`/`bytes` leaf types | M + M + S |
 | 043 | Interval polling (end-to-start, paused in background and offline, per-observer override); infinite queries return `Page<T, C>` and expose a keyed list that grows by recorded appends; `Lazy<T>` becomes a store signal the host pages through, with op 2 carrying length and version | S + M + M |
 | 044 | Each core is a self-contained image (cdylib, or a prelinked static object on iOS) exporting one `<namespace>_undra_api()` function table; JNI natives on a per-core class; artefacts named by namespace; one `UndraCore` per core; `-force_load` goes away; ADR-038 adopts the table | L |
@@ -39,7 +39,7 @@ C4c TS snapshot parity == 049c's first step
 
 Answers to the questions the brief asked:
 
-* **044 before 038 lands?** Yes — before 038's *code*. The RN C++ module must call through the table and key
+* **044 before 038 lands?** Yes, before 038's *code*. The RN C++ module must call through the table and key
   its host object by namespace (ADR-044 §8); building it on global `undra_*` symbols would be rewritten weeks
   later. Only the small enabling half (044a: table, `export_core!`, `undra.h` v2, Swift/Kotlin transports and the
   schema loader through the table) must precede G1; 044b (artefact names, prelink, per-core JNI class, generated
@@ -54,16 +54,16 @@ Answers to the questions the brief asked:
 
 | Wave | Piece (worktree) | ADRs | Size | Needs first | Implementer / reviewer |
 |---|---|---|---|---|---|
-| 0 (now) | `po4-worker-sync` (inside the `parity` piece, as Amendment C allows) | 049 §2.1, §2.5 | S | — | sonnet / opus |
-| 0 | `abi-table` (`wt/abi-table`) | 044a | M | — | opus / opus |
-| 0 | `ios-floor` (`wt/ios-floor`) | 045 | M | — | sonnet / opus |
-| 0 | `newtypes` (`wt/newtypes`; C3's ADR-backed half) | 042 §1 + §4 | M | — | sonnet / opus |
+| 0 (now) | `po4-worker-sync` (inside the `parity` piece, as Amendment C allows) | 049 §2.1, §2.5 | S | none | sonnet / opus |
+| 0 | `abi-table` (`wt/abi-table`) | 044a | M | none | opus / opus |
+| 0 | `ios-floor` (`wt/ios-floor`) | 045 | M | none | sonnet / opus |
+| 0 | `newtypes` (`wt/newtypes`; C3's ADR-backed half) | 042 §1 + §4 | M | none | sonnet / opus |
 | 1 | `multi-core` (`wt/multi-core`) | 044b | L | abi-table | opus / opus |
 | 1 | `generics-decimal` (`wt/generics`) | 042 §2 + §3 | M | newtypes (same files) | sonnet / opus |
-| 1 | `stdlib-v2` (`wt/stdlib-v2`; piece A7) | 049 §1 + ADR-046's standard items + PO-6/PO-8 standard changes | M | — (C4a adopts `StorageError` when it lands) | opus / opus |
+| 1 | `stdlib-v2` (`wt/stdlib-v2`; piece A7) | 049 §1 + ADR-046's standard items + PO-6/PO-8 standard changes | M | none (C4a adopts `StorageError` when it lands) | opus / opus |
 | 1 | `polling` (`wt/polling`) | 043 §1 | S | ADR-034 merged | sonnet / opus |
 | 1 | `symbols-debugging` (`wt/symbols`; Track I, shares D3's build plumbing) | 046 §1 + §2 | M | multi-core | sonnet / opus |
-| 2 | wire revision (already owned by `persistence-v2`) | + 040 §8 snapshot floor and handle split, + 043 §3.2 lazy encodings (codecs and vectors only) | +S | — | opus (persistence-v2's implementer) |
+| 2 | wire revision (already owned by `persistence-v2`) | + 040 §8 snapshot floor and handle split, + 043 §3.2 lazy encodings (codecs and vectors only) | +S | none | opus (persistence-v2's implementer) |
 | 2 | `objects` (`wt/objects`) | 040 | L | runtime-lifecycle merged (same `runtime.rs`); wire revision | opus / opus |
 | 2 | `infinite-lazy` (`wt/paging`; re-scoped E3) | 043 §2 + §3 | M + M | persistence-v2; wire revision; `Lazy::over` after derived-lists | opus / opus |
 | 2 | `panic-reports` (`wt/panic-reports`) | 046 §4 | S | A3; stdlib-v2 | sonnet / opus |
@@ -77,7 +77,7 @@ pieces; the rest are serialised behind Track A and persistence-v2 as the table s
 ## 4. Shared revisions (do each once)
 
 * **The last pre-publication wire revision** (Amendment C item 1: ADR-036 + ADR-037) also carries **ADR-040 §8**
-  (`Snapshot` floor `u64`; handles repartitioned 24/40 — invisible to hosts) and **ADR-043 §3.2** (the `Lazy<T>`
+  (`Snapshot` floor `u64`; handles repartitioned 24/40 - invisible to hosts) and **ADR-043 §3.2** (the `Lazy<T>`
   value, op 2's value and the lazy page reply gain a length and a version; nothing emits them today). If the
   revision lands before 040/043 are implemented, its implementer lands these as codec changes with vectors.
   Nothing else in this set changes the wire: 041 rides SPEC 3.6, 042's `Decimal` is a new, additive leaf, 044
@@ -88,7 +88,7 @@ pieces; the rest are serialised behind Track A and persistence-v2 as the table s
   `HttpError::TooLarge` + `max_body_bytes`, PO-8 `Fs::delete_dir`). One piece (`stdlib-v2`) changes
   `undra-ports`, `undra_bindgen::stdlib` and the three runtimes' standard types together.
 * **C ABI version 2** (044): the function table. Because the table carries its `size` and only ever appends,
-  the v1.2 port-cancellation ADR (Amendment C item 6) can add a host callback later **without another break** —
+  the v1.2 port-cancellation ADR (Amendment C item 6) can add a host callback later **without another break**,
   though ADR-041 §7 shows a reserved-method mechanism that needs no ABI entry at all.
 
 ## 5. Contract scenarios (the grid grows past 19)

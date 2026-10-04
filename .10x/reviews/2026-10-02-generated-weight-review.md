@@ -1,4 +1,4 @@
-# generated-weight (ADR-062, generated code is an artifact; the schema is the API) — adversarial review
+# generated-weight (ADR-062, generated code is an artifact; the schema is the API) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/generated-weight` at `8996f13` (draft PR #3; contains `main` `fd7abb4`) · **Read:** `CLAUDE.md` (R1, R3, R7, R8, R11),
@@ -50,7 +50,7 @@ with no line were fixed too. Nothing blocking is open.
 | L5 | Low | `crates/undra-cli/tests/golden/stores/*/.gitattributes` | The CLI's golden copy of a tree is a real `.gitattributes`, so GitHub collapses that golden in pull requests too. The bindgen goldens (the generator's review surface) are not collapsed. | Open, by choice: one click away, and the CLI golden is a copy of a bindgen case. |
 | L6 | Low | the hash-less headers | "One unified header" holds for the sources and the two JSON files; the C entry, module map, R8 rules, `Package.swift` (line 2), `build.gradle.kts` and `.gitignore` keep four wordings of "Generated … do not edit" (ADR-062 1.1 says so). | Open; wording only. |
 | L7 | Low | `schema_diff.rs` | A core crate renamed is not a line: `crate_name` is a label (SPEC 2.3), but the default Swift module, Kotlin package, npm package, `Undra<Namespace>` entry and default storage directory derive from it unless `undra.toml` overrides them. | Open; follow-up (it needs the project's naming config, which a schema file does not carry). |
-| L8 | Low | — | An infinite query added makes its row `Identifiable` in Swift; an app's own `extension Row: Identifiable` then gets the cross-module "already stated" warning (not an error). | Open; a warning. |
+| L8 | Low | n/a | An infinite query added makes its row `Identifiable` in Swift; an app's own `extension Row: Identifiable` then gets the cross-module "already stated" warning (not an error). | Open; a warning. |
 | L9 | Low | `examples/` | The repository's own examples commit no `schema.json`, so neither `export --check` nor `diff --against` runs on them in CI (R10). | Open; follow-up, listed in ADR-062. |
 
 ## The compatibility cases checked

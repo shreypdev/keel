@@ -1,4 +1,4 @@
-# Track A runtime lifecycle (ADR-034, ADR-035, ADR-019 amendment, ADR-036) — adversarial review
+# Track A runtime lifecycle (ADR-034, ADR-035, ADR-019 amendment, ADR-036) - adversarial review
 
 **Date:** 2026-10-01 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/runtime-lifecycle` at `480a0f3` (172 files, +7,220/−917 against `main`; `main` merged at `42fdd42`, not re-merged

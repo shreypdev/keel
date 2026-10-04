@@ -1,4 +1,4 @@
-# ns-storage (ADR-044 amendment A: default storage per namespace) — adversarial review
+# ns-storage (ADR-044 amendment A: default storage per namespace) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/ns-storage`
 at `bc6061d` (`main` `3fc8b7f` merged), reviewed with `main` at `d1b35b5` (ios-floor) merged once at the end · **Scope (four

@@ -1,4 +1,4 @@
-# SDE — the dev loop: Android remote mode and dev-client reconnect (wt/dev-loop, 2026-10-01)
+# SDE - the dev loop: Android remote mode and dev-client reconnect (wt/dev-loop, 2026-10-01)
 
 Tracks B1 and B2 of the v1.x design (`.10x/specs/2026-10-01-v1x-default-choice-design.md`). The decision is
 ADR-051 (written first, R11: it touches the dev transport contract and public runtime API; the envelope, the C

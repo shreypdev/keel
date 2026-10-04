@@ -1,4 +1,4 @@
-# Review — launch-dist (ADR-063, "Launch distribution from GitHub"), PR #14
+# Review: launch-dist (ADR-063, "Launch distribution from GitHub"), PR #14
 
 Adversarial review of `wt/launch-dist` at `70cf7f7` (+3,192 −1,264, 88 files), 2026-10-03; the fixes land on `824dc20` (the
 branch with main merged, #12 and #13). Everything below was run on
@@ -37,7 +37,7 @@ show is listed at the end; the checklist's release candidate (step 4) exercises 
 
 ## What was run
 
-* `packaging/rehearse-launch.sh` from a clean directory (web, iOS, Android) on `70cf7f7`: all ok — `web 15 s`, `iOS 24 s`,
+* `packaging/rehearse-launch.sh` from a clean directory (web, iOS, Android) on `70cf7f7`: all ok - `web 15 s`, `iOS 24 s`,
   `Swift package undra 0.1.0-rehearsal.1 from the bare clone`, `Android 22 s`. With the fixes and `--version 1.0.0` (the
   launch's own shape: tag `v1.0.0`, `from: "1.0.0"`, `:v1.0.0`, `.../v1.0.0/undra-runtime-1.0.0.tgz`): all ok, `init` printing
   the three override warnings, and in that project, without the overrides, `undra bindgen --check` up to date and

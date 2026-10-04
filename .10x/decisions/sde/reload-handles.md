@@ -1,4 +1,4 @@
-# SDE: reload-handles — query handles across every restore (ADR-059), 2026-10-02
+# SDE: reload-handles - query handles across every restore (ADR-059), 2026-10-02
 
 Branch `wt/reload-handles`, from `main` `a309e9f`. The binding text is ADR-059 (Accepted, with its "Implementation note"
 of ten items: what differs from the text and why); the architect's note is `.10x/decisions/architect/reload-handles.md`.

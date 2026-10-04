@@ -1,4 +1,4 @@
-# Undra v1 — integrator's handoff
+# Undra v1: integrator's handoff
 
 Reconstructed 2026-09-30 on the takeover branch after merging the four outstanding
 branches (`wt/integrate`, `wt/ts-core`, `wt/kotlin-core`, `wt/swift-core`). The original
@@ -31,26 +31,26 @@ runners (only `wire-vectors.json` exists), CI workflows.
 Each piece in its own worktree (`scripts/wt.sh new <slug>` → `.work/<slug>`, branch
 `wt/<slug>`), implemented from a precise brief, adversarially reviewed before merge.
 
-1. **undra-ports** (SPEC §8) — the ten standard ports with `#[undra::port]`, the §8 records,
+1. **undra-ports** (SPEC §8): the ten standard ports with `#[undra::port]`, the §8 records,
    and all fakes + `TestRuntime` glue. The record layouts and ids are *already implemented*
    by the three platform runtimes' adapters; the Rust side must match them, not the other
    way round. Cross-check against `runtimes/*/…/adapters` and the wire vectors.
-2. **undra-query** (SPEC §9) — QueryClient, QueryHandle store object (signals data/status/
+2. **undra-query** (SPEC §9): QueryClient, QueryHandle store object (signals data/status/
    error/fetching/updated_at), refetch triggers, retry w/ jitter, dedup, mutations with
    optimistic patches + rollback, offline queue, persistence. Implements the traits in
    `crates/undra/src/query.rs`. Handle method ids `0x21d1b9e2` refetch / `0x44cec2fa`
    invalidate (already baked into the runtimes).
-3. **undra-ffi** (SPEC §6, §6.1, §7) — C ABI, JNI shim (`dev.undra.runtime.UndraNative`,
+3. **undra-ffi** (SPEC §6, §6.1, §7): C ABI, JNI shim (`dev.undra.runtime.UndraNative`,
    RegisterNatives via JNI_OnLoad), wasm exports/imports exactly as
    `runtimes/ts/@undra/runtime/src/transport/wasm-main.ts` consumes them. Unsafe only here,
    every block `// SAFETY:`. The Kotlin NativeSmokeTests and the TS wasm tests are the
    acceptance tests.
-4. **undra-transport** (SPEC §3.2, §5.10) — WebSocket server for `undra dev` (tungstenite),
+4. **undra-transport** (SPEC §3.2, §5.10): WebSocket server for `undra dev` (tungstenite),
    envelope framing, Hello/schema check, remote transport contract the three runtimes
    already test against fake servers.
-5. **undra-cli** — init/build/dev/adopt/doctor/bindgen; XCFramework/AAR/npm packaging;
+5. **undra-cli**: init/build/dev/adopt/doctor/bindgen; XCFramework/AAR/npm packaging;
    schema extraction by dlopen (§13).
-6. **examples/playground** — one Rust core (todos, counter, 10k keyed list, a query,
+6. **examples/playground**: one Rust core (todos, counter, 10k keyed list, a query,
    benchmark methods); React web app, Compose Android app, SwiftUI iOS app; run on
    Chrome, Android emulator, iOS simulator.
 7. **Contract scenarios** (SPEC §14) on all three platforms; **bench/RESULTS.md** against

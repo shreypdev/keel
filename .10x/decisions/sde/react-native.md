@@ -1,4 +1,4 @@
-# SDE — React Native runtime (wt/react-native, 2026-10-01)
+# SDE - React Native runtime (wt/react-native, 2026-10-01)
 
 Implements ADR-038 (React Native is a fourth host of the C ABI), v1.2 bet G1. No wire, C ABI, wasm
 ABI, schema or generated-code change; nothing in `runtimes/ts/@undra/runtime` changed.

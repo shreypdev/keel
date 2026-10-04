@@ -1,4 +1,4 @@
-# CTO — launch-v2 (2026-09-30)
+# CTO - launch-v2 (2026-09-30)
 
 **Problem.** v1 is complete and green, but the working name "Keel" cannot be owned on
 npm or crates.io and collides with an active Rust project; nobody can install the CLI
@@ -20,7 +20,7 @@ that decide adoption; and the performance story stops at microbenchmarks.
    index). A static-site generator costs more in lock-in than it saves at 20 pages.
 4. The stress benchmark is a product feature: its numbers go on the landing page and its
    budgets gate CI (R9). If it shows that delivery floods the platform thread, the fix
-   (frame-coalesced delivery) gets an ADR and a v1.1 line — that is what the suite is for.
+   (frame-coalesced delivery) gets an ADR and a v1.1 line - that is what the suite is for.
 5. Comparison posts are written to be read by the other projects' maintainers: four
    posts, fact-checked adversarially, each with an honest "when to pick the other tool".
 6. Founder-only actions (npm org, tap repository, tokens, the `v1.0.0` tag, Search

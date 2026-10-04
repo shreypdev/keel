@@ -27,7 +27,7 @@ it lives as long as the call. A `Ctx` kept by something the runtime itself owns 
 ADR-023 made `shutdown` break every cycle (it drops tasks, subscribers, Rust bindings and objects), so an
 embedder that calls it is fine. The audit's probe (threaded `Runtime::new`, the owner's `Arc` dropped without
 `shutdown`) shows what happens otherwise: a runtime with a looping task or a subscriber that captured its `Ctx`
-is still alive after the owner let go — with its `undra-core`, timer and blocking threads running — and stays
+is still alive after the owner let go - with its `undra-core`, timer and blocking threads running - and stays
 alive; even an idle runtime survives 6 to 8 seconds (the hydration retries) before it is freed. `Runtime::drop`
 (`runtime.rs:2314-2330`) already tears everything down; it just never runs.
 
@@ -36,7 +36,7 @@ works: `spawn`, `sleep`, `port_call` and `event` are WARN-logged no-ops and `sle
 The holder has no typed way to learn the runtime is gone, and a polling loop outside a task spins.
 
 On the platforms, Swift's `shutdown()` calls `undra_shutdown`; Kotlin's `close()` on an in-process core detaches
-the host and leaves the native core running — its tasks, timers and port traffic continue — and refuses a later
+the host and leaves the native core running - its tasks, timers and port traffic continue - and refuses a later
 `load` in the same process (`UndraCore.kt:221-226`, `InprocTransport.kt:93-99`, `:174-176`); TS drops the wasm
 instance (the wasm ABI has no shutdown export, and dropping the instance ends everything).
 
@@ -75,7 +75,7 @@ instance (the wasm ABI has no shutdown export, and dropping the instance ends ev
 8. **Owners.** The `Arc<Runtime>` returned by `Runtime::new`/`init` is the owner. With 4–7, a runtime whose app
    code keeps only `WeakCtx`s across awaits is freed when the owner drops it, and `Drop` performs the teardown.
    Because a call no longer pins the runtime, `Drop` must also answer what is in flight exactly as `shutdown`
-   does (status 3 for calls, the cancelled stream item for streams, each once — the `Host` is still owned by the
+   does (status 3 for calls, the cancelled stream item for streams, each once - the `Host` is still owned by the
    runtime while it drops), so a host never waits for a reply that cannot come. `Drop` may run on the core thread
    (the last upgrade released at the end of a poll); it then skips joining itself, as it does today. The global runtime's owner is the
    global slot; `undra_shutdown` remains the only way to end it. **Kotlin's `UndraCore.close()` on an in-process
@@ -105,7 +105,7 @@ instance (the wasm ABI has no shutdown export, and dropping the instance ends ev
   `Drop` that may run on the core thread cannot join the threads it stops (ADR-023 L5).
 * **Leave it to `shutdown`.** It is correct for embedders that call it, and ADR-023 made it so. It leaves
   `Runtime::new` embedders, tests and Kotlin's `close()` leaking threads, and gives long-lived holders no typed
-  end — the founder's "a dropped or shut-down runtime is released and the task ends with a typed outcome".
+  end - the founder's "a dropped or shut-down runtime is released and the task ends with a typed outcome".
 * **A lint that refuses `Ctx` fields in stores.** Too strict: `Ctx` fields are correct when the embedder shuts
   down, and the playground uses them. A recommendation plus decision 7 is enough.
 
@@ -154,7 +154,7 @@ instance (the wasm ABI has no shutdown export, and dropping the instance ends ev
    shutdown and `Err(Dropped)` after drop; `closed()` completes on shutdown; `WeakCtx::sleep` resolves
    `Err(Gone::ShutDown)` when shutdown starts mid-sleep and does not keep the runtime alive; Kotlin `close()` then `load()` in
    one JVM works and a periodic core task makes no port call after `close()`.
-9. Contract scenario (all three runtimes): "close ends the core's work" — after close/shutdown, no port call
+9. Contract scenario (all three runtimes): "close ends the core's work" - after close/shutdown, no port call
    reaches the host and a new load starts with fresh handles.
 10. Bench: `streams/*` rows (one upgrade per item) within budget; sync-call rows unchanged.
 
@@ -163,7 +163,7 @@ instance (the wasm ABI has no shutdown export, and dropping the instance ends ev
 Builds on ADR-023 (shutdown answers and releases everything) and ADR-022 (generations survive re-init). Does
 not depend on ADR-035/036/037; lands first in `wt/runtime-lifecycle` together with them.
 
-## Amendment A (2026-10-01) — what a call pins
+## Amendment A (2026-10-01): what a call pins
 
 Decision 8 says "because a call no longer pins the runtime". That is precise only for **the task**. The runtime's
 own call and stream tasks hold a `WeakCtx` and upgrade per item (decision 4), so an idle stream between items and a

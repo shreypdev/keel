@@ -44,11 +44,11 @@ Brief: `.10x/specs/2026-10-01-derived-keyed-lists-impl.md`. Implementation waits
 
 ADR-039 is accepted in direction; it flips to Accepted with its implementation, which starts
 after Track A (ADR-034/035 and the ADR-019 amendment) lands because they rewrite the same files.
-1. Parameters in v1 (`filter_with`, `sort_by_key_with`): **yes** — the playground's `visible`
+1. Parameters in v1 (`filter_with`, `sort_by_key_with`): **yes** - the playground's `visible`
    needs them; closures that read other signals stay out of v1 and panic in debug.
 2. Names: **`DerivedList<T>`** and **`derive()`**.
-3. Caps: 4,096 pending ops; 256 ops for a parameter change, else a full value — **yes**.
+3. Caps: 4,096 pending ops; 256 ops for a parameter change, else a full value - **yes**.
 4. `count()` in v1: **yes**.
-5. Ties in source order; a sort-key change is Move + Update — **yes**.
+5. Ties in source order; a sort-key change is Move + Update - **yes**.
 The playground moves to recorded ops as part of the implementation so the benefit is visible on
 the landing page's numbers; contract scenario S19 brings the grid to 19 × 3.

@@ -100,7 +100,7 @@ describe("the development and the production flavour throw the same errors", () 
   it("says a sentence in the development build and a code with a link in the production build, for each of them that the runtime words itself", async () => {
     const dev = await runtime("development");
     const prod = await runtime("production");
-    const link = /^(T\d{4}(: .*)? — |wire: code=\w+( \w+=\S+)* — )https:\/\/shreypdev\.github\.io\/undra\/docs\/errors\.html#(T\d{4}|wire-\w+)$/;
+    const link = /^(T\d{4}(: .*)?; see |wire: code=\w+( \w+=\S+)*; see )https:\/\/shreypdev\.github\.io\/undra\/docs\/errors\.html#(T\d{4}|wire-\w+)$/;
     let worded = 0;
     for (const [name, scenario] of Object.entries(scenarios)) {
       const d = (await scenario(dev)) as Error;
@@ -142,7 +142,7 @@ describe("the development and the production flavour throw the same errors", () 
     const prod = await runtime("production");
     const panicked = new prod.UndraCallError.Panicked("index out of bounds: 7", "at core::foo");
     expect(panicked.panicMessage).toBe("index out of bounds: 7");
-    expect(panicked.message).toMatch(/^T\d{4}: index out of bounds: 7 — https:\/\//);
+    expect(panicked.message).toMatch(/^T\d{4}: index out of bounds: 7; see https:\/\//);
     expect(panicked.kind).toBe("panicked");
   });
 });

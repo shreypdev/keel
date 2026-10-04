@@ -11,7 +11,7 @@ One commit per item (`fix(streams)` O1, `fix(swift)` O2, `fix(restore)` O3, `fix
 the ADR notes, the size trim (`perf(runtime)`: the web gate, below) and the abort-order fix of O7 that the contract grid found
 (`fix(ts)`). Every test below was run **before** the fix (or with the fix reverted in place) and fails there.
 
-## O1 — streams that take objects or callbacks
+## O1 - streams that take objects or callbacks
 
 **Cause.** Swift's stream branch wrote no `requireOwn` and no give-back (an object of another core was sent; a refused
 stream's lent listener stayed in the registry, held strongly). TypeScript lent outside `lending`, so a refused stream
@@ -59,7 +59,7 @@ TypeScript lends nothing (it opens at the first collection). The TypeScript obje
 synchronously from the method, not at iteration (`lendingStream` covers streams with callbacks, where the check sits
 inside the lazily run encoder).
 
-## O2 — Swift store wrappers
+## O2 - Swift store wrappers
 
 **Cause.** (a) `UndraStore.init` registered with the mirror unconditionally and the mirror was last-wins, so the second
 wrapper of a handle (an `Arc<Self>` `new` returning an interned store: a Swift initializer cannot return the first)
@@ -83,7 +83,7 @@ observed cleared); `testAdoptingWhileOtherThreadsCloseTheSameHandleIsConsistent`
 on global queues, then the invariants). **Limit:** a duplicate wrapper is not the handle's identity-map wrapper, so after the
 first closes a later `adopt` makes a third; all work (each owns its reference).
 
-## O3 — restore and object parameters
+## O3 - restore and object parameters
 
 **Cause.** `cancel_calls_replaced_by_restore` checked a call's receiver only; an async free function or a stream that took
 a `&Store` kept running on the pre-restore store and answered status 0 (ADR-023's M3 hazard through ADR-040's parameters).
@@ -102,7 +102,7 @@ parameter across a restore is answered `Cancelled`, once, and the restored store
 ends with one failed item (flag 3); a call whose store parameter was released before the restore (and is not in the snapshot)
 carries on. The first two fail without the change (`expected exactly one, got []`).
 
-## O4 — TypeScript crash recovery and give-backs
+## O4 - TypeScript crash recovery and give-backs
 
 **Cause.** A `Release` sent while the core restarts was kept in a `Set` and replayed as `core.release(handle)`, which
 unregisters the mirror, forgets the handle and its observed signals and releases: for a give-back (a superseded wrapper's
@@ -121,7 +121,7 @@ observation and updates survive, and another handle's two releases go out twice;
 frees the live wrapper, a post-restart one gives back normally, and with no wrapper at all it releases. Both fail with the old
 replay and the old finalizer.
 
-## O5 — `undra dev` sessions
+## O5 - `undra dev` sessions
 
 **Cause.** (1) A constructor reply was recorded in the connection's `constructed` *set* and, for an `Arc<Self>`
 constructor, again in the origin ledger: a disconnect gave back one reference more than the client held (an in-process
@@ -152,7 +152,7 @@ Swift `testALostConnectionKeepsTheRegistryAndClosingTheCoreDropsIt` (also: the r
 **Limit:** after a hot reload the new core has no proxies for the old instance ids, so a client's registry keeps entries the
 new core never releases until the client closes (dev only).
 
-## O6 — a constructor that fails after its body
+## O6 - a constructor that fails after its body
 
 **Cause.** A constructor with callback parameters has made its proxies by the time `issue_constructed` or
 `__undra_attach_all` fails; the unpublished value drops them (`__release`), yet the call answered status 5 ("refused: owns
@@ -168,7 +168,7 @@ the transport, not recorded for the origin: O5).
 whose second construction cannot attach; fails with the old macro: "expected a failed call, got BadRequest"; the proxy is
 released once), `undra-runtime/tests/layers.rs` (`Failed` is status 2 with the reason, sync and async).
 
-## O7 — an abort racing a successful reply
+## O7 - an abort racing a successful reply
 
 **Cause.** `_send`'s abort handler sent `Cancel` and deleted the pending entry, so a success reply already on its way
 (worker, remote and React Native transports; `wasm-main` answers inside the cancel) found no entry and its object references
@@ -188,7 +188,7 @@ an orphan is unchanged: fails without the tombstone: `pendingCalls` 0 not 1) and
 (over the stand-in native module: the abandoned reply's reference goes back by its two halves). **Not done:** Kotlin and Swift
 keep their documented limit (the same race, in process: a hook on `UndraCore.call` would fix each).
 
-## O8 — Kotlin `invoke` for every `new`, and the Swift weak wrapper
+## O8 - Kotlin `invoke` for every `new`, and the Swift weak wrapper
 
 **Kotlin.** `operator fun invoke(<params>, ctx = ..)` is generated for every `new` (parameters, `suspend`, fallible), as a
 forwarder to `create`; a golden `Vault` (suspending, fallible, takes a parameter) is in `object_graph`, and the run fixture calls

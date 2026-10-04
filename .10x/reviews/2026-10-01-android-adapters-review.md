@@ -1,4 +1,4 @@
-# Android platform adapters — adversarial security review
+# Android platform adapters - adversarial security review
 
 **Date:** 2026-10-01 · **Reviewer:** security-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/android-adapters` at `5c93d45` (10 commits on `main` `6ab7b8c`) · **Read:** `CLAUDE.md` (R6, R12, the Kotlin rule),

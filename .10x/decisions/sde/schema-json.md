@@ -1,4 +1,4 @@
-# SDE — full-JSON `undra_schema_json` and public Swift standard types (wt/schema-json, 2026-10-01)
+# SDE - full-JSON `undra_schema_json` and public Swift standard types (wt/schema-json, 2026-10-01)
 
 Track C1 and C2 of the v1.x design (`.10x/specs/2026-10-01-v1x-default-choice-design.md`): the two
 queue items "`undra_schema_json` full-JSON variant so dlopen bindgen keeps docs" and "Swift runtime

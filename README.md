@@ -8,8 +8,8 @@
 
 **[Docs & site → shreypdev.github.io/undra](https://shreypdev.github.io/undra/)**
 
-Undra owns everything **under the pixels** of your iOS, Android and web apps — domain
-logic, reactive state, the data layer, persistence, and the dev loop — while the UI stays
+Undra owns everything **under the pixels** of your iOS, Android and web apps (domain
+logic, reactive state, the data layer, persistence, and the dev loop) while the UI stays
 100% native: SwiftUI, Jetpack Compose, React and React Native, written by hand, the way
 platform engineers want to write them.
 
@@ -32,7 +32,7 @@ platform. Your *logic* stops being written three times.
 
 ## Why it's fast
 
-Reads never cross the language boundary — each platform holds a mirror of your state,
+Reads never cross the language boundary: each platform holds a mirror of your state,
 updated by compact binary change-sets, once per transaction. Lists cross as O(change)
 patches, not O(list) copies, and a filtered or sorted view of a list costs what changed. The
 numbers below are measured by the benchmark suite in [`bench/`](bench/RESULTS.md) on an
@@ -73,11 +73,11 @@ Sustained-load results (a firehose, keyed churn, fan-out, a 60-second soak) are 
 
 ## Why you can trust it
 
-* **<!--trust:tests-total-->7,770<!--/trust--> tests across the platforms** — Rust
+* **<!--trust:tests-total-->7,770<!--/trust--> tests across the platforms**: Rust
   <!--trust:tests-rust-->3,812<!--/trust--> · TypeScript <!--trust:tests-typescript-->2,043<!--/trust--> ·
   Kotlin <!--trust:tests-kotlin-->890<!--/trust--> · Swift <!--trust:tests-swift-->914<!--/trust--> ·
-  React Native <!--trust:tests-react-native-->111<!--/trust--> — the counts at the last merge, after the full matrix
-  ran (the ledger is [`.10x/status.md`](.10x/status.md)).
+  React Native <!--trust:tests-react-native-->111<!--/trust-->. These are the tests that passed in a recent green CI
+  run, each suite's own count ([`site/data/tests.json`](site/data/tests.json) names the run).
 * **<!--trust:scenarios-->35<!--/trust--> wire-level contract scenarios, run on every platform**
   (<!--trust:cells-->101<!--/trust-->/<!--trust:cells-->101<!--/trust--> cells pass; two scenarios are about the web
   host and run on TypeScript only): sync/async calls, typed errors, cancellation, stream backpressure, keyed patches,
@@ -118,11 +118,11 @@ impl Todos {
 }
 ```
 
-`undra bindgen` emits code a native reviewer would sign off on — no wrappers, no
-reflection, no `Any`:
+`undra bindgen` emits code a native reviewer would sign off on (no wrappers, no
+reflection, no `Any`):
 
 ```swift
-// SwiftUI — the store is @Observable; reads are local, instant.
+// SwiftUI: the store is @Observable; reads are local, instant.
 struct TodoScreen: View {
     let store: Todos           // try Todos() after UndraPlaygroundCore.load()
     var body: some View {
@@ -133,13 +133,13 @@ struct TodoScreen: View {
 ```
 
 ```kotlin
-// Compose — signals are StateFlows.
+// Compose: signals are StateFlows.
 val todos by store.visible.collectAsState()
 LazyColumn { items(todos, key = { it.id }) { TodoRow(it) } }
 ```
 
 ```tsx
-// React and React Native — hooks from @undra/runtime/react (vue / svelte / solid adapters ship too).
+// React and React Native: hooks from @undra/runtime/react (vue / svelte / solid adapters ship too).
 const store = useUndra(Todos);
 const todos = useSignal(store?.visible);
 ```
@@ -184,8 +184,8 @@ cargo install --path crates/undra-cli
 undra init myapp --dir .. --undra-path .  # the project next to the checkout, using it
 ```
 
-Then open `web/` (`npm install && npm run dev`), `ios/` (Xcode) or `android/` (Gradle) —
-each shell is a plain native project wired to your core, and each builds the core itself (a Gradle
+Then open `web/` (`npm install && npm run dev`), `ios/` (Xcode) or `android/` (Gradle).
+Each shell is a plain native project wired to your core, and each builds the core itself (a Gradle
 task, an Xcode build phase, a Vite plugin: there is no manual `undra build`). `undra build --platform
 ios,android,web` is the explicit form: an XCFramework, 16 KB-aligned `.so`s and a `wasm-opt`'d module.
 Building with Bazel? [`bazel/`](bazel/) has the rules (`undra_core`, `undra_bindings`, and the Swift, Kotlin and
@@ -196,37 +196,37 @@ that `bazel test`s a core on the JVM, Node and (on macOS) Swift; the [guide](htt
 moves a project to a newer Undra in one step.
 
 Prefer to explore first? The [playground](examples/playground/README.md) is the same
-thing, fully built: todos, a counter, a 10,000-row keyed list, and remote
-queries/mutations with an offline switch — on all three platforms.
+thing, fully built, on all three platforms: todos, a counter, a 10,000-row keyed list, and remote
+queries/mutations with an offline switch.
 
 ## What's in it
 
 The core: records, enums, typed errors, **stores** (signals, computeds, keyed lists), **queries and
 mutations** (staleness, dedup, retry with jitter, optimistic updates with surgical rollback, offline queue,
-persistence), ten **ports** (Http, Kv, SecureStore, Fs, Clock, Rng, Log, Timer, Connectivity, Lifecycle — with
-platform default adapters and deterministic Rust fakes), streams with backpressure, cancellation,
+persistence), ten **ports** (Http, Kv, SecureStore, Fs, Clock, Rng, Log, Timer, Connectivity, Lifecycle) with
+platform default adapters and deterministic Rust fakes, streams with backpressure, cancellation,
 snapshot/restore, a schema-hash compatibility gate, `undra dev` with a live remote core, and teaching
 diagnostics for every macro mistake (`error[undra::E0007]: …` with what/why/fix/docs).
 
 And, each with its page:
 
-* **React Native** — the same bindings and TypeScript mirror over a TurboModule on the C ABI, with the ten
+* **React Native.** The same bindings and TypeScript mirror over a TurboModule on the C ABI, with the ten
   default adapters: [docs/REACT_NATIVE.md](docs/REACT_NATIVE.md).
-* **Devtools with time travel** — a page served by `undra dev`: live stores, a change-set timeline you can scrub,
+* **Devtools with time travel.** A page served by `undra dev`: live stores, a change-set timeline you can scrub,
   port and query logs, behind a per-run token; state, and the query handles on screen, are kept across a rebuild:
   [docs/DEV_LOOP.md](docs/DEV_LOOP.md).
-* **Derived lists** — a filtered or sorted view of a keyed list costs what changed (158 bytes, not 353 KB, for one
+* **Derived lists.** A filtered or sorted view of a keyed list costs what changed (158 bytes, not 353 KB, for one
   edited row in 10,000): [docs](https://shreypdev.github.io/undra/docs/concepts.html#derived-lists).
-* **WebSocket, SSE and Db ports** — opt-in real-time streams and SQL over SQLite with deterministic fakes on every
+* **WebSocket, SSE and Db ports.** Opt-in real-time streams and SQL over SQLite with deterministic fakes on every
   platform: [real time](https://shreypdev.github.io/undra/docs/realtime.html),
   [database](https://shreypdev.github.io/undra/docs/db.html).
-* **Migrations** — a changed schema still restores what the last build stored, and storage ports fail with typed
+* **Migrations.** A changed schema still restores what the last build stored, and storage ports fail with typed
   errors: [Shipping an update](https://shreypdev.github.io/undra/docs/updates.html).
-* **A testing kit** — previews that run your real core with scripted ports and a manual clock, and recorded sessions
+* **A testing kit.** Previews that run your real core with scripted ports and a manual clock, and recorded sessions
   that replay in tests on Swift, Kotlin, TypeScript and Rust: [docs/TESTING.md](docs/TESTING.md).
-* **iOS 15 and 16** — a lower deployment target generates `ObservableObject` stores; proven by compilation and a
+* **iOS 15 and 16.** A lower deployment target generates `ObservableObject` stores; proven by compilation and a
   runtime probe on iOS 26.5, not yet on an iOS 15 or 16 runtime: [docs/IOS_15_16.md](docs/IOS_15_16.md).
-* **Generics** — a generic record, enum, function, method, object or store crosses as the instantiations you list:
+* **Generics.** A generic record, enum, function, method, object or store crosses as the instantiations you list:
   overloads for functions, one ordinary class per alias for objects and stores. Declared, not open-ended; no native
   generic types: [Generic functions, objects and stores](https://shreypdev.github.io/undra/docs/generics.html).
 * Also: objects and host callbacks across the boundary, newtypes and `Decimal`, paged and lazy lists,
@@ -265,10 +265,10 @@ package (see [`docs/blueprint.html`](docs/blueprint.html)).
 
 ## For contributors
 
-* **[docs/ONBOARDING.md](docs/ONBOARDING.md)** — machine setup and how to run every suite.
-* **[docs/AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md)** — the worktree-per-piece workflow
-  (humans and AI agents alike): brief → implement → adversarial review → merge → clean up.
-* **[CLAUDE.md](CLAUDE.md)** — the constitution: twelve non-negotiable rules (R1–R12)
+* **[docs/ONBOARDING.md](docs/ONBOARDING.md)**: machine setup and how to run every suite.
+* **[docs/AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md)**: the worktree-per-piece workflow for humans and AI
+  agents alike (brief → implement → adversarial review → merge → clean up).
+* **[CLAUDE.md](CLAUDE.md)**: the constitution, twelve non-negotiable rules (R1–R12)
   every change is held to.
 
 ## License

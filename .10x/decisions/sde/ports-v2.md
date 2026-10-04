@@ -1,4 +1,4 @@
-# SDE — ports-v2: the WebSocket, Sse and Db ports (wt/ports-v2, 2026-10-01)
+# SDE - ports-v2: the WebSocket, Sse and Db ports (wt/ports-v2, 2026-10-01)
 
 Pieces G2 and G3 of the v1.x design (`.10x/specs/2026-10-01-v1x-default-choice-design.md`, Track G; the founder
 approved both bets in Amendment A). The decisions are ADR-047 (WebSocket + SSE) and ADR-048 (Db), written first

@@ -7,7 +7,7 @@ the deviations, numbers and counts.
 
 ## What is built, by layer
 
-### The core (Rust) — done first, the platforms build on it
+### The core (Rust) - done first, the platforms build on it
 
 * `undra-wire`: `Handle` is 24 bits of slot and 40 bits of generation (`Handle::new(index: u32, generation: u64)`,
   `MAX_INDEX`, `MAX_GENERATION`); the `Snapshot`'s `generation_floor` is a `u64`; `contract-tests/wire-vectors.json`

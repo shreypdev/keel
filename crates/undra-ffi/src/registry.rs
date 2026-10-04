@@ -165,8 +165,8 @@ impl Drop for Invocation {
 pub(crate) struct Registry {
     ports: RwLock<BTreeMap<u32, Arc<PortReg>>>,
     /// Registrations taken out of `ports` whose callbacks may still be running. Every removal
-    /// of a port id waits for ALL entries of that id here — not only the one it took out of
-    /// the map itself — so the loser of a removal race still returns only once no callback of
+    /// of a port id waits for ALL entries of that id here (not only the one it took out of
+    /// the map itself), so the loser of a removal race still returns only once no callback of
     /// that port runs (re-review N1). Entries leave the list once drained.
     draining: Mutex<Vec<(u32, Arc<PortReg>)>>,
     /// Tests only: runs while a removal holds registrations it took out of the map (the window in
@@ -202,7 +202,7 @@ impl Registry {
         self.settle(Some(port_id));
     }
 
-    /// Removes the registration of `port_id`, returning once none of its callbacks is running —
+    /// Removes the registration of `port_id`, returning once none of its callbacks is running,
     /// including callbacks of a registration that a concurrent removal or shutdown took out of
     /// the map first (re-review N1).
     pub(crate) fn remove(&self, port_id: u32) {
@@ -255,7 +255,7 @@ impl Registry {
     /// Waits until no callback of `port_id` (every port for `None`) still runs: the entries this
     /// removal published AND the ones concurrent removals published. Skips all waiting, with a
     /// debug assertion and a FATAL log, when called from inside a port callback (undra.h forbids
-    /// it; waiting could only deadlock — re-review N2).
+    /// it; waiting could only deadlock; re-review N2).
     fn settle(&self, port_id: Option<u32>) {
         let on_callback_thread = RUNNING
             .try_with(|running| !running.borrow().is_empty())

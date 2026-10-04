@@ -42,7 +42,7 @@ const K = await import(pathToFileURL(dist).href);
 // build, or the code of the production one, so the same acceptance runs against either (`UNDRA_TS_DIST=<runtime>/dist/index.js`).
 const production = /^T\d{4}\b/.test(new K.UndraSessionLostError().message);
 const words = (message, sentence, code) =>
-  production ? assert.match(message, new RegExp(`^${code}\\b.* — https://\\S+/errors\\.html#${code}$`), message) : assert.match(message, sentence, message);
+  production ? assert.match(message, new RegExp(`^${code}\\b.*; see https://\\S+/errors\\.html#${code}$`), message) : assert.match(message, sentence, message);
 const {
   ALL_SIGNALS,
   CallTarget,

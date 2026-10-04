@@ -1,4 +1,4 @@
-# SDE: types-paging, sub-piece `tp-query` — interval polling and infinite queries (ADR-043 decisions 1, 2 and the Rust half of 4) — 2026-10-01
+# SDE: types-paging, sub-piece `tp-query` - interval polling and infinite queries (ADR-043 decisions 1, 2 and the Rust half of 4) - 2026-10-01
 
 Branch `wt/tp-query`, off the foundation commit `6013803`. Implements ADR-043 decision 1 (polling) and decision 2
 (infinite queries) in `undra-query`, the query macro and the facade, with E0073, the SPEC text for those parts and the

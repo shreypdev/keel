@@ -19,7 +19,7 @@ changed: every class, method, `kind` and typed field of SPEC 17.1 is the same in
   load with its transport; `stats`/`snapshot`/`restore`/`runInBackground` on first call; per-transport `load()` mapping; two rare error classes;
   trims.
 * Step 13: every sentence the runtime throws or logs is `msg(<code>, ...values)`: a table of 244 rows (`src/messages.ts`), the production
-  module (`messages.prod.ts`) says `T<code>: <values> — <link>`, the package is built twice (`scripts/build.mjs`: `dist` production, `dist/dev`
+  module (`messages.prod.ts`) says `T<code>: <values>; see <link>`, the package is built twice (`scripts/build.mjs`: `dist` production, `dist/dev`
   development, the export conditions `types`/`development`/`react-native`/`default`), the errors page has a "Runtime messages" section (an anchor
   per code and per wire failure).
 * Step 14: `scripts/mangle.mjs` renames the 169 private properties of the production build (`_pending` -> `_c`); the suites run against that build
@@ -45,11 +45,11 @@ changed: every class, method, `kind` and typed field of SPEC 17.1 is the same in
   100,121/s, applied 169/s, 85 drains/s, drain p50 under 0.1 ms and p99 200 us, 45 ns per change-set, 0 dropped frames, 16.1 MB heap, no console
   error (that app aliases the sources, so it runs the readable flavour). A scratch page built with Vite against the **production** package (the
   playground's bindings, `@undra/runtime` resolved through `exports`): 169 private names on `UndraCore.prototype` read `_ck _ae _bU ..`, an
-  out-of-range write says `T0233: u8, 300 — https://…/errors.html#T0233`, a wire failure `wire: code=unexpected_eof needed=3 at=0 — …#wire-unexpected_eof`,
+  out-of-range write says `T0233: u8, 300; see https://…/errors.html#T0233`, a wire failure `wire: code=unexpected_eof needed=3 at=0; see …#wire-unexpected_eof`,
   a typed error of the core arrives with its own text (`emptyTitle`, "the title cannot be empty"), a malformed command reports `Todos.remove
   malformed` to `onError`, `stats`, `snapshot` (688 bytes) and `restore` run from their lazy chunk, and the same stress at 100,000/s generated
   99,762/s and applied 73/s. The same package in `wasm-worker` mode on a real Worker (the Worker script bundled by Vite from `dist/worker.js`): a store created and a call
-  answered through the worker, a typed `emptyTitle` rejection across it, `callSync` refused with `UndraModeError` saying `T0093: callSync, wasm-worker — …`,
+  answered through the worker, a typed `emptyTitle` rejection across it, `callSync` refused with `UndraModeError` saying `T0093: callSync, wasm-worker; see …`,
   `snapshot` (687 bytes) and `restore`. The playground's Playwright smoke: 9 of 9.
 * **Counts**, on the tree before the merge with `main` (after it: the runtime's suite 2,025 pass + 1 skipped, `test:dist` 1,983, `main`'s two new tests): the
   runtime's suite **2,023 pass, 1 skipped** in 75 files (1,646 on `main`'s count in
@@ -92,7 +92,7 @@ changed: every class, method, `kind` and typed field of SPEC 17.1 is the same in
 * **Earlier levers had not been through `cargo fmt`**: one commit of formatting (`56287c5`).
 * **Close reasons of the realtime ports are messages too**: `reactNativeWebSocket`'s "the core did not keep up" and the Node client's protocol
   failures are `WsError.Closed(1008, reason)` fields and WebSocket close-frame reasons sent to the peer; in the production build they read
-  `T0115 — https://…` (66 bytes, inside a close frame's 123). D1 listed `reason` among the fields that do not change meaning; this one is the
+  `T0115` and the link (66 bytes, inside a close frame's 123). D1 listed `reason` among the fields that do not change meaning; this one is the
   runtime's own text. If the integrator wants wire-visible reasons to stay sentences in both flavours, `HEADERS_REFUSED`, `DID_NOT_KEEP_UP` and
   the `#fail(code, msg)` sites of `node-websocket.ts` are the places (all in opt-in modules, so no gated byte).
 * **`vi.doMock` of a module and `vi.resetModules`**: a class imported before the reset is not the one the fresh registry builds; tests that

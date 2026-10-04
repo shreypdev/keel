@@ -1,4 +1,4 @@
-# Derived keyed lists (E2, ADR-039) — adversarial review
+# Derived keyed lists (E2, ADR-039) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/derived-lists` at `643a767` (`main` `0aa98a4` merged) · **Read:** `CLAUDE.md` (R1, R3, R5, R9, R11, R12), ADR-039 with
@@ -42,12 +42,12 @@ the merge before): numbers below. The landing card (Option A) is applied; prose 
 
 No High. No Medium.
 
-**L1 — S19 never ran on the React Native column (fixed, `f0db513`).** `vitest.contract.config.ts` listed its scenario
+**L1 - S19 never ran on the React Native column (fixed, `f0db513`).** `vitest.contract.config.ts` listed its scenario
 files and stopped at S18. S19 is pure JavaScript over the wasm stand-in: it passes there unchanged. Added to the glob;
 CI's React Native job writes the recording first (`contract-tests/derived-vectors.sh`); `docs/REACT_NATIVE.md` and
 `docs/ONBOARDING.md` say 18 pass (and the package's unit-test count, 39 there, is 60).
 
-**L2 — ADR-031 merging of derived shapes was proved on TypeScript only (fixed, `518227a`).** Kotlin's and Swift's S19
+**L2 - ADR-031 merging of derived shapes was proved on TypeScript only (fixed, `518227a`).** Kotlin's and Swift's S19
 step 9 apply change-set by change-set; only TypeScript went through a mirror. The generic merge model tests of both
 runtimes would catch a concatenation bug, but nothing named the derived shapes. Added: the scripted prologue (records
 2-6 of the recording, `support/seeded_views.rs:294`), TypeScript draining records 2-3 and 4-5 as one with the applied
@@ -55,14 +55,14 @@ counts asserted (three and six), and a `CoalesceTests` case on Kotlin and Swift 
 drain`, `testADerivedListsShapesMergePerDrainLikeAppliedOneByOne`): one drain per change-set and one per pair end
 equal; a full value and the patches around it apply as the full value once and one merged patch.
 
-**L3 — The over-cap rebuild inside one drain had no test (fixed, `518227a`).** `7e0e147` made the fast path rebuild in
+**L3 - The over-cap rebuild inside one drain had no test (fixed, `518227a`).** `7e0e147` made the fast path rebuild in
 the same drain when a replayed op does not fit; it is defended rather than reachable (the tap invariant rules such an
 op out, and every unwinding path sets `in_flight`, which forces the slow path). What *is* reachable, a tap that went
 stale part-way through a transaction followed by more writes and a read before the commit, is now tested exactly
 (`an_op_that_arrives_after_the_tap_overflowed_is_rebuilt_in_the_drain_that_meets_it`: one rebuild, mid-transaction
 reads equal the reference, the commit sends the full value, patches resume) and by the second model's bursts.
 
-**L4 — What a read inside a transaction sees was not stated (fixed, `518227a`).** It sees the writes the transaction
+**L4 - What a read inside a transaction sees was not stated (fixed, `518227a`).** It sees the writes the transaction
 already made (taps record at write time, not at commit), as a `Signal` read does, and the commit still sends them all
 as one patch; a read never deadlocks with a write of the same transaction (the drain nests a transaction, holds only
 the list's own lock while closures run and the source's read lock only to take ops and a snapshot; inside the
@@ -70,16 +70,16 @@ source's own `update` closure it panics with ADR-021 L3). Stated on `DerivedList
 (`a_read_inside_a_transaction_sees_the_writes_made_before_it_and_the_commit_sends_them_all`, and every `Read` edit of
 both models).
 
-**L5 — Eight landing cards would have laid out ragged (fixed, `f0db513`).** `build-numbers.mjs`'s `spans` gave the
+**L5 - Eight landing cards would have laid out ragged (fixed, `f0db513`).** `build-numbers.mjs`'s `spans` gave the
 first n - 4 cards span 4 for any n >= 7: at eight that is spans 4, 4, 4, 4, 3, 3, 3, 3, which wrap as 12 + 10 + 6
 columns (three cards, three, then two with half the row empty). A multiple of four from eight on is now rows of four.
 
-**L6 — README's test counts were stale (fixed, `docs(derived-lists): adversarial review`).** "4,000+ ... Rust 2,168 ·
+**L6 - README's test counts were stale (fixed, `docs(derived-lists): adversarial review`).** "4,000+ ... Rust 2,168 ·
 TypeScript 931 · Kotlin 500 · Swift 425" is now "4,900+ ... Rust 2,700 · TypeScript 1,132 · Kotlin 617 · Swift 512" (483 here, 512 with `main`'s
 `swift-fs` merged), in
 README and in the landing page's tests card (which carried the same stale numbers).
 
-**I1 — The generated docs say "Computed by the core; read-only.", not "derived" (not changed).** ADR-039 section 7
+**I1 - The generated docs say "Computed by the core; read-only.", not "derived" (not changed).** ADR-039 section 7
 pins a derived list's declaration as byte-for-byte a computed list's (`crates/undra-bindgen/tests/generators.rs:1207`
 asserts it), and the schema can tell them apart (`computed` + `key` exists only for a derived list), so a one-line
 `signal_doc` change in `crates/undra-bindgen/src/model.rs:401` ("Derived by the core from a list; read-only, updated
@@ -87,16 +87,16 @@ by keyed patches.") would say it without a hash move. It changes the `stores` an
 bindings and three reference pages, and contradicts the ADR's pinned property: the integrator's call. The site's
 concepts page ("Derived lists") and SPEC say it plainly.
 
-**I2 — The 256-op limit is per walk, not per patch.** Two parameter changes drained separately within one transaction
+**I2 - The 256-op limit is per walk, not per patch.** Two parameter changes drained separately within one transaction
 (a Rust read between them) can send 2 x 256 walk ops plus the replayed ops in one patch; it is still bounded by the
 slot's 4,096 and always applies. ADR-039's wording ("the walk emits a patch of at most 256 ops") holds per walk.
 
-**I3 — Duplicate keys have no typed outcome in release.** By design (ADR-039 section 9: keys are for the platforms'
+**I3 - Duplicate keys have no typed outcome in release.** By design (ADR-039 section 9: keys are for the platforms'
 identity, maintenance ignores them): debug builds isolate the slot with the duplicate message, release sends rows
 that share a key and the view stays exact (`duplicate_keys_never_corrupt_the_view`). A UI keyed by that field
 mis-animates; the data does not diverge.
 
-**I4 — Debug builds pay O(view) per derived commit.** `node.rs:797` takes a snapshot and `:822-835` materialises the
+**I4 - Debug builds pay O(view) per derived commit.** `node.rs:797` takes a snapshot and `:822-835` materialises the
 view and replays every patch on a shadow copy, so a debug core holds a second copy of each observed view and each
 commit costs its length. Right for tests; worth remembering when a debug dev loop shows a 100,000-row view.
 

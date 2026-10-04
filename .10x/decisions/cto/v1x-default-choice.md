@@ -1,4 +1,4 @@
-# CTO — v1.1 / v1.2 "the default choice" (2026-10-01)
+# CTO - v1.1 / v1.2 "the default choice" (2026-10-01)
 
 **Problem.** v1 is complete and the launch material is live, but "a team could still say no"
 for reasons we can enumerate: lifecycle edges (`WeakCtx`, silent off-runtime drops), an Android

@@ -1,4 +1,4 @@
-# SDE — the cold-restore rows 1.8x over their baseline (wt/cold-restore-regression, 2026-10-02)
+# SDE - the cold-restore rows 1.8x over their baseline (wt/cold-restore-regression, 2026-10-02)
 
 ## The finding
 

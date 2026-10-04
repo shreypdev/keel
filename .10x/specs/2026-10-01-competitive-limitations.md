@@ -373,46 +373,46 @@ start here.
 
 Rows are capabilities a team needs. Cells: **yes**, **part.** (partial), **no**, **lib** (available from
 third-party libraries, not part of the tool; not assessed in depth), **n/a** (does not arise, for example when
-logic and UI share a language), and **—** (not assessed, or not measured by us, so no claim). The Undra v1.2
+logic and UI share a language), and **?** (not assessed, or not measured by us, so no claim). The Undra v1.2
 column is the plan as approved (Amendment A), not a promise; each cell names its piece. Footnotes follow the
 table.
 
 | # | Capability | KMP | UniFFI | Crux | RN | Flutter | Undra today | Undra by v1.2 (planned) |
 |---|---|---|---|---|---|---|---|---|
 | 1 | Typed domain errors across the boundary, in each language's idiom | part. | yes | part. | n/a | n/a | yes | yes (+A4) |
-| 2 | A bug in shared logic does not end the app | part. | part. | — | — | yes | yes native · part. web | yes (+A3) |
+| 2 | A bug in shared logic does not end the app | part. | part. | ? | ? | yes | yes native · part. web | yes (+A3) |
 | 3 | UI reads shared state without crossing a language boundary | part. | no | yes | yes | yes | yes | yes |
 | 4 | Updates cost O(change), including large lists | part. | no | no | n/a | n/a | part. | yes (E2) |
 | 5 | Shared state observable natively (StateFlow, `@Observable`, hooks) | part. | no | part. | yes | yes | yes | yes |
 | 6 | Cancellation from the UI, and streams with backpressure | part. | no | part. | n/a | n/a | yes | yes |
-| 7 | Server-state cache with optimistic updates and rollback | lib | no | no | lib | — | yes | yes |
-| 8 | Offline mutation queue that survives a restart intact | lib | no | no | lib | — | part. | part. (A5; M-7) |
+| 7 | Server-state cache with optimistic updates and rollback | lib | no | no | lib | ? | yes | yes |
+| 8 | Offline mutation queue that survives a restart intact | lib | no | no | lib | ? | part. | part. (A5; M-7) |
 | 9 | Persisted state with migrations across schema changes | yes | no | no | lib | lib | no | yes (A5) |
 | 10 | Paged and infinite lists, and polling | yes | no | no | lib | lib | no | part. (E3 needs an ADR; M-1) |
 | 11 | Structured local database (SQL) | yes | lib | no | yes | yes | no | yes (G3) |
 | 12 | WebSocket and real-time streams | yes | lib | part. | yes | yes | no | yes (G2) |
-| 13 | OS background execution (BGTaskScheduler, WorkManager) | part. | no | no | part. | — | no | no (M-5) |
+| 13 | OS background execution (BGTaskScheduler, WorkManager) | part. | no | no | part. | ? | no | no (M-5) |
 | 14 | Default HTTP, storage and connectivity adapters on iOS, Android and web | yes | no | part. | yes | yes | part. | yes (C4) |
-| 15 | Live reload of shared logic on a device, keeping state | part. | no | — | part. | yes | part. | yes (B1–B3) |
+| 15 | Live reload of shared logic on a device, keeping state | part. | no | ? | part. | yes | part. | yes (B1–B3) |
 | 16 | State inspector, transaction timeline, time travel | no | no | no | part. | part. | no | yes (B4) |
-| 17 | Step-debug from UI code into shared code | yes | — | — | yes | yes | no | no (M-8) |
+| 17 | Step-debug from UI code into shared code | yes | ? | ? | yes | yes | no | no (M-8) |
 | 18 | Previews and UI tests without the real core | part. | part. | yes | yes | part. | no | yes (F1) |
-| 19 | Deterministic tests (virtual time, fake I/O) | yes | part. | yes | — | — | yes | yes (+F2) |
+| 19 | Deterministic tests (virtual time, fake I/O) | yes | part. | yes | ? | ? | yes | yes (+F2) |
 | 20 | Compatibility check between bindings and library | n/a | yes | yes | part. | n/a | yes | yes |
 | 21 | Generated Swift passes native review | part. | yes | part. | n/a | n/a | yes | yes |
-| 22 | Generics across the boundary | part. | no | — | n/a | n/a | no | no (M-6) |
+| 22 | Generics across the boundary | part. | no | ? | n/a | n/a | no | no (M-6) |
 | 23 | Objects, callbacks and listeners as arguments and returns | yes | yes | n/a | n/a | n/a | part. | part. (M-3, M-4) |
-| 24 | Supports iOS 15 and 16 | yes | — | — | yes | yes | no | no (M-9) |
+| 24 | Supports iOS 15 and 16 | yes | ? | ? | yes | yes | no | no (M-9) |
 | 25 | First-party web target with a DOM UI | part. | part. | yes | part. | part. | yes | yes |
 | 26 | Desktop | yes | yes | part. | part. | yes | part. | part. (C5) |
 | 27 | Reuse of the shared code on a server | yes | part. | part. | yes | part. | part. | part. (M-13) |
 | 28 | React Native UI on top | no | part. | no | yes | no | no | yes (G1) |
 | 29 | Flutter UI on top | no | part. | no | no | yes | no | part. (G4, after G1) |
-| 30 | Two independent libraries built with it in one app | part. | — | — | n/a | no | no | no (M-12) |
+| 30 | Two independent libraries built with it in one app | part. | ? | ? | n/a | no | no | no (M-12) |
 | 31 | Incremental adoption in an existing app | yes | yes | part. | part. | part. | part. | yes (D3, H1) |
-| 32 | Build-system integration (Gradle, Xcode, web bundler) | yes | no | — | yes | yes | no | yes (D3) |
-| 33 | Crash symbolication of shared code | — | — | — | — | — | no | no (M-2) |
-| 34 | Size, startup and list performance measured on devices | — | — | — | — | — | part. | yes (E1) |
+| 32 | Build-system integration (Gradle, Xcode, web bundler) | yes | no | ? | yes | yes | no | yes (D3) |
+| 33 | Crash symbolication of shared code | ? | ? | ? | ? | ? | no | no (M-2) |
+| 34 | Size, startup and list performance measured on devices | ? | ? | ? | ? | ? | part. | yes (E1) |
 | 35 | Ecosystem, backing, production record | yes | yes | part. | yes | yes | no | no |
 | 36 | Shared UI if the product wants it | yes | no | no | yes | yes | n/a | n/a |
 
@@ -484,8 +484,8 @@ surface), **L** (several pieces, or a wire/ABI change).
 | 14 | M-14 | **Tracing spans** (blueprint §12's Telemetry port, not in v1) | A `Telemetry` port that emits a span per command, transaction, query fetch and port call, with an OpenTelemetry-compatible adapter on each platform | M | Native SDKs |
 | 15 | M-15 | **Apple secondary platforms** (a macOS slice, tvOS, visionOS, watchOS) | XCFramework slices plus `Package.swift` platforms. C5 should include the macOS slice, which is missing today (E30) | S–M | KMP (Tier 2 watchOS and tvOS), RN (out of tree) |
 | 16 | M-16 | **Default parameter values** | `#[undra(default = ..)]` on method parameters, emitted as Swift and Kotlin default arguments and TS optional parameters | S | KMP with SKIE, UniFFI (`defaults.md`) |
-| 17 | M-17 | **Python, Ruby, C#, Go hosts** | Not proposed. UniFFI serves these; the post should say Undra targets three UIs | — | UniFFI, Crux (C#) |
-| 18 | M-18 | **Over-the-air logic updates on mobile** | Not proposed (native code under store rules). Document that the web core updates with the site | — | RN (EAS Update, JS only) |
+| 17 | M-17 | **Python, Ruby, C#, Go hosts** | Not proposed. UniFFI serves these; the post should say Undra targets three UIs | n/a | UniFFI, Crux (C#) |
+| 18 | M-18 | **Over-the-air logic updates on mobile** | Not proposed (native code under store rules). Document that the web core updates with the site | n/a | RN (EAS Update, JS only) |
 
 ### 11.2 Corrections to the existing plan
 

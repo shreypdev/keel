@@ -1,4 +1,4 @@
-# React Native default ports (ADR-038 amendment B, G1b) — adversarial review
+# React Native default ports (ADR-038 amendment B, G1b) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/rn-adapters` at `b1b2eb0` (`main` `3e8a304` merged) · **Read:** `CLAUDE.md` (R1, R2, R6, R10, R12), ADR-038 with

@@ -1,4 +1,4 @@
-# sse-chunks (the Swift SSE adapter reads chunks; ADR-047 amendment) — adversarial review
+# sse-chunks (the Swift SSE adapter reads chunks; ADR-047 amendment) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** adversarial (`docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/sse-chunks` at `53a315a`
 (draft PR #5; contained `main` `fd7abb4`, `ef60acf` merged in at `76d8fe8`) · **Read:** `CLAUDE.md` (R4, R6, R9, R11), AGENT_WORKFLOW 4,

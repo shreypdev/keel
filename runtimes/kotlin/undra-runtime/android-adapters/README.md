@@ -100,9 +100,9 @@ own methods throw the same `StorageError`s:
 |---|---|---|
 | a full disk or quota (`ENOSPC`, `EDQUOT`); the old value stays | `Full` | `Full` |
 | an entry file that does not decode (the file is kept) | `Corrupt` | `Corrupt` |
-| a value that fails authentication or is not in the sealed format, a `KeyPermanentlyInvalidatedException` | — | `Corrupt` |
-| a key that needs the user to authenticate (`UserNotAuthenticatedException`) | — | `Locked` |
-| no Android Keystore, or no `AndroidKeyStore` provider | — | `Unavailable` |
+| a value that fails authentication or is not in the sealed format, a `KeyPermanentlyInvalidatedException` | n/a | `Corrupt` |
+| a key that needs the user to authenticate (`UserNotAuthenticatedException`) | n/a | `Locked` |
+| no Android Keystore, or no `AndroidKeyStore` provider | n/a | `Unavailable` |
 | anything else the file system, the Keystore or the cipher reports | `Io` | `Io` |
 
 The messages name the key and what failed, never the value. Anything an adapter throws that is not a `StorageError` is a bug:

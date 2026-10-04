@@ -1,4 +1,4 @@
-# Persisted-state migrations (ADR-037) and storage errors, worker sync ports, web recovery (ADR-049) — adversarial review
+# Persisted-state migrations (ADR-037) and storage errors, worker sync ports, web recovery (ADR-049) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** adversarial reviewer (`docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/persistence-v2` at `336637b` (`main` `6db6749` merged by the implementer) · **Read:** `CLAUDE.md` (R1, R4, R5, R6,
@@ -28,14 +28,14 @@ piece (all nine non-stdlib bindgen goldens keep their hash; only `stdlib`'s move
 
 Three Highs, all fixed with a test that fails without the fix:
 
-* **H1 (data integrity)** — a `#[undra::migrate(store, signal)]` hook whose return type is not the signal's restored a
+* **H1 (data integrity)** - a `#[undra::migrate(store, signal)]` hook whose return type is not the signal's restored a
   wrong value and answered `Ok` (an `i32` hook for an `f32` signal: the bytes of `1084227584` restored as `5.0`), the very
   misdecode ADR-037 exists to prevent. Start-up only logged E0066.
-* **H2 (React Native was not migrated to ADR-049)** — the module's native `Kv` and `SecureStore` answered every failure
+* **H2 (React Native was not migrated to ADR-049)** - the module's native `Kv` and `SecureStore` answered every failure
   with port status 2, which the core reads as "no adapter registered (E0062)": a damaged queue stayed "unreadable" for
   ever instead of being dead-lettered, a full disk never paused persistence, and `cpp/test/run.sh` **failed** on the
   branch.
-* **H3 (web recovery)** — a trap the new instance reported while its restart was still under way was dropped, leaving a
+* **H3 (web recovery)** - a trap the new instance reported while its restart was still under way was dropped, leaving a
   dead core that answered "restarted" for ever (and, with nothing observed, even fired `onCoreRestarted`).
 
 One blocking merge finding: after `main`'s ABI table the hello-world web core was **120,188 bytes gzipped, 188 over the
@@ -49,7 +49,7 @@ caught this piece's two new TypeScript `Undra…` names, and the cross-merge's s
 
 ## Findings
 
-### F1 — the merged hello-world web core was over its budget (blocking; fixed, `ea81c3c`)
+### F1 - the merged hello-world web core was over its budget (blocking; fixed, `ea81c3c`)
 
 Measured first thing after the merge: `web/hello-wasm` 287,450 bytes, **120,188 gzipped**, gate 120,000 (budget):
 OVER by 188. The branch had left 435 bytes of headroom and `main`'s table added the rest. The lever the record named,
@@ -65,7 +65,7 @@ a binding without one answers raw calls unavailable, with one it runs them; the 
 The JavaScript runtime is the tighter one: **25,984 of 26,000** after M2 (whose first wording put it at 26,032, 32 over;
 the message was shortened).
 
-### H1 — a mistyped store-and-signal hook restored wrong values with `Ok` (fixed, `ee9a66e`)
+### H1 - a mistyped store-and-signal hook restored wrong values with `Ok` (fixed, `ee9a66e`)
 
 `crates/undra-runtime/src/runtime.rs` `convert_signal` / `missing_signal`: the hook's bytes were spliced into the
 body `StoreObject::restore` decodes, whatever type the hook returned. The macro cannot check a signal hook's return
@@ -77,7 +77,7 @@ returns i32 but the signal is f32 (E0066)" }`, and the core's snapshot is byte-i
 already safe (their identity is a compile-time assertion), mutation hooks too (`encode_params` re-encodes against the
 current parameters).
 
-### H2 — React Native's native storage answered "unavailable" for every failure (fixed, `a0ebff2`)
+### H2 - React Native's native storage answered "unavailable" for every failure (fixed, `a0ebff2`)
 
 `runtimes/rn/@undra/react-native/cpp/UndraDefaults.cpp:225-319`: the branch never touched `runtimes/rn`. Success
 encodings matched the new signatures (so nothing undecodable), but every `Kv`/`SecureStore` failure was status 2, so:
@@ -91,7 +91,7 @@ Keystore's text (the platform layer gives no variant; open item); `FsErrorKind` 
 `Unavailable`. `stores_test.cpp` and `host_test.cpp` check `Corrupt` through the core, `Io` from a failing keychain and
 `Unavailable` on out-of-memory. `cpp/test/run.sh`: 74 ok, `UndraPlatformApple.mm` compiles against the iOS SDK.
 
-### H3 — a trap during the restart was lost: a dead core passed for a restarted one (fixed, `a9c6999`)
+### H3 - a trap during the restart was lost: a dead core passed for a restarted one (fixed, `a9c6999`)
 
 `runtimes/ts/@undra/runtime/src/recovery.ts:556` dropped every `closed` that arrived while `#restarting`, assuming a
 trap during the restart always surfaces as a rejected restart. It does not when the new instance traps after its
@@ -102,14 +102,14 @@ trap is kept and taken as the next trap of the restart loop (another restart wit
 with `onClose`). Two tests (`recovery.test.ts`), both failing before: the late trap restarts the core again (two
 floors, two panic reports, one `onCoreRestarted`, calls work); with the budget spent it ends the core.
 
-### M1 — the web restore floor could go down from one restart to the next (fixed, `a9c6999`)
+### M1 - the web restore floor could go down from one restart to the next (fixed, `a9c6999`)
 
 `recovery.ts` `#floor()` read only the handles the host still tracked; `#reattach` forgets the ones that went stale,
 while the app's wrappers keep them. A second restart (from the same or an empty snapshot) then used a lower floor and
 the new instance could issue a stale wrapper's handle to another object (ADR-022). Fix: the floor never goes below the
 one an earlier restart used. Test: an object of generation 7 goes stale at restart 1; restart 2's floor is 7 (was 0).
 
-### M2 — an old worker script with `worker.ports` trapped at the first synchronous port call (fixed, `a9c6999`)
+### M2 - an old worker script with `worker.ports` trapped at the first synchronous port call (fixed, `a9c6999`)
 
 There is no protocol version check (the brief's "typed load error" is not what the branch does): a worker answers
 `ready { features }` and the host degrades by feature. A worker older than protocol 3 ignores `portsModule`, so the
@@ -119,7 +119,7 @@ this runtime ...")`; without `worker.ports` an older worker still loads as befor
 `snapshot.test.ts`, failing before. The `bytes` → `data` rename of the snapshot payloads within the same `"snapshot"`
 feature is harmless only because both sides ship in one package and nothing is published (open item).
 
-### M3 — `undra dev` reset the state on every schema change although the restore can migrate (open item 2, applied, `7fda3b7`)
+### M3 - `undra dev` reset the state on every schema change although the restore can migrate (open item 2, applied, `7fda3b7`)
 
 `reload.rs` no longer skips the snapshot when the hash changed; the runner restores with
 `Runtime::restore_with_report`, which migrates by name or refuses as a whole and changes nothing. A store type the
@@ -130,7 +130,7 @@ rebuild removed counts among the objects not carried over. The notice says `Relo
 gives 6) and `a_schema_change_the_state_cannot_follow_resets_it_and_says_why` (a signal renamed); the `reload.rs`
 unit test; SPEC 5.10 and `docs/DEV_LOOP.md`.
 
-### M4 — the React Native contract column failed S14 and S15 (fixed, `db1f334`)
+### M4 - the React Native contract column failed S14 and S15 (fixed, `db1f334`)
 
 CI runs `npm run test:contract` in `runtimes/rn/@undra/react-native`: `contract-tests/ts`'s scenario files with the
 harness swapped for the module's. That harness ignored `boot({ build: "B" })` and loaded build A, so S14 step 8 timed out
@@ -153,7 +153,7 @@ it reports: 18 passed, 1 skipped (was 2 failed). The column still excludes S20 a
 
 ### Lows and coverage added
 
-* L1 — the `Corrupt`-queue path (`queue.rs:398`: a queue the store reports `Corrupt` becomes a dead letter with no
+* L1 - the `Corrupt`-queue path (`queue.rs:398`: a queue the store reports `Corrupt` becomes a dead letter with no
   bytes and counts as read) had no test anywhere; `crates/undra-query/tests/storage.rs` now has one (`a3f1e91`).
 * Coverage (`96895a5`): the damaged-snapshot fuzz, the streamed-vs-tree differential on random schema evolutions plus
   a hostile-bytes proptest, and the closure-JSON differential against `serde_json` (all described under the attacks).
@@ -164,10 +164,10 @@ it reports: 18 passed, 1 skipped (was 2 failed). The column still excludes S20 a
 
 * **Every structural rule, proptest-level.** `persist/tests.rs` `the_two_conversions_agree_on_random_schema_evolutions`
   (1,024 cases per run; 20,000 run once): a random type up to depth 3 over records, enums, `Option`, `Vec`, `Map` and
-  the primitives, a random valid value, read by a build with up to three random edits — fields reordered, dropped,
+  the primitives, a random valid value, read by a build with up to three random edits - fields reordered, dropped,
   added with and without `#[undra(default)]` (`Option`, `u32`, `Timestamp`, `Uuid`, a named type), a field renamed, a
   field retyped (`Option`↔non-`Option`, `Vec<T>` → `Vec<Option<T>>`, `Bytes`↔`Vec<u8>`, a narrowing), enum variants
-  reindexed, removed, added in front, a variant's fields narrowed — and possibly a changed root type (wrapped,
+  reindexed, removed, added in front, a variant's fields narrowed - and possibly a changed root type (wrapped,
   unwrapped, widened, narrowed). Both conversions convert to the same bytes or both refuse, and the output always
   decodes as the new type and re-encodes to itself. Clean. Store-level rules (signals by name, reordered, added with a
   default, removed, a renamed store is incompatible) are covered end to end in `crates/undra/tests/migrations.rs`; a
@@ -250,7 +250,7 @@ it reports: 18 passed, 1 skipped (was 2 failed). The column still excludes S20 a
   instantiating in both wasm modes when `crypto.getRandomValues` is missing; when it throws later the guarded `random`
   import writes nothing and no exception crosses wasm frames, the canary trips and `Rng.fill` answers unavailable. As
   ADR-049 2.5 decides, `Rng` has no error channel, so the proxy's E0062 then panics: a loud trap (which recovery then
-  restarts, and a deterministic loop ends dead after the budget) — "nothing traps" holds for the throw itself, not for
+  restarts, and a deterministic loop ends dead after the budget) - "nothing traps" holds for the throw itself, not for
   the core's use of `Rng` afterwards.
 * **Worker protocol 3:** M2.
 

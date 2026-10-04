@@ -1,4 +1,4 @@
-# `prod-ops` (ADR-046 production operations: panic reports, background runs, symbol artefacts) — adversarial review
+# `prod-ops` (ADR-046 production operations: panic reports, background runs, symbol artefacts) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/prod-ops` at `ecdd6a2`
 (`main` `b800994` merged), then `main` at `f9a37a8` (objects-callbacks, ADR-040/041) merged by the review · **Read:** `CLAUDE.md` (R1, R2, R6,

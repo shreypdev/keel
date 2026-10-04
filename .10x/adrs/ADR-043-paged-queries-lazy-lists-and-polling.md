@@ -126,7 +126,7 @@ Two different needs hide under "paging", and they want different machinery:
    A host therefore knows the new length when it applies op 2, without a round trip, and can tell which version
    a page was read at. ADR-031's merge rules are unchanged (op 2 supersedes earlier entries for its key).
 3. **Commit.** Any change to a `Lazy<T>` marks its slot dirty; an observed slot's commit sends op 2 with the
-   new length and version — O(1) bytes whatever changed. The host keeps showing the rows it has (stale while it
+   new length and version - O(1) bytes whatever changed. The host keeps showing the rows it has (stale while it
    re-pages) and re-requests the pages of its visible window, so a change costs O(window), never O(list).
    (Index-only patches that let the host shift its cached pages without re-paging are a later refinement; the
    window is bounded by the screen.)

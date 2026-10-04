@@ -1,4 +1,4 @@
-# SDE: platform parity — the Kotlin and TypeScript failure model, TypeScript snapshot/restore, worker-mode ports, recursive records (wt/parity, 2026-10-01)
+# SDE: platform parity - the Kotlin and TypeScript failure model, TypeScript snapshot/restore, worker-mode ports, recursive records (wt/parity, 2026-10-01)
 
 Implements the "parity" pieces of amendment C of the v1.x plan: **C4b** (an ADR-032 analogue for Kotlin and TypeScript,
 gaps PA-1, PA-2, PA-3, PA-4, PA-9), **C4c** (TypeScript `snapshot()`/`restore()`, PA-5), **PO-4** (`wasm-worker` mode

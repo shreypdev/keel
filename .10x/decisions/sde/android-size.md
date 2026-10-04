@@ -1,4 +1,4 @@
-# SDE — android-size: a size-tuned mobile profile and native size gates (wt/android-size, 2026-10-02)
+# SDE - android-size: a size-tuned mobile profile and native size gates (wt/android-size, 2026-10-02)
 
 ADR-052's amendment "Amendment: native size gates (2026-10-02)" has the numbers; this is the piece's record. User feedback U4: a core at 1.6 MB per Android ABI
 against a 1.2 MB budget. The piece is a profile, a gate and a record; no crate's code changed.

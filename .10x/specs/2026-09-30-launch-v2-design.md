@@ -1,9 +1,9 @@
-# Launch v2 — win the argument (design)
+# Launch v2 - win the argument (design)
 
 **Date:** 2026-09-30 · **Status:** approved by the founder ("you know the best, so you decide"; the product name **Undra** was the founder's pick from the shortlist) · **Owner:** 10x-team integrator
 
-v1 shipped under the working name Keel (see `.10x/status.md`). v2 of the *launch* — not
-of the framework — renames the product to **Undra**, and turns the site and the
+v1 shipped under the working name Keel (see `.10x/status.md`). v2 of the *launch* (not
+of the framework) renames the product to **Undra**, and turns the site and the
 distribution into the vehicle that wins the argument with platform engineers: premium,
 fast, honest, developer-obsessed, installable in one line, with comparison posts that
 survive expert scrutiny, a roadmap that shows momentum, and stress numbers that end the
@@ -34,7 +34,7 @@ Success for this batch, all verifiable:
 
 ## 1. Identity (ADR-030)
 
-Facts found 2026-09-30: "keel" is a crowded name in developer tooling — keel.sh
+Facts found 2026-09-30: "keel" is a crowded name in developer tooling: keel.sh
 (Kubernetes), keel.so (owns the npm package `keel`), the npm user `keel` (so `@keel/*`
 was never claimable), another active Rust project "keel" (crates.io `keel-cli`,
 `keel-macros`, npm `@getkeel`, `@keel-dev`), and `keel.dev` is someone else's site. After a
@@ -53,14 +53,14 @@ Decisions:
   `@undra/cli-{darwin-arm64,darwin-x64,linux-x64,linux-arm64}` (optionalDependencies, as
   esbuild). The unscoped `undra` name is reserved with a stub that points to `@undra/cli`.
 * **crates.io**: `undra`, `undra-cli`, `undra-*` are free; publishing is v1.1 (needs its
-  own ADR for the crates' public API review) — this batch only ensures the names are ours
+  own ADR for the crates' public API review) - this batch only ensures the names are ours
   by naming the workspace packages `undra-*` now.
 * **GitHub**: repository `shreypdev/keel` → `shreypdev/undra` (GitHub redirects the old
   URLs); Homebrew tap `shreypdev/homebrew-undra`, formula `undra`
   (`brew install shreypdev/undra/undra`). An organisation (`undra-dev` if free) is a
   later founder step; the tap and the repo can move under it without breaking anything.
-* **Site**: `https://shreypdev.github.io/undra/` (a custom domain — `undra.rs` was free
-  at the time of writing — is a founder purchase and a roadmap item).
+* **Site**: `https://shreypdev.github.io/undra/` (a custom domain - `undra.rs` was free
+  at the time of writing - is a founder purchase and a roadmap item).
 * **curl installer** at `https://shreypdev.github.io/undra/install.sh`: detects OS/arch,
   downloads the release asset, verifies sha256 against `checksums.txt`, installs to
   `~/.undra/bin`, prints the PATH line. Never `sudo`, fail closed.
@@ -68,7 +68,7 @@ Decisions:
 
 ## 2. Site v2
 
-### 2.1 Typography — the founder's first complaint
+### 2.1 Typography - the founder's first complaint
 
 * **Geist** (sans, weights 400/500/600) for everything textual, **Geist Mono** (400/500)
   for code, eyebrow labels, numbers and table data. Both via Google Fonts (already wired),
@@ -78,7 +78,7 @@ Decisions:
   h2 2rem / 600 / −0.02em; h3 1.25rem / 600; body 1.0625rem / 1.6; eyebrow mono 0.75rem
   uppercase tracking 0.08em; numbers `font-variant-numeric: tabular-nums`.
 
-### 2.2 Design system — "premium, modern, developer-obsessed"
+### 2.2 Design system - "premium, modern, developer-obsessed"
 
 Reference the qualities of Linear, Vercel, Bun, Zed and Biome: restraint, one accent,
 thin borders, mono labels, code as a first-class element, calm motion.
@@ -106,7 +106,7 @@ thin borders, mono labels, code as a first-class element, calm motion.
 ```
 /                       landing
 /docs/…                 existing 10 pages (search, prev/next, "Edit on GitHub", copy buttons)
-/blog/                  index (cards, RSS link) — generated from the posts by a script
+/blog/                  index (cards, RSS link) - generated from the posts by a script
 /blog/<slug>/           4 posts (Section 3)
 /roadmap/               shipped · now · next · later
 /playground/            the real web playground, built in CI (Section 2.6)
@@ -135,14 +135,14 @@ thin borders, mono labels, code as a first-class element, calm motion.
 6. **Features** bento: stores, queries/mutations, offline queue, ports, contracts, dev loop,
    diagnostics, snapshot/restore.
 7. **Trust**: tests across five languages, 17 contract scenarios × 3 platforms, four
-   adversarial reviews, ASan/Miri — every number linked to its source.
+   adversarial reviews, ASan/Miri - every number linked to its source.
 8. **Compared**: teaser cards for the four posts.
 9. **Roadmap** teaser: three "now" items and a link.
 10. **Final CTA** + footer (GitHub, docs, blog, roadmap, RSS, license).
 
-### 2.5 SEO — indexed fast, found for the right phrases
+### 2.5 SEO - indexed fast, found for the right phrases
 
-* Brand phrase everywhere: **"Undra — the Rust core for native apps"**. Target long-tail:
+* Brand phrase everywhere: **"Undra, the Rust core for native apps"**. Target long-tail:
   *share business logic between iOS and Android*, *Kotlin Multiplatform alternative*,
   *UniFFI alternative*, *Rust iOS Android web framework*, *SwiftUI Compose React shared
   logic*, *native UI shared core*. "Undra" has no software competitor for the term.
@@ -153,7 +153,7 @@ thin borders, mono labels, code as a first-class element, calm motion.
   `SoftwareApplication` (landing), `TechArticle` + `BreadcrumbList` (docs), `BlogPosting`
   (posts), `ItemList` (roadmap).
 * `sitemap.xml` with `lastmod`, `robots.txt`, RSS `feed.xml`, `llms.txt` and
-  `llms-full.txt` (the docs concatenated — agents discovering Undra should get the whole
+  `llms-full.txt` (the docs concatenated - agents discovering Undra should get the whole
   thing in one fetch).
 * IndexNow: `site/<key>.txt` + a post-deploy step in `site.yml` that submits the sitemap
   URLs to `api.indexnow.org` (Bing, Yandex, DuckDuckGo pick it up; Google is via Search
@@ -191,22 +191,22 @@ thin borders, mono labels, code as a first-class element, calm motion.
 
 ### 2.7 Roadmap page content (source of truth is `.10x/handoff.md`; keep in sync)
 
-* **Shipped — v1.0 (2026-09-30)**: records, enums, typed errors, objects, stores
+* **Shipped - v1.0 (2026-09-30)**: records, enums, typed errors, objects, stores
   (signals, computeds, keyed lists), 10 ports with platform adapters and Rust fakes,
   queries and mutations (staleness, dedup, retry, optimistic rollback, offline queue,
   persistence), streams with backpressure, cancellation, snapshot/restore, schema-hash
   gate, `undra dev` live core, teaching diagnostics, 17 contract scenarios × 3 platforms,
   adversarial reviews of every core crate.
-* **Now — v1.x (in flight)**: distribution (brew, npm, curl, cargo-from-git); harsh-
+* **Now - v1.x (in flight)**: distribution (brew, npm, curl, cargo-from-git); harsh-
   conditions benchmark suite with CI budgets; device-measured benchmark rows (iPhone,
   Android, Chromium); schema loader that survives dead-stripping; Android `undra dev`
   remote mode; dev-client auto-reconnect; `WeakCtx`; macro diagnostic polish; Swift
   `Port*` types public; full-JSON `undra_schema_json`.
-* **Next — v1.1 / v1.2**: crates.io publishing; frame-coalesced delivery if the stress
+* **Next - v1.1 / v1.2**: crates.io publishing; frame-coalesced delivery if the stress
   suite shows it is needed (ADR first); Maven Central for the Kotlin runtime; Windows CLI;
   `undra upgrade`; migration guides (from KMP, from UniFFI); a custom domain.
-* **Later — horizon**: desktop targets over the same C ABI (macOS, Windows, Linux); a
-  first-party inspector (time-travel over change-sets — the wire makes it natural); a sync
+* **Later - horizon**: desktop targets over the same C ABI (macOS, Windows, Linux); a
+  first-party inspector (time-travel over change-sets - the wire makes it natural); a sync
   engine as a separate package; Compose Multiplatform interop.
 * Explicitly not planned: shared UI of any kind, hosted services.
 
@@ -300,7 +300,7 @@ numbers on the site. Questions the design must answer from the code, not from me
    allocations per op where the existing harness counts them, memory steady state.
 4. Platform side: a `stress` screen in the playground (web first; iOS/Android follow in
    the device phase) showing generated updates/s, applied change-sets/s, p50/p99 apply
-   time, dropped frames — the same numbers the landing page's live section shows.
+   time, dropped frames - the same numbers the landing page's live section shows.
 5. Output: `bench/benches/stress.rs`, `bench/src/bin/soak.rs`, budget rows,
    `bench/RESULTS.md` "Harsh conditions" section, `site/data/bench.json` rows.
 
@@ -339,10 +339,10 @@ crates.io publishing (v1.1), Windows CLI, Maven Central, a custom domain, per-po
 images, Google Search Console verification (founder action, documented), moving the
 repository under a GitHub organisation.
 
-## Amendment A — founder feedback on the first redesign (2026-09-30, evening)
+## Amendment A - founder feedback on the first redesign (2026-09-30, evening)
 
 Overrides §2.2 (palette) and §2.4 (sections). The founder reviewed the v2 landing and
-said: the colour and theme of the v1 site (commit `e45e30f`) must stay — "the blue change
+said: the colour and theme of the v1 site (commit `e45e30f`) must stay - "the blue change
 is not looking good at all"; the new home page "has too much text and is very hard to
 digest, the old one was better"; keep the live playground; the "Describe once. Generate
 native. Write once per change." code should be minimised or shown on demand; the v1

@@ -1,4 +1,4 @@
-# SDE — the rename to Undra (wt/rename, 2026-09-30)
+# SDE - the rename to Undra (wt/rename, 2026-09-30)
 
 Executes ADR-030. This record is excluded from `scripts/rename-keel-to-undra.sh` on purpose:
 it has to name the old spelling ("keel") to say what happened to it.
@@ -47,7 +47,7 @@ spellings:
 
 | Token | Count | Decision |
 |---|---|---|
-| `libkeel` (`libkeel_core.*`, `libkeel_ffi`), `lkeel` (`-lkeel_core`), `nlibkeel` (a `\nlibkeel_core.so` test string) | 112 / 2 / 1 | renamed — real identifiers |
+| `libkeel` (`libkeel_core.*`, `libkeel_ffi`), `lkeel` (`-lkeel_core`), `nlibkeel` (a `\nlibkeel_core.so` test string) | 112 / 2 / 1 | renamed - real identifiers |
 | `keelbuf` (a WAT function in the TS stub core) | 4 | renamed |
 | camelCase: `useKeel`, `openKeel`, `isKeelClass`, `forKeelLevel`, `startKeel`, `rememberKeel` | ~100 | renamed |
 | natural-language words (keeled, keelson, keelhaul, nautical prose) | 0 | none exist; no sentence used "keel" as the ship part |
@@ -64,7 +64,7 @@ spellings:
 
 * Envelope magic + FNV vector (above); `Cargo.lock` (`cargo build`), three `package-lock.json`
   (`npm install --package-lock-only`; npm 11 also writes the runtime's `peerDependencies` into
-  the lock root entry — format drift, not a dependency change).
+  the lock root entry - format drift, not a dependency change).
 * `cargo fmt`: 67 files (imports re-sorted, lines re-wrapped for the longer name).
 * Fixed-width expectation: the CLI's aligned-table test pads to `libundra_core.so` (+1 space).
 * Diagnostics docs link shape (`#`), see rule 1.

@@ -1,4 +1,4 @@
-# SDE: ios-floor — the iOS 15 / 16 compatibility mode (ADR-045), 2026-10-01
+# SDE: ios-floor - the iOS 15 / 16 compatibility mode (ADR-045), 2026-10-01
 
 Worktree `wt/ios-floor`, from `main` `8cbfc0f`. Sources of truth: ADR-045 (now Accepted; its deviations section is the dated
 record of what differs from the proposal), SPEC §10.1/§12/§17.3, ADR-024/032/044/051. No wire, schema, C ABI, Kotlin or TypeScript

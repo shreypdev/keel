@@ -1,4 +1,4 @@
-# DevOps — dist (2026-09-30)
+# DevOps - dist (2026-09-30)
 
 Piece `wt/dist` of launch-v2 (spec section 4): prebuilt `undra` binaries and the four install
 channels. Runbook: `docs/RELEASING.md`.

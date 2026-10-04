@@ -1,4 +1,4 @@
-# B3 dev-reload (ADR-053, state-preserving reload) — adversarial review
+# B3 dev-reload (ADR-053, state-preserving reload) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/dev-reload` at `12ec236` (57 files, +4,008/−331 against `main`; `main` merged at `3e8a304`, which is still `main`'s

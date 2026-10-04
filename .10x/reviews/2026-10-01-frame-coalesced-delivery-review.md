@@ -1,4 +1,4 @@
-# Frame-coalesced delivery (ADR-031) — adversarial review
+# Frame-coalesced delivery (ADR-031) - adversarial review
 
 **Date:** 2026-10-01 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/coalesce` at `9d09055` (`main` fully merged) · **Read:** `CLAUDE.md`, ADR-031 (accepted, conditions (a)-(e)),
@@ -149,20 +149,20 @@ remove on deinit, which is documented), `MirrorStats: Sendable, Equatable`. `Mir
 
 ## The SDE record's open choices, judged
 
-1. "Both bounds" — **overturned** (M1, decision above).
-2. The bound wins over `no_coalesce` — agreed; documented and tested on all three.
-3. Compaction amortisation by doubling — agreed (attack 4).
-4. A patch too short for its count is dropped and re-observed — agreed (better than handing it to a decoder).
-5. TS rAF plus a 100 ms backstop, a zero-delay task while hidden — agreed.
-6. TS read-your-writes from a microtask queued before `resolve` — agreed; draining inside the wasm import would run
+1. "Both bounds" - **overturned** (M1, decision above).
+2. The bound wins over `no_coalesce` - agreed; documented and tested on all three.
+3. Compaction amortisation by doubling - agreed (attack 4).
+4. A patch too short for its count is dropped and re-observed - agreed (better than handing it to a decoder).
+5. TS rAF plus a 100 ms backstop, a zero-delay task while hidden - agreed.
+6. TS read-your-writes from a microtask queued before `resolve` - agreed; draining inside the wasm import would run
    subscribers inside a core callback.
-7. Observe waiters drain from a microtask — agreed.
-8. Resync sends only `Observe(on)` — agreed: `observed` is a flag, not a count (`store.rs` `start_observing`), and
+7. Observe waiters drain from a microtask - agreed.
+8. Resync sends only `Observe(on)` - agreed: `observed` is a flag, not a count (`store.rs` `start_observing`), and
    re-observing re-baselines the keyed list (SPEC 16.1).
-9. Worker protocol version in `init` — agreed.
-10. Two Kotlin `register` overloads — agreed.
-11. Extra rounds — agreed for Swift and TS (one thread), **overturned for Kotlin** (M2).
-12. Swift reply drain on `DispatchQueue.main` — agreed (attack 3).
+9. Worker protocol version in `init` - agreed.
+10. Two Kotlin `register` overloads - agreed.
+11. Extra rounds - agreed for Swift and TS (one thread), **overturned for Kotlin** (M2).
+12. Swift reply drain on `DispatchQueue.main` - agreed (attack 3).
 
 ## Verification after the fixes
 
