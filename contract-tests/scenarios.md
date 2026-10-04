@@ -427,7 +427,7 @@ queue, S20 step 4; the client reads it again after a backoff of about a second).
 
 ### S17 panic containment
 
-**Native (Kotlin over JNI, Swift over the C ABI)** — a panic unwinds to the boundary:
+**Native (Kotlin over JNI, Swift over the C ABI).** A panic unwinds to the boundary:
 
 1. `explode("kaboom")` fails with reply status **panic** and a message containing `kaboom` (plus a
    backtrace string). The process is alive. Swift and Kotlin call the generated `explode` (Swift:
@@ -464,7 +464,7 @@ queue, S20 step 4; the client reads it again after a backoff of about a second).
    detaches the transport first; the native shutdown retires the port registrations and the Swift
    adapters are detached), so the windows alone cannot.
 
-**wasm (TypeScript)** — the shipped wasm profile aborts on panic (SPEC section 7), so containment means
+**wasm (TypeScript).** The shipped wasm profile aborts on panic (SPEC section 7), so containment means
 the host survives and recovers:
 
 1. Before the panic: `snapshot = undra_snapshot()` of a core with a `Todos` holding two items.
@@ -834,7 +834,7 @@ delivered on.
    (the runner's `onPanic` throws once, on the first report, in a second `load` of the S17 kind: Swift cannot
    throw there, so its `onPanic` is `@Sendable (UndraPanicReport) -> Void` and the step is Kotlin and TypeScript).
 
-**wasm (TypeScript)** — the core traps, so the report is built from the core's FATAL record and the trap:
+**wasm (TypeScript).** The core traps, so the report is built from the core's FATAL record and the trap:
 
 1. `explode("kaboom")` makes the call fail as in S17 (wasm); `onPanic` received **exactly one** report **before**
    the restart of S22 begins (`onCoreRestarted` fires after it): `message` contains `kaboom`, `location` contains

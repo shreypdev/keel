@@ -1,7 +1,7 @@
-# The worktree workflow — how changes land on Undra
+# The worktree workflow: how changes land on Undra
 
-This is the working method that built v1, written down so the next contributor — human
-or AI agent — follows the same loop. It exists because parallel work on one checkout
+This is the working method that built v1, written down so the next contributor, human
+or AI agent, follows the same loop. It exists because parallel work on one checkout
 destroys itself, and because unreviewed merges destroy trust. One piece, one worktree,
 one adversarial review, one merge, then clean up.
 
@@ -34,14 +34,14 @@ Every piece starts from a written brief (for agents, it is the task prompt; for 
 an issue). A good brief names, in this order:
 
 1. The exact SPEC sections that bind the piece (`docs/SPEC.md §…`).
-2. The real files to read first — the code the piece must fit, and the *consumers* that
+2. The real files to read first: the code the piece must fit, and the *consumers* that
    already exist (the three platform runtimes hard-code ids, layouts and semantics; when
    the SPEC and shipped consumers disagree, **the shipped consumers win**, and the SPEC
    gets a documented correction).
 3. The quality bar: tests next to code + integration tests, docs on every `pub` item,
    `clippy -D warnings`, `cargo fmt`, wasm32 build where the crate is core, benchmarks
    when the boundary is touched (R4, R9).
-4. What is OUT of scope — especially files other worktrees own right now. Two active
+4. What is OUT of scope, especially files other worktrees own right now. Two active
    worktrees must not touch the same crate; the integrator enforces this when cutting
    briefs.
 
@@ -51,13 +51,13 @@ step of CI, Bench, Two cores and Site, in a clone of your commit, read from the 
 "Before you push a branch"); and `scripts/ci-local.sh --slow` when the piece adds or touches a test that waits, times or
 races (it runs the timing-sensitive suites throttled, so the failures a slower runner would show are found here, once,
 not one push at a time). Do not merge, rebase onto, or
-push `main` from a worktree — the integrator merges. Pushing the piece's own `wt/<slug>` branch (which starts its CI
+push `main` from a worktree: the integrator merges. Pushing the piece's own `wt/<slug>` branch (which starts its CI
 run, section 4) is the integrator's too, unless the brief says the author does it. Do not edit `.10x/status.md` or
 `.10x/handoff.md` from a worktree (guaranteed conflicts); record your piece in
 `.10x/decisions/<role>/<slug>.md` instead and the integrator folds it in.
 
 If the piece changes the wire, the runtime model, the threading model or a generated
-public shape: **write the ADR first** (`.10x/adrs/`, next free number — check for
+public shape: **write the ADR first** (`.10x/adrs/`, next free number: check for
 parallel branches claiming the same number; the integrator renumbers collisions at
 merge) and update the SPEC in the same commits (R11, R7).
 
@@ -78,7 +78,7 @@ No piece merges on its author's word. A reviewer who did not write the code atta
 For small pieces the review can be a focused pass by the integrator; for core crates it
 is a full cycle. The four v1 cycles in `.10x/reviews/` are the reference for depth.
 
-### 4. Merge — integrator only, through a pull request
+### 4. Merge: integrator only, through a pull request
 
 **`main` is protected: nothing lands except through a pull request whose required checks are green on its exact
 head.** The required check is **"All green"**, the last job of the Gate workflow (`.github/workflows/gate.yml`). On a
@@ -98,7 +98,7 @@ checks, requires "All green" on the head (`scripts/wt-ci-check.sh pr-verdict`), 
 that lands is the tree CI tested), verifies that `origin/main` contains the commit GitHub made, and cleans up
 (section 5). `main`'s ruleset allows squash merges only and does not ask for "branches up to date", so the script keeps the
 rule itself: the branch contains `main`, or merging `main` into it changes nothing (a piece stacked on the one
-landing before it: `git merge origin/wt/<that>` before the final push, and build the whole stack before pushing —
+landing before it: `git merge origin/wt/<that>` before the final push, and build the whole stack before pushing;
 two clean merges can still fail to compile together). A squash is a new commit, so what is verified after the
 merge is the tree: `main`'s tree is the tested head's tree. The workflows also run on `merge_group`, for the day a
 merge queue is turned on. State commits (`.10x/status.md`,
@@ -131,14 +131,14 @@ Two rules of merge hygiene, both learned the hard way:
   isolation can break each other (a new background task landing inside another suite's
   timing window; a schema change invalidating another branch's snapshots). When the
   matrix fails after a merge, fix it on `main` with a commit that explains the
-  interaction — never loosen a test without stating the precise new semantics.
+  interaction; never loosen a test without stating the precise new semantics.
 * **`Cargo.lock` conflicts are never hand-merged**: take either side, then
   `cargo update --workspace -q` and commit the regenerated file.
 
 After the matrix is green: update `.10x/status.md` (what landed, new totals, debts) and
 `.10x/handoff.md`, commit `state(<piece>): …`.
 
-### 5. Clean up — `merge` does it, and nothing is left lying around
+### 5. Clean up: `merge` does it, and nothing is left lying around
 
 `scripts/wt.sh merge <slug>` does not stop at the fast-forward. After the CI gate and the merge it
 
@@ -173,8 +173,8 @@ not needed for it.
   integrator assigns ownership in each brief and is the only one who resolves overlap.
 * Shared files nobody may touch from a worktree: `.10x/status.md`, `.10x/handoff.md`,
   root `Cargo.lock` (regenerate at merge), `.github/workflows/ci.yml` (one owner per
-  round — put new jobs in a new workflow file if in doubt).
-* The stash stack is shared across all worktrees. Never bare `git stash` — prefer a WIP
+  round; put new jobs in a new workflow file if in doubt).
+* The stash stack is shared across all worktrees. Never bare `git stash`; prefer a WIP
   commit; if you must stash, tag it (`git stash push -u -m "<slug>"`) and `apply` by
   SHA, never `pop`.
 
@@ -189,7 +189,7 @@ before the rename crosses it mechanically, in the same order the rename branch d
    (`git checkout --ours -- <file>`); in any other file, take main's (`--theirs`). A file you
    added inside a directory the rename moved is placed at the new path by git
    (`CONFLICT (file location)`): `git add` it there.
-3. **`scripts/rename-keel-to-undra.sh <your paths>`** — files or directories, relative to where
+3. **`scripts/rename-keel-to-undra.sh <your paths>`**: files or directories, relative to where
    you stand, in either spelling (`site/blog`, `crates/undra-foo`). It `git mv`s every path
    whose name carries the old name (deepest first) and rewrites the content of every tracked
    text file under the paths; running it again changes nothing. Without paths it renames the
@@ -220,7 +220,7 @@ before the rename crosses it mechanically, in the same order the rename branch d
 
 * Your world is exactly the worktree path in your brief. Do not touch any other
   checkout. Do not merge or push. Report back: branch, what you built, test totals,
-  deviations from the brief **with reasons**, and open questions — the integrator reads
+  deviations from the brief **with reasons**, and open questions; the integrator reads
   the report before the diff.
 * If a defect in already-merged code blocks you, do not silently work around it:
   minimal-repro it, flag it prominently in your report, and work around it loudly in a

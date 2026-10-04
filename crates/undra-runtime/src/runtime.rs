@@ -3243,7 +3243,7 @@ impl Runtime {
         }
         // The counter must be left real room to issue from: the generation counter is shared by
         // every runtime in the process, so obeying a floor near `u32::MAX` would let one corrupt
-        // or hostile snapshot exhaust handle creation process-wide — and crash recovery restores
+        // or hostile snapshot exhaust handle creation process-wide, and crash recovery restores
         // the same bytes on every launch. Anything above the ceiling is refused (re-review NF1).
         if snapshot.generation_floor >= GENERATION_CEILING {
             return Err(RestoreError::GenerationFloor {

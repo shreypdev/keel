@@ -8,7 +8,7 @@
 //! runtime shuts down (a transaction left that way makes every later statement on its database
 //! `Busy`). [`owned`] runs the call in a task of its own instead, and when the caller is gone by
 //! the time the platform answers, it hands what was created to `orphan` (which closes it or rolls
-//! it back) — ADR-047 §7 and ADR-048 §5: dropping without closing closes, through a `WeakCtx`.
+//! it back). ADR-047 §7 and ADR-048 §5: dropping without closing closes, through a `WeakCtx`.
 
 use core::future::Future;
 use core::pin::Pin;

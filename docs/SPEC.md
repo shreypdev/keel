@@ -1,4 +1,4 @@
-# Undra v1 — Implementation Specification
+# Undra v1: Implementation Specification
 
 This is the binding technical specification for Undra v1. Every crate, runtime and generated file conforms to it. When code and this document disagree, the code is wrong until an ADR changes the document.
 
@@ -434,7 +434,7 @@ The runtime is dependency-light (no tokio). It provides the executor, the core l
 
 ### 5.2 Executor
 
-Own minimal executor: tasks are `Pin<Box<dyn Future<Output = ()> + Send>>` in a slab; a `Waker` pushes the task id onto an MPSC ready queue and nudges the core thread (Condvar) / host scheduler (wasm). Each in-flight call is one task; cancellation drops the task (which drops the future, cancelling awaited port calls: the `PortFuture` `Drop` sends a port cancel notification — v1 marks the port call as abandoned so a late reply is discarded; the host is not told, so the set of abandoned ids is capped at 4096 with FIFO eviction and a WARN, and a reply for a forgotten id is logged as unknown).
+Own minimal executor: tasks are `Pin<Box<dyn Future<Output = ()> + Send>>` in a slab; a `Waker` pushes the task id onto an MPSC ready queue and nudges the core thread (Condvar) / host scheduler (wasm). Each in-flight call is one task; cancellation drops the task (which drops the future, cancelling awaited port calls: the `PortFuture` `Drop` sends a port cancel notification; v1 marks the port call as abandoned so a late reply is discarded; the host is not told, so the set of abandoned ids is capped at 4096 with FIFO eviction and a WARN, and a reply for a forgotten id is logged as unknown).
 
 ### 5.3 Ctx
 
@@ -602,7 +602,7 @@ typedef struct UndraApi {
 
 `undra_snapshot` with no running runtime (before `undra_init`, after `undra_shutdown`) returns an empty snapshot (`count 0`) whose `generation_floor` is the process-wide generation counter, which survives shutdown (§5.9, ADR-022).
 
-Return codes (as implemented): `undra_init` returns 0 ok, or a nonzero `init_code` (bad argument, undecodable config, already initialized with a *different* embedder — a repeat init with the same callbacks and `user` is a no-op returning 0). "Once" is per core: two cores in one process are initialised, used and shut down independently. `undra_restore` returns 0 ok or a nonzero `restore_code` (2 a store's restore panicked, 5 a malformed snapshot or a bad handle or floor, 6 unavailable or re-entrant, 7 incompatible: a store's values do not migrate to this build, ADR-037); a failed restore leaves the core unchanged. The native ABI has no `undra_poll`, so `core_threads == 0` is treated as 1. There is no native log callback: core log records reach the host through its registered `Log` port (the JNI `Callbacks` interface likewise has none).
+Return codes (as implemented): `undra_init` returns 0 ok, or a nonzero `init_code` (bad argument, undecodable config, already initialized with a *different* embedder; a repeat init with the same callbacks and `user` is a no-op returning 0). "Once" is per core: two cores in one process are initialised, used and shut down independently. `undra_restore` returns 0 ok or a nonzero `restore_code` (2 a store's restore panicked, 5 a malformed snapshot or a bad handle or floor, 6 unavailable or re-entrant, 7 incompatible: a store's values do not migrate to this build, ADR-037); a failed restore leaves the core unchanged. The native ABI has no `undra_poll`, so `core_threads == 0` is treated as 1. There is no native log callback: core log records reach the host through its registered `Log` port (the JNI `Callbacks` interface likewise has none).
 
 **Host contract** (the same text is the header comment of `undra.h`; a host that breaks a rule has undefined behaviour). The *callbacks* are `reply_cb`, `changeset_cb`, `stream_cb` (given to `undra_init`) and every `port_cb` (given to `undra_port_register`).
 
@@ -1268,7 +1268,7 @@ Build-system integration (a project made by `undra init`; `undra build` is never
 * Errors: `thiserror`-style enums; no `anyhow` in library crates.
 * No `println!`; use the `Log` port through `undra_runtime::log!`.
 * Determinism: no `std::time::SystemTime::now()`, `Instant::now()`, `rand`, or threads spawned outside `undra-runtime`; Clock/Rng/Timer ports only (Constitution R12). The one exception is the native default `Timer`/`Clock` binding inside `undra-runtime`, gated behind `cfg(not(target_family = "wasm"))`.
-* Commit messages: `type(scope): summary` — `feat`, `fix`, `test`, `docs`, `bench`, `state`, `chore`.
+* Commit messages: `type(scope): summary` (`feat`, `fix`, `test`, `docs`, `bench`, `state`, `chore`).
 
 ---
 

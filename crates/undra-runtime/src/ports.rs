@@ -171,7 +171,7 @@ struct Pending {
     abandoned_order: VecDeque<u32>,
     /// How many abandoned ids have ever been evicted, for rate-limiting the eviction warning
     /// (a host that never answers is exactly the case the cap is for; one WARN per eviction
-    /// would flood the log — re-review NF2).
+    /// would flood the log; re-review NF2).
     evicted_total: u64,
     next_id: u32,
 }

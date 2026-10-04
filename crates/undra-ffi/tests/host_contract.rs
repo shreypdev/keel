@@ -208,7 +208,7 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
-/// A `Host` kept alive — and, crucially, REACHABLE — for the rest of the process. These
+/// A `Host` kept alive (and, crucially, REACHABLE) for the rest of the process. These
 /// fixtures stand in for a C embedder whose `user` pointer must outlive its registration;
 /// parking them in a static keeps LeakSanitizer quiet without disabling it, so an
 /// allocation that becomes unreachable (a real leak) still fails the ASan job.
