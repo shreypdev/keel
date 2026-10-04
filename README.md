@@ -73,10 +73,10 @@ Sustained-load results (a firehose, keyed churn, fan-out, a 60-second soak) are 
 
 ## Why you can trust it
 
-* **<!--trust:tests-total-->7,414<!--/trust--> tests across the platforms** — Rust
-  <!--trust:tests-rust-->3,689<!--/trust--> · TypeScript <!--trust:tests-typescript-->1,864<!--/trust--> ·
-  Kotlin <!--trust:tests-kotlin-->881<!--/trust--> · Swift <!--trust:tests-swift-->870<!--/trust--> ·
-  React Native <!--trust:tests-react-native-->110<!--/trust--> — the counts at the last merge, after the full matrix
+* **<!--trust:tests-total-->7,770<!--/trust--> tests across the platforms** — Rust
+  <!--trust:tests-rust-->3,812<!--/trust--> · TypeScript <!--trust:tests-typescript-->2,043<!--/trust--> ·
+  Kotlin <!--trust:tests-kotlin-->890<!--/trust--> · Swift <!--trust:tests-swift-->914<!--/trust--> ·
+  React Native <!--trust:tests-react-native-->111<!--/trust--> — the counts at the last merge, after the full matrix
   ran (the ledger is [`.10x/status.md`](.10x/status.md)).
 * **<!--trust:scenarios-->35<!--/trust--> wire-level contract scenarios, run on every platform**
   (<!--trust:cells-->101<!--/trust-->/<!--trust:cells-->101<!--/trust--> cells pass; two scenarios are about the web
