@@ -19,6 +19,9 @@ Ground rules, condensed:
   warnings`, `cargo fmt`, wasm32 build for core crates, no `TODO`/`unimplemented!()`, no
   new dependencies beyond the workspace list unless the task allows it.
 * Small `type(scope): summary` commits; `git status` clean at the end.
+* No em-dash (U+2014) anywhere: docs, comments, program output, records, commit messages and
+  pull requests. Write a colon, a comma, parentheses or two sentences (a spaced hyphen is fine);
+  `scripts/check-no-em-dash.sh` fails CI on a tracked file that has one.
 
 ## When you finish
 

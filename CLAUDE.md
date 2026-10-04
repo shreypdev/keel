@@ -30,6 +30,7 @@ R12 The core is deterministic: no wall-clock, randomness or threads outside the 
 * Public items are documented with a one-line summary and, where it matters, an example.
 * Tests live next to the code (`#[cfg(test)]`) for units and in `tests/` for integration. Property tests use `proptest`.
 * Small commits, `type(scope): summary` messages (`feat`, `fix`, `test`, `docs`, `bench`, `state`, `chore`).
+* No em-dash (U+2014) in any tracked file (docs, comments, program output, records) or commit subject; write a colon, a comma, parentheses or two sentences (a spaced hyphen is fine). `scripts/check-no-em-dash.sh` enforces it in CI.
 * Do not add a dependency without checking it builds on `wasm32-unknown-unknown`, iOS and Android (no tokio, no reqwest, no ring in core crates). Ask in the PR description why it is needed.
 * TypeScript: strict mode, ESM, no `any` in exported types, no runtime dependencies in `@undra/runtime` core.
 * Kotlin: stdlib + kotlinx-coroutines only in the runtime module; Android-specific code in `android-adapters`.

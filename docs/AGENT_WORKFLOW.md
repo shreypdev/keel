@@ -46,7 +46,9 @@ an issue). A good brief names, in this order:
    briefs.
 
 Inside the worktree: small `type(scope): summary` commits as you go; never leave
-`TODO`/`unimplemented!()`; end with `git status` clean. **Run `scripts/ci-local.sh` before pushing a branch**: every
+`TODO`/`unimplemented!()`; end with `git status` clean. Write no em-dash (U+2014) anywhere, commit messages and
+pull requests included: a colon, a comma, parentheses or two sentences say what it meant (a spaced hyphen is fine;
+CLAUDE.md), and `scripts/check-no-em-dash.sh`, the first step of CI, fails on a tracked file that has one. **Run `scripts/ci-local.sh` before pushing a branch**: every
 step of CI, Bench, Two cores and Site, in a clone of your commit, read from the workflow files (docs/ONBOARDING.md,
 "Before you push a branch"); and `scripts/ci-local.sh --slow` when the piece adds or touches a test that waits, times or
 races (it runs the timing-sensitive suites throttled, so the failures a slower runner would show are found here, once,

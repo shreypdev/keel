@@ -33,6 +33,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # First, before any toolchain: it needs only git and fails in seconds.
+      - name: No em-dash (U+2014) in any tracked file (scripts/check-no-em-dash.sh, and its test)
+        run: |
+          bash scripts/check-no-em-dash.test.sh
+          bash scripts/check-no-em-dash.sh
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
           components: clippy, rustfmt
