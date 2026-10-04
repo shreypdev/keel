@@ -79,8 +79,8 @@ objects, `Option<Child>`.
    dispatcher (a `Lower` step with the runtime in scope, before `Encode`), and each issue is recorded in the
    current call's **ledger** (a per-call list held by the runtime's call scope: the dispatch thread for sync
    calls, the task for async ones). A call that is answered with status 0 commits its ledger. A call that ends
-   any other way — cancelled (status 3, including restore and shutdown), a panic after some handles were issued
-   (status 2), a reply that could not be built — **rolls the ledger back** (one `release` per entry), so no
+   any other way - cancelled (status 3, including restore and shutdown), a panic after some handles were issued
+   (status 2), a reply that could not be built - **rolls the ledger back** (one `release` per entry), so no
    reference is ever owned by nobody. Constructors may return `Arc<Self>` (the singleton pattern: an existing
    instance is interned) besides `Self`/`Result<Self, E>`.
 7. **Platforms keep one wrapper per handle.** Each runtime gains an identity map (handle → weak wrapper) inside
@@ -172,7 +172,7 @@ A returned store observes its signals when its wrapper is made, exactly as a con
 
 * **`Named` keeps naming objects; bindgen looks the kind up.** The SPEC already allows it, but a schema reader
   could not tell a handle from a value without resolving the name, validation could not refuse a `Named`
-  object in a field by shape, and ownership — the thing that differs — would be invisible in the description.
+  object in a field by shape, and ownership, the thing that differs, would be invisible in the description.
 * **A fresh handle per return (UniFFI's model: every crossing is a new reference and a new wrapper).** No
   interning map, but a store returned twice would have two handles while its cell can deliver to one, and two
   wrappers would mirror (or, in TypeScript, refuse to mirror) the same signals. Interning plus one wrapper per

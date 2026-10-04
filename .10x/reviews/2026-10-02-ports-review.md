@@ -1,4 +1,4 @@
-# The opt-in `WebSocket`, `Sse` (ADR-047) and `Db` (ADR-048) ports — adversarial review
+# The opt-in `WebSocket`, `Sse` (ADR-047) and `Db` (ADR-048) ports - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** adversarial reviewer (`docs/AGENT_WORKFLOW.md` section 3), with four platform
 sub-reviewers (Swift; Kotlin JVM + Android; TypeScript; React Native) whose findings were each re-checked here and
@@ -28,19 +28,19 @@ connection takes the write lock at once and sees none of it) on every platform.
 
 What did not hold, all fixed with a test that fails without the fix:
 
-* **B1 (blocking, size)** — after the cross-merge the hello-world JS was **26,132 B gz, 132 over ADR-052's gate**:
+* **B1 (blocking, size)** - after the cross-merge the hello-world JS was **26,132 B gz, 132 over ADR-052's gate**:
   the opt-in ports had put `PortIds.WebSocket/Sse/Db`, codec residue and the dispose plumbing into the main entry.
   Now 25,996 (ids in `OptInPortIds` of the subpaths, pure codecs, `dispose` called on close only from the main
   entry, from `recovery.ts` at a restart).
-* **H1 (resource leak, every platform's Rust surface)** — a task cancelled while `WebSocket.connect`, `Sse.open`,
+* **H1 (resource leak, every platform's Rust surface)** - a task cancelled while `WebSocket.connect`, `Sse.open`,
   `Db.open` or **`Db.begin`** crossed left what the platform opened with no handle in the core; an orphaned
   transaction makes every later statement on its database `Busy` until shutdown.
-* **H2 (web recovery)** — a crash-restarted wasm core (ADR-049) kept the trapped instance's connections and its
+* **H2 (web recovery)** - a crash-restarted wasm core (ADR-049) kept the trapped instance's connections and its
   open transaction: the restarted core's `begin` was `Busy` for ever.
-* **H3 (every `Db` binding)** — two opens of one new database at once (two stores opening `"app"` at launch, two
+* **H3 (every `Db` binding)** - two opens of one new database at once (two stores opening `"app"` at launch, two
   cores) both migrated; the second failed `Migration { 1, "table already exists" }`. The WAL switch was `Busy`
   in ~0.1 s instead of the busy timeout, and a version above `i32::MAX` bricked the database.
-* **H4 (Android, `android-adapters` and React Native)** — a `COMMIT` SQLite refused (a deferred foreign key) left
+* **H4 (Android, `android-adapters` and React Native)** - a `COMMIT` SQLite refused (a deferred foreign key) left
   the database stuck in a transaction: every later `begin` failed until the database closed. Proven on the `undra`
   AVD before and after the fix.
 
@@ -48,7 +48,7 @@ What did not hold, all fixed with a test that fails without the fix:
 
 ### Blocking
 
-**B1 — the hello-world JS over ADR-052's gate (fixed, `c40953a`).** `scripts/wasm-size.sh` on the merged tree:
+**B1 - the hello-world JS over ADR-052's gate (fixed, `c40953a`).** `scripts/wasm-size.sh` on the merged tree:
 `web/hello-runtime-js` 26,132 B gz against `<= 26,000` (main's record 25,984). Diffing the unminified hello bundle
 against main's: `PortIds` gained the three opt-in entries (72 B gz), `/* @__PURE__ */ codecs.option(codecs.u16)`
 left `codecs.u16; codecs.string; codecs.string;` statements behind (12 B), and `PortImpl.dispose` plumbing
@@ -62,21 +62,21 @@ longer disposes the port it replaces (documented in `port.ts` and SPEC §17).
 
 ### High
 
-**H1 — `connect` / `open` / `begin` cancelled while crossing leaves what the platform opened (fixed, `e23301e`).**
+**H1 - `connect` / `open` / `begin` cancelled while crossing leaves what the platform opened (fixed, `e23301e`).**
 `crates/undra-ports/src/{ws.rs,sse.rs,db.rs}`: the platform finishes an abandoned port call (SPEC 5.1: the host is
-not told), so a cancelled `Database::transaction` during `begin` left `BEGIN IMMEDIATE` open on the platform — every
-later statement `Busy` — and a cancelled `connect`/`open` left a live connection, stream or database
+not told), so a cancelled `Database::transaction` during `begin` left `BEGIN IMMEDIATE` open on the platform - every
+later statement `Busy` - and a cancelled `connect`/`open` left a live connection, stream or database
 (`SseEvents::drop` returned on `State::Opening`). Fix: `crates/undra-ports/src/owned.rs` runs those four calls in a
 task of their own that closes (1001), closes, or rolls back what the late answer names when the caller is gone
 (`db.rs:379`, `db.rs:457`, `ws.rs:321`, `sse.rs:178`). Tests (`tests/opt_in.rs`):
 `a_transaction_cancelled_while_begin_crosses_is_rolled_back_when_the_platform_answers`,
-`a_connect_or_open_cancelled_while_it_crosses_closes_what_the_platform_opened` — both fail without the fix. The
+`a_connect_or_open_cancelled_while_it_crosses_closes_what_the_platform_opened` - both fail without the fix. The
 platform-side twin (a connect/open finishing after the core detached) was fixed in Kotlin (`WebSocketPort.kt:127`,
 `SsePort.kt:108`, `DbPort.kt:157`, `22fbbe2`) and TypeScript (the bindings' epoch, `0bd736a`); a cancelled Kotlin
 connect now abandons the half-open client (`ClientWebSocketAdapter.kt:216`) and a cancelled Kotlin Db open closes
 its file under `NonCancellable`.
 
-**H2 — a crash restart kept what the trapped instance held (fixed, `0bd736a`, then `c40953a`).** The restart did
+**H2 - a crash restart kept what the trapped instance held (fixed, `0bd736a`, then `c40953a`).** The restart did
 not dispose the ports: old WebSocket and SSE connections stayed open (`nodeWebSocket` paused for ever, the browser
 adapter buffered to 1008) and an open transaction kept SQLite's write lock, so every `begin` of the restarted core
 was `Busy` after 5 s (reproduced with `nodeSqliteDb`). The bindings' terminal `disposed` flag would also have
@@ -85,11 +85,11 @@ ports module's (`worker.ts:205`), and the bindings count disposals (an epoch) so
 core. Tests: `recovery.test.ts` "a restart closes the WebSocket connections…", "a restart rolls back the
 transaction…", "wasm-worker: the ports of the worker's ports module release…" (each fails without the fix). The
 web playground then had to re-create what a restart does not restore: the Live view kept a stale `Live` ("stale
-handle") and the Notes view a store whose database was gone ("no database is open") — both remount after a restart
+handle") and the Notes view a store whose database was gone ("no database is open") - both remount after a restart
 (`examples/playground/web/src/App.tsx:64-65`, `f3b110a`, `173a731`; checked in the browser pane: connect, crash,
 connect and echo; add, crash, add, reload, both notes kept).
 
-**H3 — concurrent opens migrate twice; the WAL switch does not wait; a version above `i32::MAX` bricks the
+**H3 - concurrent opens migrate twice; the WAL switch does not wait; a version above `i32::MAX` bricks the
 database (fixed on every binding).** The brief prescribed reading `user_version` before `BEGIN IMMEDIATE`. Swift
 (`a6ffa1e`, `DbPort.swift:300`) found it (2 of 3 concurrent opens failed `Migration{1, "table notes already
 exists"}`); reproduced on the React Native C++ binding over the host SQLite (4 bindings, one new file:
@@ -98,7 +98,7 @@ Fix everywhere: the version is read again under the write lock and what is pendi
 (`DbPort.kt:162`, `db/binding.ts:282`, `UndraDb.cpp:952`); `PRAGMA journal_mode = WAL`, which SQLite answers `BUSY`
 at once while another connection switches the same file, is retried until the busy timeout (`DbPort.swift:347`,
 `DbPort.kt:209`, `binding.ts` `walOn`, `UndraDb.cpp`); `user_version` is a signed 32-bit integer, so a version above
-2,147,483,647 was stored as 0 and every later open re-ran migration 1 — refused before the call in Rust
+2,147,483,647 was stored as 0 and every later open re-ran migration 1 - refused before the call in Rust
 (`db.rs:284`, `48f7eda`) and again by every binding. Tests that fail without the fix: Swift
 `testConcurrentOpensOfOneNewDatabaseAllSucceedAndMigrateOnce`, `testTheSwitchToWalWaitsForTheBusyTimeoutThenIsBusy`,
 `testAVersionBeyondUserVersionsRangeIsRefusedAndTheLargestFittingOneIsKept`; Kotlin `PortsV2BindingTests` (three
@@ -106,7 +106,7 @@ cases and the stricter open sequence); TypeScript `db-binding.test.ts` (three); 
 `testConcurrentOpens`; Rust `db_checks_names_and_migrations_before_crossing`. `MemDb` holds one lock across `open`,
 so it has no race.
 
-**H4 — Android: a refused `COMMIT` sticks (fixed, `c9f4da9`, `97a5a89`).** `AndroidDbAdapter.kt:169` and the React
+**H4 - Android: a refused `COMMIT` sticks (fixed, `c9f4da9`, `97a5a89`).** `AndroidDbAdapter.kt:169` and the React
 Native module's `UndraDatabase.java` ran `BEGIN`/`COMMIT`/`ROLLBACK` through `SQLiteDatabase`'s transaction stack.
 When SQLite refuses a `COMMIT` (a deferred foreign key), Android has already popped the transaction while SQLite
 keeps it open; the binding's `ROLLBACK` is then refused ("no transaction is active") and every later `begin` fails
@@ -132,14 +132,14 @@ AVD with exactly that error and passes after the fix (the three statements go to
 ### Minor / documentation (done)
 
 * **Two cores, one database name: shared by design** (each core its own binding over the same file; SQLite's locks
-  keep them apart) — `runtimes/ts/@undra/runtime/test/db-two-cores.test.ts` (committed rows seen, uncommitted not,
+  keep them apart) - `runtimes/ts/@undra/runtime/test/db-two-cores.test.ts` (committed rows seen, uncommitted not,
   a contended write `Busy` after 5 s, concurrent first opens migrate once). On Node `DatabaseSync` waits on the
   calling thread.
 * **The web's `Db` is one tab's**: `AccessHandlePoolVFS` holds every file of the origin's pool, so a second tab's
   open is `DbError.Unavailable` (checked in the browser pane; typed, no data lost). SPEC §8.1, `site/docs/db.html`.
 * **React Native**: a lone message reaches the core after one frame (~16.7 ms; RN timers are frame-aligned); every
   failure before a socket opens is `Refused { status: null }`; a drop is `Network`, or on iOS sometimes
-  `Closed(1001, "Stream end encountered")` — `docs/REACT_NATIVE.md`, ADR-047 notes; RN20 accepts what each OS gives.
+  `Closed(1001, "Stream end encountered")` - `docs/REACT_NATIVE.md`, ADR-047 notes; RN20 accepts what each OS gives.
 * `contract-tests/scenarios.md` S23 named Node's global `WebSocket` for the TS column, which runs `nodeWebSocket()`.
 * SPEC §8.1 and §17 follow every fix above; ADR-047 and ADR-048 are Accepted with dated implementation notes.
 
@@ -205,11 +205,11 @@ AVD with exactly that error and passes after the fix (the three statements go to
   Node; `Refused{null}` on the browser and React Native (no status, no reason exposed before `open`). *Peer close
   1000.* `Closed{1000}` everywhere. *Drop.* `Network` everywhere, except iOS React Native, which can report
   `Closed(1001, "Stream end encountered")`. *Bad UTF-8.* `Protocol` on Swift, Kotlin, Node; the browser reports a
-  drop. *Headers on a browser* — refused with the typed message, no socket made. *SSE* 401 → `Refused{401}`, DNS →
+  drop. *Headers on a browser* - refused with the typed message, no socket made. *SSE* 401 → `Refused{401}`, DNS →
   `Network`, HTML → `Protocol` on all. **Holds** (platform differences documented in ADR-047's notes).
 * *R3, Kotlin `reason` vs `message`.* The goldens and the playground read natively: `WsError.Closed(code, reason)`,
   `Refused(status, reason)` like `HttpError.Network(reason)`; `message` stays the Display text. (A Rust-style doc link
-  `` [`disconnect`](Live::disconnect) `` survives in the generated Kotlin KDoc of `Objects.kt` — bindgen's, open.)
+  `` [`disconnect`](Live::disconnect) `` survives in the generated Kotlin KDoc of `Objects.kt` - bindgen's, open.)
 
 **4. Hashes and size (R1, ADR-052).** Standard schema with the features off: **`0xbbf6f70d0c567f47`**, main's
 (`cargo test -p undra-ports --test schema` with default features; the hello core builds `undra-ports` with default
@@ -241,7 +241,7 @@ informational (`bench/RESULTS.md`, 299,165 B gz).
 | `bash contract-tests/run-all.sh` | **74/74** (ts 26, kotlin 24, swift 24: S01–S20, S23–S26, and S21–S22 on ts) |
 | interop `run.sh ts`, `run.sh kotlin` | OK, OK |
 | Android playground on the `undra` AVD (`smoke.sh` through its Notes step; the airplane-mode half not run on the shared emulator) | a note written to SQLite (`AndroidDbAdapter`) is there after a killed process; 0 crash markers |
-| Web playground in the browser pane (OPFS, `browserWebSocket`) | Notes: add, reload, crash restart, add, reload — every note kept; a second tab `Unavailable`; Live: connect, echo, crash, connect, echo |
+| Web playground in the browser pane (OPFS, `browserWebSocket`) | Notes: add, reload, crash restart, add, reload - every note kept; a second tab `Unavailable`; Live: connect, echo, crash, connect, echo |
 | Site `build-all`, `check-links --words` | clean |
 
 ## Open items (not fixed here)

@@ -134,8 +134,8 @@ carry, so the index is positional and never hashes a key:
 
 | Source op | Row before → after | Derived ops emitted (indices in the view) |
 |---|---|---|
-| `Insert{i, t}` | — → passes | `Insert{rank, out(t)}` |
-| | — → filtered out | none |
+| `Insert{i, t}` | none → passes | `Insert{rank, out(t)}` |
+| | none → filtered out | none |
 | `Remove{i}` | passed | `Remove{rank}` |
 | | filtered out | none |
 | `Update{i, t}` | passed → passes, same sort key | `Update{rank, out(t)}` |

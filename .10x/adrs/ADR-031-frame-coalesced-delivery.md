@@ -218,7 +218,7 @@ coalescing", and the opt-out cannot be honoured: `#[undra(no_coalesce)]` never r
 From the integrator's decision D1 (`.10x/decisions/architect/stress-bench.md`, 2026-09-30), verbatim:
 
 (a) Kotlin frame pacing is an interface in the runtime module implemented
-in `android-adapters` (Choreographer) — the runtime module stays stdlib + coroutines;
+in `android-adapters` (Choreographer) - the runtime module stays stdlib + coroutines;
 (b) synchronous calls made from the main thread drain before they return on all three
 runtimes, so read-your-writes holds for sync calls as well as replies; (c) decision 6
 (`no_coalesce` through the schema) lands in the same piece as a separable commit with

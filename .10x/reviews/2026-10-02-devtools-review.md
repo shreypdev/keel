@@ -1,4 +1,4 @@
-# Devtools (B4, ADR-054) — adversarial review
+# Devtools (B4, ADR-054) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/devtools`
 at `ddc8d36` (`main` merged at the end) · **Read:** `CLAUDE.md` (R1, R2, R6, R9, R11, R12), ADR-054 and
@@ -33,7 +33,7 @@ dropped without the core or the app waiting for it.
 
 ## Findings
 
-**M1 — The socket's refusal was not the one `404`, and its state came before its token (fixed, `e324ff8`;
+**M1 - The socket's refusal was not the one `404`, and its state came before its token (fixed, `e324ff8`;
 `serve.rs:56`).** ADR-054 section 6: a missing or wrong token, an unknown path, devtools off and a method other than `GET`
 are "the *same* `404` (same status, headers and body), so the endpoint does not announce itself". For `/devtools`,
 `/devtools/<asset>` and anything else that goes through `http::respond_to` that held. For `/devtools/ws` the token was
@@ -51,7 +51,7 @@ server with devtools on and one with them off: every answer is byte-for-byte the
 wrong last character, a good token and no asset, and the two upgrade forms; the spread between runs of one case is larger than
 the spread between cases (`token_matches` reads the whole expected token whatever differs).
 
-**M2 — A panicking inspector was silent (fixed, `e324ff8`; `ext.rs:67`, `runtime.rs:840`).** `Inspectors::inspect` ran
+**M2 - A panicking inspector was silent (fixed, `e324ff8`; `ext.rs:67`, `runtime.rs:840`).** `Inspectors::inspect` ran
 the inspector under `guarded` and threw the `PanicReport` away with `.ok()`. R6 is met (nothing escapes), but nothing was
 logged, `panics` in `undra_stats_json` did not count it, and the hub's worker asked again at every sample, so a broken
 inspector cost a backtrace (the guard formats one with `force_capture`) several times a second for as long as the page was
@@ -60,7 +60,7 @@ place), counted, and the inspector is skipped until a new one is registered unde
 `a_panicking_inspector_is_contained_reported_once_and_not_asked_again` (fails on the old code: asked five times, no record,
 `panics` 0) and `an_inspector_that_asks_the_runtime_for_a_snapshot_or_another_inspector_does_not_deadlock`.
 
-**M3 — The query cache was sampled up to a hundred times a second, under its lock (fixed, `e324ff8`; `hub.rs:744`,
+**M3 - The query cache was sampled up to a hundred times a second, under its lock (fixed, `e324ff8`; `hub.rs:744`,
 `inspect.rs:130`).** `sample_queries` ran on every pass of the worker's loop that had no snapshot pending: every 250 ms
 idle and, during a commit burst, once after every snapshot (up to 100 a second). `describe` formatted every entry while
 holding the cache's `state` lock, so every query operation waited behind it. Measured on 10,000 entries with a value each:
@@ -70,53 +70,53 @@ the sampler runs at most four times a second and nine times as far apart as the 
 most; about once a second on this cache in debug). Test: `sampling_a_cache_of_ten_thousand_entries_stays_within_a_budget`
 (a 1.5 s bound on the document, debug); the cadence is the hub's own and is exercised by the storm test.
 
-**L1 — A snapshot's cost was unbounded on a big state (fixed, `e324ff8`; `hub.rs:59`, `hub.rs:536`).** A snapshot holds the
+**L1 - A snapshot's cost was unbounded on a big state (fixed, `e324ff8`; `hub.rs:59`, `hub.rs:536`).** A snapshot holds the
 core lock. The worker took one per 10 ms burst whatever it cost, so a state whose snapshot takes 30 ms would hold the core
 for three quarters of every second while a page is open, and the 4 MiB bound only decides what is *kept*, not what is
 *taken*. Now the next snapshot waits for `max(10 ms, 9 x the last one's duration)`, at most 2 s: the snapshots take a
 tenth of the worker's time at most. Small states are unaffected (the storm test is unchanged at one step per 10 ms).
 
-**L2 — The app was not told how many stores a time travel dropped (fixed, `e324ff8`; `hub.rs:669`).** The brief and
+**L2 - The app was not told how many stores a time travel dropped (fixed, `e324ff8`; `hub.rs:669`).** The brief and
 ADR-053's reload notice say `(N objects not carried over)`; the time-travel notice said `time travel: step N` only, and the
 count went to the page alone. It is now `time travel: step 1 (1 store(s) built since are gone)` when a store was dropped
 (unchanged otherwise). Test: the dropped-store test now reads the notice from the app's session. SPEC 5.10 and DEV_LOOP say so.
 
-**L3 — A dead worker left the app unfiltered (fixed, `2342e49`; `hub.rs:491`).** The worker's panic guard set `active` to
+**L3 - A dead worker left the app unfiltered (fixed, `2342e49`; `hub.rs:491`).** The worker's panic guard set `active` to
 false and left the pages attached: the hub still observed every store, but the bridge stopped filtering, so the app client
 was sent every entry the runtime emitted, including stores it never observed, until the pages left. Now the pages are
 closed (1001), each leaves through `detach`, and the last one undoes the observation as it always does; a page that comes
 back gets a new worker. Test: `a_dead_worker_closes_the_pages_and_leaves_the_hub_to_undo_its_observation` (the policy; the
 panic itself cannot be provoked from outside, since the inspector and the restore are guarded below it).
 
-**L4 — A state over 4 MiB was listed again at every capture (fixed, `2342e49`; `ring.rs`).** The dedupe compared with the
+**L4 - A state over 4 MiB was listed again at every capture (fixed, `2342e49`; `ring.rs`).** The dedupe compared with the
 newest step's bytes, and a step over the per-step bound has none, so an unchanged big state (a commit that changes only a
 query handle, which a snapshot does not hold) pushed a new non-restorable step every time and evicted the restorable ones.
 A step that was not kept now carries its length and a hash. Test: `the_same_state_is_not_listed_twice_whether_or_not_it_was_kept`.
 
-**L5 — A step's `through_seq` can lag its content (open).** `capture` reads the change-set sequence before it takes the
+**L5 - A step's `through_seq` can lag its content (open).** `capture` reads the change-set sequence before it takes the
 snapshot, so a commit between the two is in the state and not in the label; the next capture finds the same bytes and adds
 no step. Only visible under a storm (a commit every 16 microseconds against a snapshot of 50 to 100): the timeline would
 show that commit after a step that already contains it. The label cannot be read after (it would claim commits the state
 does not have) and cannot be read under the core lock from the transport; fixing it needs the runtime to return the
 sequence with the snapshot. Left, noted in the sde record's open items.
 
-**I1 — The token is in the runner's environment for as long as the runner lives.** Not in any `argv` (asserted for every
+**I1 - The token is in the runner's environment for as long as the runner lives.** Not in any `argv` (asserted for every
 process on the machine), not in stdout or stderr (asserted), written once in the banner. `UNDRA_DEVTOOLS_TOKEN` stays in
 the runner's environment, so a process the core spawns inherits it, and `ps eww` shows it to the same user and root
 (argv is shown to everyone). The runner is generated and `forbid(unsafe_code)` is not set in it, but `remove_var` is
 `unsafe` in edition 2024; left. A hardened variant would hand it over on stdin.
 
-**I2 — The page's CSP says `connect-src 'self' ws: wss:`** which lets a script connect to any WebSocket host (Safari's
+**I2 - The page's CSP says `connect-src 'self' ws: wss:`** which lets a script connect to any WebSocket host (Safari's
 older `'self'` does not cover `ws:`). Inert today: `script-src 'self'` stops inline script and the page builds its DOM with
 `createElement`/`textContent` (no `innerHTML`, `insertAdjacentHTML`, `eval` or `new Function` in `runtimes/ts/devtools/src`).
 
-**I3 — `HEAD` is answered with the body (a `404` with `Not Found`);** and a plain `GET` of any path that is not `/devtools*`
+**I3 - `HEAD` is answered with the body (a `404` with `Not Found`);** and a plain `GET` of any path that is not `/devtools*`
 is hung up on without an answer, so the listener can be told from a web server whichever way the page is configured. Both
 harmless.
 
 ## The attacks
 
-**1. The token and exposure — holds (M1 fixed).** *Identical 404:* above; the same matrix against a server with devtools
+**1. The token and exposure - holds (M1 fixed).** *Identical 404:* above; the same matrix against a server with devtools
 off. *128 bits from the OS:* `new_token` reads 16 bytes from `/dev/urandom`; the only fallback (no such file, i.e. Windows)
 takes the keys of `RandomState`, which the OS seeds, and mixes the clock in addition, never as the only source; `a_token_is_32_hex_digits_and_not_the_same_twice`.
 It is made once per `undra dev` (`dev.rs:63`), so a reload keeps the page's address. *Never logged:* the hub's and the
@@ -134,7 +134,7 @@ tag bytes with no body, a short body and a restore-sized body (768 messages), a 
 fresh page: every one that is not a valid `Resync` or `Restore` closes the page, the core's `calls` counter moved only
 for the app's own read, the counter is where it was, no log line says `panicked`, and a new page still attaches.
 
-**2. Observe-all routing — holds.** `the_app_gets_exactly_what_it_observed_before_during_and_after_a_page`: the app watches
+**2. Observe-all routing - holds.** `the_app_gets_exactly_what_it_observed_before_during_and_after_a_page`: the app watches
 store A's `count` only; B changes before the page (nothing), with it (the page sees it, the app nothing; A's unobserved
 `label` neither), after it leaves (nothing), and when the app then observes B it is sent B's current value (103) and no
 other. `two_pages_share_the_observation_and_the_last_one_out_restores_the_app`: the first page leaving does not release
@@ -148,7 +148,7 @@ and then only what it asks for; its first page has another `core_epoch`. A race 
 instead: between `observe(off)` and the re-`observe(on)` of `release_observation` an app that observes or unobserves at the
 same instant can leave one signal observed that it just dropped, which is one unobserved entry sent to the app; Info only.
 
-**3. Time travel and bounds — holds (L1, L2, L4 fixed).** *Convergence on the TypeScript runtime:*
+**3. Time travel and bounds - holds (L1, L2, L4 fixed).** *Convergence on the TypeScript runtime:*
 `crates/undra-transport/interop/ts-devtools.mjs` (run by `interop/run.sh`) drives the shipped, unmodified `RemoteTransport`
 as the app, observes a counter, and a plain WebSocket speaks the page's `[tag][body]` messages: attach (step 1 = 5),
 `add(3)` (mirror 8), `Restore {step 1}` (answer `ok`, 0 dropped), the mirror converges on 5, `add(0)` through the core
@@ -171,7 +171,7 @@ a page that never reads (queue bound 128 KiB) against 40,000 commits: the app wa
 released, the app's observed set is what it asked for. *Stale handles and the notice:* L2; the existing
 `restoring_a_step_from_before_a_store_existed_...` shows status 5 for the dropped store's handle and now the notice.
 
-**4. The runtime seam — holds (M2, M3 fixed).** *Panic:* M2. *Thread and lock:* an inspector runs on the thread that
+**4. The runtime seam - holds (M2, M3 fixed).** *Panic:* M2. *Thread and lock:* an inspector runs on the thread that
 asks (the hub's worker; the doc comment says so now) with none of the runtime's locks held by `inspect` (the slot is cloned
 out of the list first, so registering from inside one works); `undra-query`'s takes only the cache's own lock, and
 since M3 only to copy rows. Re-entrancy: an inspector that calls `rt.inspect(..)` and `rt.snapshot()` is fine from a test

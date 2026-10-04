@@ -207,8 +207,8 @@ The package publishes two builds of the same sources and the same declarations:
 **(b) Messages are codes.** Every sentence the runtime throws or logs is `msg(17, operation, mode)`: a literal code and the
 values. `messages.ts` (development) holds the table and formats today's sentence, character for character; the production
 build swaps in `messages.prod.ts`, whose `msg` returns
-`T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017`. A wire error's production text
-is its code and fields with a link (`wire: code=unexpected_eof at=12 needed=3 — https://…/errors.html#wire-unexpected_eof`). What is **synchronous and unchanged in both flavours**
+`T0017: callSync, remote; see https://shreypdev.github.io/undra/docs/errors.html#T0017`. A wire error's production text
+is its code and fields with a link (`wire: code=unexpected_eof at=12 needed=3; see https://…/errors.html#wire-unexpected_eof`). What is **synchronous and unchanged in both flavours**
 is everything R6 names: the class (`instanceof`), `name`, `kind`, `code`, `detail`, `status`, `reason`, `operation`,
 `cause`, and the core's own text (a panic message, a refusal reason travel as values). What a production page loses is the
 prose, one click away. The T-codes are a second catalogue of SPEC 12 (never reused, generated into the same errors page);
@@ -430,7 +430,8 @@ with the helper **16,285**, all features **39,922**.
 All nine as recommended, with these conditions:
 
 * **D1.** Production messages are a code, the values and a link; the sentences live in the development flavour and on the
-  errors page (row 13: −1,316 as landed). The text is `T<code>: <values> — https://…/errors.html#T<code>` (no `undra` prefix).
+  errors page (row 13: −1,316 as landed). The text is `T<code>: <values>; see https://…/errors.html#T<code>` (no `undra` prefix).
+  The separator became `; see` on 2026-10-03: no em-dash in program output (`.10x/decisions/sde/no-em-dash.md`).
 * **D2.** The published `dist` is the production flavour with private properties renamed; `development` and `react-native`
   resolve the readable build (row 14: −570 as landed).
 * **D3.** `Transport` gains the typed control methods, `CoreTransport` is the typed channel `UndraCore` speaks, and

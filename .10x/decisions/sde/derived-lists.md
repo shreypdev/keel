@@ -1,4 +1,4 @@
-# SDE: derived keyed lists (E2, ADR-039) — 2026-10-01
+# SDE: derived keyed lists (E2, ADR-039) - 2026-10-01
 
 Implemented ADR-039 whole, from the brief `.10x/specs/2026-10-01-derived-keyed-lists-impl.md` and the
 integrator's decisions (parameters yes, `DerivedList<T>`/`derive()`, caps 4,096/256, `count()` yes, ties in
@@ -138,10 +138,10 @@ out of the monomorphised code.
 
 * Landing page: proposal only, `site/data/bench.json` untouched (card labels do not count toward the 350
   words; prose is at 342). Proposed row: `{"id": "derived-view", "operation": "Filtered view of a
-  10,000-row list, one row changed — 158 bytes on the wire, was 353 KB", "value": 392, "unit": "ns",
+  10,000-row list, one row changed - 158 bytes on the wire, was 353 KB", "value": 392, "unit": "ns",
   "budget": 1, "budgetUnit": "µs", "gate": "signals/derived_10k/update_visible ≤ 2 µs", "source":
   ".../bench/RESULTS.md#5-a-computed-list-over-a-keyed-list-cost-the-list-again-a-derived-list-costs-the-change-adr-039"}`;
-  or a harsh card "Derived churn — a 10,000-row list and a sorted view of it, both mirrored; p99 24.6 µs",
+  or a harsh card "Derived churn - a 10,000-row list and a sorted view of it, both mirrored; p99 24.6 µs",
   122 k/s, floor 22 k/s.
 * Runner samples for the two ratios (and `bench/baselines/apple-m5-pro.toml` has no derived rows; CI records
   its baseline from the base commit, so the rows are absolute-gated until then).

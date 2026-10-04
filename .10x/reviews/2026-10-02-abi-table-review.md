@@ -1,4 +1,4 @@
-# The C ABI as a per-core function table (ADR-044) — adversarial review
+# The C ABI as a per-core function table (ADR-044) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** adversarial reviewer (`docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/abi-table` at `5c621ef` (`main` `6c71cca` merged) · **Read:** `CLAUDE.md` (R1, R2, R6, R7, R8, R9, R11), ADR-044,
@@ -27,14 +27,14 @@ process-global state in `undra-ffi` and `undra-runtime` (the embedder slot, `POR
 checker's thread-local runtime list, the thread counter behind `runtime_threads`, timers, the blocking pool) is a
 static of the image, so "per process" became "per core" for all of them by construction; the test is the proof. On the
 iOS simulator the two-core app now also panics inside each **prelinked** core and gets a reply back, in Debug
-(`-all_load`) and Release (`-u`, fat LTO) — unwinding survives `ld -r`. The linked app binaries, Debug and Release, of
+(`-all_load`) and Release (`-u`, fat LTO) - unwinding survives `ld -r`. The linked app binaries, Debug and Release, of
 the two-core app and of a fresh `undra init` app export exactly one `_<ns>_undra_api` per core and no Rust symbol; the
 Android libraries export `<ns>_undra_api`, `JNI_OnLoad` and `JNI_OnUnload` only; the wasm exports are unchanged.
 
 Nothing High. Two Mediums, both fixed with a test that fails without the fix: a namespace whose generated entry is a name the
 runtimes already declare (`core` → `UndraCore`, `ids`, `store`, `log`, `core_native`, ...) was accepted and produced
 bindings that do not compile (M1); and the sibling-namespace refusal also refused **another checkout of the same
-project** — a `git worktree` or a copy beside it — so `undra build` failed in both (M2; the refusal had no test at all).
+project** - a `git worktree` or a copy beside it - so `undra build` failed in both (M2; the refusal had no test at all).
 Four Lows, fixed: the CLI's schema loader could dereference a null namespace or hold a null function pointer of a
 damaged library as a Rust `fn` (L1); `export_core!`'s compile-time check accepted uppercase and a leading `_` against
 the lowercase rule (L2); an overstated `// SAFETY:` comment (L3); the Node two-core runner ran a stale wasm against
@@ -43,7 +43,7 @@ Amendment A (per-namespace default storage, follow-up `ns-storage`).
 
 ## Findings
 
-### M1 — a namespace whose entry is a runtime name generated uncompilable bindings (fixed, `a4ed73e`)
+### M1 - a namespace whose entry is a runtime name generated uncompilable bindings (fixed, `a4ed73e`)
 
 `crates/undra-cli/src/config.rs:602` (`check_namespace`) checked only the characters. The entry `Undra<Pascal(ns)>` is
 declared in the same scope as the runtime's types and the generated `UndraIds`/`UndraCoreNative`, so `namespace =
@@ -57,7 +57,7 @@ and React Native runtimes, the generated bindings and the app templates declare)
 derived namespace). A test scans the runtimes' and templates' sources for `Undra…` declarations and fails when one is
 missing from the list (mutation-checked by deleting `UndraWriter`), so the list cannot drift as the runtimes grow.
 
-### M2 — the sibling refusal blocked a second checkout of the same project (fixed, `9ba4174`)
+### M2 - the sibling refusal blocked a second checkout of the same project (fixed, `9ba4174`)
 
 `crates/undra-cli/src/session.rs:200` (`sibling_with_namespace`) refused any directory next to the project with an
 `undra.toml` claiming the same namespace. A `git worktree add ../app-feature` or `cp -r app app-old` of a project whose
@@ -69,7 +69,7 @@ parent's listing, each sibling's `undra.toml`, and one `Cargo.toml` under the si
 absolute or `..`, so a crafted `undra.toml` can make it read one file named `Cargo.toml` anywhere). Only its
 `[package] name` is compared and nothing of it is printed beyond naming the sibling directory in a refusal: accepted.
 
-### L1 — the schema loader trusted a damaged table (fixed, `655c434`)
+### L1 - the schema loader trusted a damaged table (fixed, `655c434`)
 
 `crates/undra-cli/src/schema.rs` read the table through a `#[repr(C)]` struct whose `schema_json` and `buf_free` were
 non-nullable `fn` pointers and passed `name_space` to `CStr::from_ptr` unchecked: a library named on the command line
@@ -78,20 +78,20 @@ table, `abi_version` first and nothing else of another version, `size >= sizeof`
 entries `Option`s and present), with a unit test over in-memory tables of each defect. Swift (`CoreTable.swift`) and
 React Native (`copyTable`) already checked every entry and the namespace.
 
-### L2 — `export_core!` accepted namespaces `undra.toml` refuses (fixed, `a4ed73e`)
+### L2 - `export_core!` accepted namespaces `undra.toml` refuses (fixed, `a4ed73e`)
 
 `crates/undra-ffi/src/table.rs:149` (`is_valid_namespace`) accepted `A1_b2` and `_x` (its own test listed them as
 good), while the record and the ADR deviation say lowercase only. A hand-written shim could export a core no generated
 binding can name. It now enforces `[a-z][a-z0-9_]*`, at most 32, and the compile-time message says so; keywords (`fn`,
 `self`, `gen`, `type`, `match`) are verified to work as namespaces (`$ns:ident` matches them).
 
-### L3 — `unsafe impl Sync for UndraApi` claimed more than it guarantees (fixed, `655c434`)
+### L3 - `unsafe impl Sync for UndraApi` claimed more than it guarantees (fixed, `655c434`)
 
 `table.rs:99`: `UndraApi`'s fields are public, so a table built by hand may hold any `name_space`; the comment said it
 always points at a `'static` string. The impls are sound regardless (no safe code dereferences the pointer); the comment
 now says that.
 
-### L4 — the Node two-core runner skipped the build when a wasm existed (fixed, `0213b8f`)
+### L4 - the Node two-core runner skipped the build when a wasm existed (fixed, `0213b8f`)
 
 `examples/two-cores/node/run.sh` built a core only when its `.wasm` was missing, so after a core change (this review's
 merge of `main` moved the schema hash) it ran the old module against the regenerated bindings and failed with a schema
@@ -106,7 +106,7 @@ declared inside `const _: () = { .. }` so no safe Rust code can name and call th
 `jni_shim::on_load`, `native.rs` and `registry.rs` (moved, unchanged), the CLI loader (L1). The macro's tokens are
 authored in `undra-ffi`; a shim crate with `#![forbid(unsafe_code)]` compiles (checked), so the generated shim holds no
 `unsafe` of its own (R2). **Version and size:** every host reads `abi_version` first and refuses any other value
-(CLI, Swift, React Native; Kotlin through `abiVersion()`), then requires `size >= sizeof(UndraApi)` as it knows it — so
+(CLI, Swift, React Native; Kotlin through `abiVersion()`), then requires `size >= sizeof(UndraApi)` as it knows it - so
 `abi_version` is the breaking version and appended fields under version 2 are accepted by older hosts (tested in the
 CLI loader with a 64-byte-larger table). A v1 library: the CLI names it as v1 (`undra_abi_version` resolves); Swift's
 generated entry fails at link time; React Native's `dlsym`/class lookup fails with a message; Kotlin's v1 `JNI_OnLoad`
@@ -134,7 +134,7 @@ each core's `undra_ffi` monomorphs are present twice as locals (two images in on
 wasm: the unchanged `undra_*` exports of SPEC 7 (`schema_retention` covers the host library and passes).
 
 **3. Namespace validation.** Fuzzed (`config.rs` test): empty, 33 bytes, `-`, `.`, `/`, `../x`, uppercase, leading
-`_` or digit, non-ASCII lowercase (`été`), space, NUL — all refused; keywords accepted and compile. M1 (runtime names),
+`_` or digit, non-ASCII lowercase (`été`), space, NUL - all refused; keywords accepted and compile. M1 (runtime names),
 M2 (sibling), L2 (the macro's rule). Remaining, Low: two namespaces can share a **bundle** name (`acme_pay` and
 `acme_pay_core` both give `AcmePayCore`, so the XCFramework, the pod and the `AcmePayCoreFFI` module collide in one
 app); React Native's `validNamespace` accepts a superset (uppercase, leading `_`), which is safe because only

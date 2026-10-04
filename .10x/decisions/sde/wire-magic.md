@@ -1,4 +1,4 @@
-# SDE — the envelope magic becomes UNDR (wt/magic, 2026-09-30)
+# SDE - the envelope magic becomes UNDR (wt/magic, 2026-09-30)
 
 Executes ADR-033. The only wire change before the first publication; the rename record
 (`rename-undra.md`) listed it as the one place the old name survived. This record spells the old

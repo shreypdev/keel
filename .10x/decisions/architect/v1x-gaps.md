@@ -13,16 +13,16 @@ wrong values silently (PS-3, reproduced). Verified clean: `unsafe` confinement (
 crates.
 
 **Decisions (all Proposed).**
-* ADR-034 — anything that outlives a call holds a `WeakCtx`; the runtime's own call/stream tasks and
+* ADR-034 - anything that outlives a call holds a `WeakCtx`; the runtime's own call/stream tasks and
   `undra-query`'s tasks stop pinning it; subscribers receive the `Ctx`; `WeakCtx::upgrade() -> Result<Ctx,
   Gone>`, `Ctx::closed()` and `WeakCtx::sleep` give a typed end; a dropped owner frees the runtime (and `Drop`
   answers in-flight work like shutdown); Kotlin `close()` shuts the in-process core down. `Ctx` stays strong.
-* ADR-035 — a signal write from a thread that does not hold the owning runtime's core lock is refused in every
+* ADR-035 - a signal write from a thread that does not hold the owning runtime's core lock is refused in every
   build (E0065 panic, or `WriteError` from `try_set`/`try_update`); change-sets are routed by the store's owner;
   `Ctx::with_core` is the sanctioned path.
-* ADR-036 — flag 2 carries only the stream's `E`; new flag 3 `failed` = `status, message, detail` in the reply
+* ADR-036 - flag 2 carries only the stream's `E`; new flag 3 `failed` = `status, message, detail` in the reply
   vocabulary; `impl Stream<Item = Result<T, E>>` ends a stream with a typed error. Pre-publication wire change.
-* ADR-037 — persisted artefacts record a schema hash and per-item type fingerprints with an embedded closure;
+* ADR-037 - persisted artefacts record a schema hash and per-item type fingerprints with an embedded closure;
   equal loads, different migrates structurally by name, then through `#[undra::migrate]` hooks in Rust;
   refusals are typed (restore) or dead letters (queue), never silent; the persisted cache is bounded.
 

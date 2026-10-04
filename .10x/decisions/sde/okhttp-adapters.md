@@ -1,4 +1,4 @@
-# SDE: `okhttp-adapters` — the app's network stack inside the ports (wt/okhttp-adapters, 2026-10-02)
+# SDE: `okhttp-adapters` - the app's network stack inside the ports (wt/okhttp-adapters, 2026-10-02)
 
 User feedback U5/T3: "the Android adapter uses HttpURLConnection, not OkHttp; our real network stack (token refresh,
 interceptors, tracing, cert pinning) would need custom adapters; it sits beside our network stack, not inside it." The

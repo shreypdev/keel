@@ -1,4 +1,4 @@
-# SDE — launch-site: the site for launch (wt/launch-site, 2026-10-03)
+# SDE - launch-site: the site for launch (wt/launch-site, 2026-10-03)
 
 The founder's eight asks for launch day. Design reasoning: `.10x/specs/2026-10-03-launch-site-design.md`. No product code
 changed (crates, runtimes); the playground's head, theme and its `main.tsx` theme line are the only example code touched.

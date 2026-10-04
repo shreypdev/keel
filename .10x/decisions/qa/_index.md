@@ -1,4 +1,4 @@
-# QA — index
+# QA - index
 
 Suites and how to run them (all local):
 - Rust: `cargo test --workspace` (proptest + byte-fuzz included). 1,079 green.
@@ -7,4 +7,4 @@ Suites and how to run them (all local):
   annotations, reflection-free runner; env.sh sets the jars). 454 green, 2 JNI skips.
 - Swift: `cd runtimes/swift/UndraRuntime && swift test` (needs Xcode; env.sh sets
   DEVELOPER_DIR). 313 green.
-Contract scenarios (SPEC §14) not yet wired to the playground core — pending piece 7.
+Contract scenarios (SPEC §14) not yet wired to the playground core - pending piece 7.

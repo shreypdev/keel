@@ -1,4 +1,4 @@
-# Platform parity (C4b, C4c, PO-4, recursive records) — adversarial review
+# Platform parity (C4b, C4c, PO-4, recursive records) - adversarial review
 
 **Date:** 2026-10-01 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/parity` at `d32f60a` (14 commits, `main` merged in) · **Read:** `CLAUDE.md`; ADR-032 and its amendment A; the bar the

@@ -1,4 +1,4 @@
-# SDE — persistence-v2: persisted state migrates by name, storage has an error channel, a trapped web core restarts (wt/persistence-v2, 2026-10-01)
+# SDE - persistence-v2: persisted state migrates by name, storage has an error channel, a trapped web core restarts (wt/persistence-v2, 2026-10-01)
 
 Track A, pieces A5 (ADR-037), A6 and A7 (ADR-049), from the gap audit `.10x/specs/2026-10-01-v1x-gaps.md` (PS-1…PS-4,
 N6; PO-3, PO-4, PO-11, PC-2, PA-5). One worktree, no push; the Rust side by the piece's implementer, the three runtimes

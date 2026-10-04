@@ -144,7 +144,7 @@ UTF-8 → `Protocol`. Swift: `URLSession.bytes(for:)`; Kotlin: `java.net.http` o
 RN: `fetch` streaming when `response.body` exists, else `XMLHttpRequest` progress events (incremental
 `responseText`).
 
-### Db binding (`dbPort(adapter)`) — the binding implements ADR-048's semantics, the adapter only runs SQL
+### Db binding (`dbPort(adapter)`) - the binding implements ADR-048's semantics, the adapter only runs SQL
 * Ids: databases and transactions share one counter from 1, never reused.
 * `open(name, migrations)`: `name` must be `":memory:"` or 1–64 of `A-Z a-z 0-9 . _ -` not starting with `.`,
   else `Unavailable("invalid database name ...")`; versions must strictly increase from 1, else
@@ -153,8 +153,8 @@ RN: `fetch` streaming when `response.body` exists, else `XMLHttpRequest` progres
   `PRAGMA journal_mode = WAL` (ignore its result row); `current = PRAGMA user_version`; `newest` = the last
   migration's version; if migrations are non-empty and `current > newest`: close, `Migration { version:
   current, "the database is at version <current>, newer than the newest migration (<newest>)" }`. Pending =
-  migrations above `current`; if any: `BEGIN IMMEDIATE`, `executeScript(sql)` each in order — a failure →
-  `ROLLBACK`, close, `Migration { version, message: <the error's text> }` — then `PRAGMA user_version = <last>`,
+  migrations above `current`; if any: `BEGIN IMMEDIATE`, `executeScript(sql)` each in order (a failure →
+  `ROLLBACK`, close, `Migration { version, message: <the error's text> }`), then `PRAGMA user_version = <last>`,
   `COMMIT`. Answer `DbOpened { db, version }`.
 * A per-database **serial queue** (one operation at a time on the connection, in arrival order) and a
   transaction slot. `begin(db)`: wait until no transaction is active (at most the busy timeout, 5 s; a test hook
@@ -164,7 +164,7 @@ RN: `fetch` streaming when `response.body` exists, else `XMLHttpRequest` progres
   tx and wake the waiters. Unknown/ended id → `Unavailable("no open database or transaction <id>")` (tx after
   commit: `Unavailable("transaction <id> is over")`). `close(db)`: roll back an active tx, `conn.close()`, mark
   closed; again → `Ok`; statements afterwards → `Unavailable`.
-* Adapter contract (each runtime's SQLite code): `execute`/`query` prepare **one** statement — trailing
+* Adapter contract (each runtime's SQLite code): `execute`/`query` prepare **one** statement - trailing
   non-whitespace, non-comment SQL → `Sql { "only one statement per call: use a migration for several" }`;
   `params.count != sqlite3_bind_parameter_count` → `Sql { "the statement has N parameters, M were given" }`; bind
   positionally (`Null`, `Integer` int64, `Real` double, `Text`, `Blob`); `query` returns the column names and each
@@ -239,8 +239,8 @@ picks the shape: a `LoadOptions.ports` map, or `core.registerPort(PortIds.WebSoc
   `READY <port>`; TS imports `startRealtimeServer`): echo text and binary; subprotocol + headers (`/ws/headers`);
   refused upgrade with status (`/ws/deny?status=401`); peer close code and reason (`/ws/close`); abrupt drop
   (`/ws/drop` → `Network`); invalid UTF-8 (`/ws/bad-utf8` → `Protocol`); flood under a stalled reader
-  (`/ws/flood?n=2000&size=65536`: where the platform can pause — Swift, Kotlin — the server's `written` count
-  stays far below 2000 while the reader stalls, then everything arrives in order; where it cannot — TS/RN — the
+  (`/ws/flood?n=2000&size=65536`: where the platform can pause (Swift, Kotlin), the server's `written` count
+  stays far below 2000 while the reader stalls, then everything arrives in order; where it cannot (TS/RN), the
   stream ends with `Closed(1008)` once 16 MiB are buffered); SSE parser cases (`/sse/feed`, resume with
   `Last-Event-ID`), `/sse/status?code=204|500` → `Refused(status)`, `/sse/html` → `Protocol`, body end → `Ended`,
   `/sse/hang` + close → the server sees the client leave.

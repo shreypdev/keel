@@ -44,7 +44,7 @@ Two more facts make it worse than a debug/release asymmetry:
 ## Decision
 
 1. **The rule holds in every build.** A write that has consequences (the signal is attached to a store or has
-   dependents — the same condition as today) is allowed only on a thread that holds **the owning runtime's**
+   dependents - the same condition as today) is allowed only on a thread that holds **the owning runtime's**
    core lock, or a `TestRuntime` driver thread, or inside `testing::unchecked_writes`. Anything else is refused
    *before* the value changes, in release as in debug.
 2. **The owner is recorded.** `StoreCell` gains `owner: AtomicU64` (a runtime id, `0` until published), set by

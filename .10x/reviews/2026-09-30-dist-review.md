@@ -1,4 +1,4 @@
-# Distribution pipeline — adversarial security review
+# Distribution pipeline - adversarial security review
 
 **Date:** 2026-09-30 · **Reviewer:** fable (security) · **Piece:** `wt/dist` at `6962ace` (merged with `main` as `f7b50de`; review fixes committed on top) · **Spec:** `.10x/specs/2026-09-30-launch-v2-design.md`, Section 4 · **Decisions:** `.10x/decisions/{devops,qa}/launch-v2.md`, `.10x/decisions/devops/dist.md`
 
@@ -18,19 +18,19 @@ emits `publish=false`, the job's `if` is on that output, and `success()` still a
 dispatch with `publish=true` on anything but the `v<workspace version>` tag is refused in the first
 job; every third-party action is pinned to a commit that is the one its version comment names;
 `${{ }}` appears in no `run:` block. **A real release may follow once the founder's prerequisites
-exist** (`shreypdev/undra` already exists; `shreypdev/homebrew-undra` does not yet — 404 today —
+exist** (`shreypdev/undra` already exists; `shreypdev/homebrew-undra` does not yet (404 today)
 nor the npm org, `NPM_TOKEN` or `HOMEBREW_TAP_TOKEN`) **and the dry run is green**, with two things
 done before the first tag: the `release` environment with the `v*` restriction and the tag ruleset
 (both in `docs/RELEASING.md`, Hardening). Two of the fixes below (the on-`main` check and the
 integrity-checked npm skip) and the `ubuntu-22.04` runner labels run for the first time on GitHub
 in that dry run; the on-`main` check fires only when publishing, so the first real release is its
-first exercise — if it refuses wrongly, its message says why and it is one `if` to remove.
+first exercise - if it refuses wrongly, its message says why and it is one `if` to remove.
 
 ## Findings
 
 | # | Sev | Area | Where | Finding | Status |
 |---|---|---|---|---|---|
-| H | — | — | — | No High finding. | — |
+| H | n/a | n/a | n/a | No High finding. | n/a |
 | M1 | Medium | Trust boundary | `.github/workflows/release.yml`, `verify` (tag check, formerly lines 71–79) | A `v<workspace version>` tag on **any** commit published. `verify` checked that the tag equals the version, not that the tagged commit is on the default branch, so anyone with push access could tag a branch commit or rewritten history and publish it to all four channels; the `release` environment's `v*` rule does not help (the tag matches). | **Fixed**: `fetch-depth: 0` on `verify`'s checkout; when `publish=true`, `git merge-base --is-ancestor HEAD origin/$DEFAULT_BRANCH` (`github.event.repository.default_branch`) must hold, with a message naming the commit and the rule; dry runs are untouched. Exit codes of the command checked locally (on-main 0, off-main 1, unknown ref 128 → refused). GitHub-only, so the dry run cannot exercise it. **Open for the founder**: the tag ruleset (`RELEASING.md`, Hardening) so such a tag is not pushable in the first place. |
 | M2 | Medium | npm idempotency | `release.yml`, npm step, `publish()` (formerly lines 355–362) | The re-run skip trusted name+version: an existing version with *different* bytes (the unscoped `undra` squatted at our exact version, or a republish after a moved tag) was logged "already on npm; skipping" and the run went green while the npm channel disagreed with the GitHub Release. | **Fixed**: the skip compares the registry's `dist.integrity` with `sha512-` + base64 of the tarball this run built; a mismatch fails with the patch-release instruction. Verified against the real registry with `npm@10.9.0`: identical bytes → skip; different bytes → error; missing version and missing package → the publish path (`npm view` exits 1 for both). |
 | L1 | Low | Hash chain | `release.yml`, `release` job | The publish job trusted the artifact store: it uploaded `release/*` and `npm/*.tgz` without checking them against the checksums the build and package jobs wrote. | **Fixed**: `package` writes `npm/tarballs/SHA256SUMS` next to the tarballs it installed; `release` runs `sha256sum --check --strict` on `checksums.txt` and `SHA256SUMS` before preflight. The formula is not in the chain: it carries the release hashes and `brew install` fails loudly on a wrong one. |
@@ -91,7 +91,7 @@ Low fixes made directly: 6 (L1–L6). Medium fixed: M1, M2 (both in the workflow
    wrong-length hash and a surviving placeholder; literal (non-regex) substitution. Re-run here: a
    formula generated from a synthetic `checksums.txt`, `ruby -c` OK, `brew style --formula` no
    offences, `brew audit --strict --formula` clean, in a throwaway local tap removed afterwards.
-   (The audit pulled a `homebrew/core` tap onto this machine; it was untapped again — the machine is
+   (The audit pulled a `homebrew/core` tap onto this machine; it was untapped again - the machine is
    as it was.) Tap token: one repository, Contents read/write, passed as a header for two commands.
 6. **CLI.** `UNDRA_RELEASE_TAG = "v" + CARGO_PKG_VERSION`; `undra init` outside a checkout writes
    `undra = { git = "https://github.com/shreypdev/undra", tag = "v<version>" }` (unit test
@@ -103,7 +103,7 @@ Low fixes made directly: 6 (L1–L6). Medium fixed: M1, M2 (both in the workflow
    is unblocked by the `Cargo.toml.tmpl` rename; no `@@` survives in any `Cargo.toml`; `grep -rni
    keel` over the templates, `packaging/`, `site/install.sh`, the runbook and the workflow: nothing.
 7. **Runbook.** Prerequisites in a workable order (org before token; tap repo with a default branch
-   before the PAT; Pages serves `install.sh` — `site/scripts/stage.sh` copies `site/.` whole). Dry
+   before the PAT; Pages serves `install.sh` - `site/scripts/stage.sh` copies `site/.` whole). Dry
    run documented (`gh workflow run release.yml --ref <branch> -f publish=false`). Rollback is
    real: patch tag; `gh release edit --prerelease` so the installer's "latest" skips it; `npm
    dist-tag add … latest` + `npm deprecate`; `git revert` in the tap; never delete a release or move

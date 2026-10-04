@@ -1,4 +1,4 @@
-# Undra v1 — status
+# Undra v1 - status
 
 > **Note (2026-09-30, evening):** the product was renamed Keel → Undra (ADR-030) by a mechanical
 > script; identifiers in the entries below were rewritten with it, so branch names and crate names
@@ -41,14 +41,14 @@ the "Landed" notes below and .10x/reviews resolutions.
 
 ## In progress
 
-(nothing — v1 is complete)
+(nothing: v1 is complete)
 
 
 ## Landed since takeover
 
 - **cdylib schema/JNI dead-strip fixed** (ADR-029, `wt/schema-strip`): on a clean macOS dev
   build `undra build --platform host` produced a `libundra_core.dylib` that reported the empty
-  schema `0x98754cbea76a32b2` and exported no JNI symbols — the app core's `inventory`
+  schema `0x98754cbea76a32b2` and exported no JNI symbols: the app core's `inventory`
   registrations and undra-ffi's `#[no_mangle]` JNI exports (both in dependency rlibs, linked with
   rustc's `--start-lib` lazy semantics) were dead-stripped, because incremental compilation (the
   dev default, and worst of all a polluting incremental core rlib left by a plain `cargo build`) is
@@ -57,7 +57,7 @@ the "Landed" notes below and .10x/reviews resolutions.
   symbols), ELF (Linux/Android `.so`) is unaffected, release and iOS (`-force_load`) hid it because
   they are non-incremental. Fix: the shim's `[profile.dev]` is `incremental = false`, and `undra
   build` compiles the **host** library in a target directory of its own
-  (`<target>/undra/<project>/host-lib`) with `CARGO_INCREMENTAL=0` — so it never reuses a
+  (`<target>/undra/<project>/host-lib`) with `CARGO_INCREMENTAL=0`, so it never reuses a
   stripping-prone incremental rlib a plain `cargo build`/`cargo test` left in the shared target
   (decision 6). Only the host library needs the private dir (Android is ELF, iOS is `-force_load`ed).
   Verified robust across the clean / `cargo build` / `cargo test --workspace` / inherited-
@@ -70,7 +70,7 @@ the "Landed" notes below and .10x/reviews resolutions.
   `undra-transport::lifecycle::a_chatty_client_is_never_pinged` is unchanged by this work.
 
 - **fast-dispatch merged** (ADR-028): a per-thread reply slot (no unsafe, no ABI change)
-  makes call_sync allocation-free on the hot path — 73.8 -> 43.9 ns (31.5 ns via the new
+  makes call_sync allocation-free on the hot path: 73.8 -> 43.9 ns (31.5 ns via the new
   call_sync_with), C ABI 79.3 -> 49.8 ns; replies byte-identical under a counting
   allocator across every outcome incl. layers and panics. Both blueprint §14 host rows
   that missed now measure within target; device verdicts land with the device phase.
@@ -80,12 +80,12 @@ the "Landed" notes below and .10x/reviews resolutions.
   hint, kotlin .gitignore emitted by bindgen output, workspace target-dir reuse (no more
   second 1.4 GB tree), and a real `undra dev` watcher race fixed (10/10 under load).
 - **bindgen Swift naming fixed**: a store signal named a reserved word (`default`) spells
-  as `default_` — @Observable rejects backticked stored properties. Goldens refreshed.
+  as `default_`: @Observable rejects backticked stored properties. Goldens refreshed.
 - **CI**: playground-core added to the wasm32 loop; contract runners (ts+kotlin on Linux,
   swift on macOS) are jobs.
 
 - **keyed-ops merged** (ADR-027): recorded list operations make keyed change-sets
-  O(change) — 10k insert 536us -> 6.3us, update 272ns; model-based proptest at 100k cases;
+  O(change): 10k insert 536us -> 6.3us, update 272ns; model-based proptest at 100k cases;
   blueprint row moved from MISS to within. Playground BigList + bench hook now ride the
   recorded path. Raw update()/set() keep the diff fallback.
 - **query-rollback merged**: a failed mutation's rollback is the inverse of its OWN writes
@@ -97,9 +97,9 @@ the "Landed" notes below and .10x/reviews resolutions.
   solid adapters (SPEC §10.3) and the playground web app uses the react one.
   Post-merge sweep: Rust 2,047 · TS 869 · Swift 328 · contracts 51/51, clippy clean.
   Known small issue (pre-existing): the `stores` bindgen golden has a signal named
-  `default`; Swift @Observable rejects the backticked property — needs a rename rule.
+  `default`; Swift @Observable rejects the backticked property - needs a rename rule.
 
-- **playground merged** — the end-to-end proof. One core (todos, counter, 10k keyed list,
+- **playground merged**: the end-to-end proof. One core (todos, counter, 10k keyed list,
   remote query/mutations, lab, bench hooks; 47 tests), React/SwiftUI/Compose apps RUN on
   Chrome (48 ms interactive, 62 fps under 10k-list updates), the iPhone 17 Pro simulator
   (XCUITests 5/5) and the `undra` AVD, with proof screenshots in examples/playground/.proof.
@@ -113,7 +113,7 @@ the "Landed" notes below and .10x/reviews resolutions.
   Honest misses recorded and now in flight as ADR'd fixes (keyed diff, sync-call allocs).
   Also surfaced: dropping a Runtime without shutdown() keeps its threads up to ~5 s (the
   query hydrate task's bounded Kv retry holds a Ctx). All shipped embedders call
-  shutdown(); WeakCtx-based task handles are v1.x debt — document in Runtime docs after
+  shutdown(); WeakCtx-based task handles are v1.x debt - document in Runtime docs after
   the dispatch piece merges.
 
 - **undra-ffi fix round merged** (ADR-026): port-registration refcounting drains in-flight
@@ -122,7 +122,7 @@ the "Landed" notes below and .10x/reviews resolutions.
   host contract incl. the corrected callable-from-callback list; C harness and fresh-dist
   wasm legs revived and in CI; Log-port reply loop fixed; wasm alloc/reply hardening;
   runtime Subscription leak fixed (heap flat over 1000 cycles). TS 833. Re-review pending.
-  Local-run note: the C harness rebuilds undra-ffi without `jni`, clobbering the dylib —
+  Local-run note: the C harness rebuilds undra-ffi without `jni`, clobbering the dylib;
   build `--features jni` immediately before Kotlin runs (CI jobs are isolated).
   Re-review found N1 (a NEW UAF in the fix: the loser of a removal race did not wait) and
   N2 (mutual-removal hang); the integrator fixed both (shared draining list; in-callback
@@ -132,7 +132,7 @@ the "Landed" notes below and .10x/reviews resolutions.
 
 - **undra-macros fix round merged** (ADR-025): compile-time schema-identity checks
   (E0060/E0061), typed port outcomes via From<PortError> (E0033; HttpError/FsError map
-  Unavailable etc. — wire unchanged), store error-recovery without cascades, seven new
+  Unavailable etc. - wire unchanged), store error-recovery without cascades, seven new
   E-codes, diagnostics polish. BREAKING for users: a port `Result` method's error type now
   needs `From<PortError>`. Re-review CLOSED (sound for v1 on schema/wire); v1.x polish:
   query-in-impl diagnostics, split-impl follow-ons, two Low wording nits.
@@ -142,7 +142,7 @@ the "Landed" notes below and .10x/reviews resolutions.
   v1.x items: L3 release-build silent drop of off-runtime writes; L2 init-hook timing.
 
 - **bindgen stdlib filter merged** (ADR-024): per-app bindings no longer duplicate the
-  standard ports/records — references point at each runtime's own types (exact-shape
+  standard ports/records - references point at each runtime's own types (exact-shape
   matching; E0052 for a name collision with a foreign id). Template bindings 2,836→942
   lines. New `stdlib` golden compiled+run for TS and Kotlin. Open (recorded in ADR-024):
   Swift runtime could make its Port* types public to drop the reachable-only fallback.
@@ -162,7 +162,7 @@ the "Landed" notes below and .10x/reviews resolutions.
   RAN on the iOS 26.5 simulator, an Android emulator and Chrome against the real core.
   Sizes: wasm 85 KB gz (budget 120), Android 831 KB (budget 1.2 MB). Also fixed a real
   browser bug in the TS mirror (queueMicrotask receiver → change-sets dropped; TS 831).
-  Deviation accepted: dlopen unsafe in cli's schema.rs (SPEC §13) — CLAUDE.md R2 amended.
+  Deviation accepted: dlopen unsafe in cli's schema.rs (SPEC §13); CLAUDE.md R2 amended.
   Open: undra_schema_json is canonical (docs dropped) → --docs uses the runner; Swift
   Package stand-in core needs UNDRA_LINK_CORE=1 under Xcode-from-Dock; no Android remote
   mode in the Kotlin runtime; dev clients don't auto-reconnect.
@@ -239,7 +239,7 @@ CI → adversarial reviews closed.
   (471 us native vs a 20 us budget), undra-query rollback drops a later placeholder, generated Swift streams lose
   backpressure, Swift `load` inits before the schema check, TS Mirror strands a subscriber-enqueued change-set.
 
-## Launch v2 (2026-09-30, evening) — integrator ledger
+## Launch v2 (2026-09-30, evening) - integrator ledger
 
 Spec: `.10x/specs/2026-09-30-launch-v2-design.md` (+ Amendment A). Decisions under
 `.10x/decisions/{cto,product-manager,architect,devops,qa}/launch-v2.md`.
@@ -247,8 +247,8 @@ Spec: `.10x/specs/2026-09-30-launch-v2-design.md` (+ Amendment A). Decisions und
 | Piece | Merge | Verdict |
 |---|---|---|
 | cdylib dead-strip fix (ADR-029) | `1a4b038` | contracts green on CI for the first time; Rust 2,110 |
-| contract runner diagnostics, S04 spacing, fixed-finding test, per-call alloc assertion | `e2374f4`…`dd5a2cd` | CI all-green twice (`1b550c1`, `dd5a2cd`) — first fully green runs of the project |
-| state: spec, ADR-030 (Undra), role decisions | `2d4f0fe`, `6a0a67a` | — |
+| contract runner diagnostics, S04 spacing, fixed-finding test, per-call alloc assertion | `e2374f4`…`dd5a2cd` | CI all-green twice (`1b550c1`, `dd5a2cd`) - first fully green runs of the project |
+| state: spec, ADR-030 (Undra), role decisions | `2d4f0fe`, `6a0a67a` | none |
 | rename Keel → Undra (ADR-030; 1,290 files; `scripts/rename-keel-to-undra.sh`) | `31a1f37` | every suite green on the branch incl. iOS sim + Android emulator launches; repo renamed to `shreypdev/undra` |
 | docs truth pass (blueprint claims, README label/count, TS count) | `4fdd36e`, `0b0f292` | from the blog fact-check |
 | site v2 (v1 palette, 332-word landing, live demo, roadmap, SEO, error codes page) + 4 fact-checked posts | `c9e6bf8` | fable reviews: `.10x/reviews/2026-09-30-site-v2-review.md`, `…-blog-factcheck.md` |
@@ -268,7 +268,7 @@ Matrix at checkpoint 2: Rust 2,156 · TS 897 · Kotlin 454 · Swift 384 · wasm 
 | harsh-conditions benchmark harness (S1a) + 7 landing-page cards | `2e0d1c5`, `74ddb44` | opus review `.10x/reviews/2026-09-30-stress-bench-review.md` (H1 churn invariant fixed); the `[stress]` gates and the 10 s soak **pass on the GitHub runner** (Bench job) |
 | ADR-032 Swift error channel (generated Swift never traps) | `1e50f96` | opus review `.10x/reviews/2026-09-30-swift-error-channel-review.md`: R6 holds for Swift; Rust 2,156 · Swift 384 · contracts 51/51 |
 
-Review follow-ups recorded, not yet done: stress M1 (gates would not catch a 2× regression —
+Review follow-ups recorded, not yet done: stress M1 (gates would not catch a 2× regression -
 ratio gates or runner baselines), M3 (a contended-writes scenario), M4 (a real drift gate), L4–L8;
 dist: the `release` environment + `v*` tag ruleset are founder steps.
 
@@ -278,31 +278,31 @@ dist: the `release` environment + `v*` tag ruleset are founder steps.
 |---|---|---|
 | transport tests deterministic (injected clock; the fuzz test sized to the flood guard; TIME_WAIT fix) | `33e4172` | 100/100 and 200/200 loaded runs |
 | `UNDRA_BENCH_SCALE=2` in `bench.yml` | `b993067` | the slowest runner class is 6.2× the host on `changeset_100/cell`; Bench green since |
-| **ADR-031 frame-coalesced delivery** — all three runtimes, `no_coalesce` through the schema, `Stress` store, S18 | `ce4fd85` | opus review `.10x/reviews/2026-10-01-frame-coalesced-delivery-review.md`: mirror-equals-core holds (model tests 30k/20k/20k histories); 2 Medium fixed (either patch bound drops; Kotlin drain no longer chases); Rust 2,168 · TS 931 · Kotlin 500 · Swift 425 · **contracts 54/54** |
+| **ADR-031 frame-coalesced delivery**: all three runtimes, `no_coalesce` through the schema, `Stress` store, S18 | `ce4fd85` | opus review `.10x/reviews/2026-10-01-frame-coalesced-delivery-review.md`: mirror-equals-core holds (model tests 30k/20k/20k histories); 2 Medium fixed (either patch bound drops; Kotlin drain no longer chases); Rust 2,168 · TS 931 · Kotlin 500 · Swift 425 · **contracts 54/54** |
 
 Every piece of the launch-v2 spec (§7) is merged. In flight: `bench-followups` (stress review M1/M3/M4/L4–L8)
 and `stress-screen` (S1b: the playground stress screen and the landing page's "Push it").
 Matrix at checkpoint 3: Rust 2,168 · TS 931 · Kotlin 500 · Swift 425 · wasm 29 · contracts 54/54 (18 scenarios × 3).
 
-### Checkpoint 4 (2026-10-01, late morning) — launch v2 complete
+### Checkpoint 4 (2026-10-01, late morning) - launch v2 complete
 
 | Piece | Merge | Verdict |
 |---|---|---|
 | S1b playground stress screen + landing "Push it" | `a4efd8d` | fable review `.10x/reviews/2026-10-01-stress-screen-review.md`: live numbers honest; 100k updates/s → 120 applies/s after merge, drain p99 ≈ 1 ms, 0 dropped frames; 2,185 Rust · 102 web |
-| roadmap data: shipped since v1.0 | `7c1a0b5` | — |
+| roadmap data: shipped since v1.0 | `7c1a0b5` | none |
 | port tests wait for the Echo port's call (dev-mode Kv/Wall calls arrived first on a slow runner) | `74106e1` | 30 loaded runs clean; CI green |
-| bench follow-ups: ratio gates, same-VM base baseline in CI, contended completions, Theil–Sen drift gate, L4–L8, the completions deadline fix | `0c88c8a` | opus review `.10x/reviews/2026-10-01-bench-followups-review.md` (2 High fixed: an out-of-sample ratio bound; `cancel-in-progress` had been cancelling merge runs); first runner Bench run green — the baseline step engaged: 55 rows recorded from the base commit `74106e1` on the same VM and the head gated against them (a `vs base` column in the budgets table); 2,236 Rust |
+| bench follow-ups: ratio gates, same-VM base baseline in CI, contended completions, Theil–Sen drift gate, L4–L8, the completions deadline fix | `0c88c8a` | opus review `.10x/reviews/2026-10-01-bench-followups-review.md` (2 High fixed: an out-of-sample ratio bound; `cancel-in-progress` had been cancelling merge runs); first runner Bench run green - the baseline step engaged: 55 rows recorded from the base commit `74106e1` on the same VM and the head gated against them (a `vs base` column in the budgets table); 2,236 Rust |
 
 Every piece of the launch-v2 spec and every review follow-up is merged; no worktrees remain.
 Matrix at checkpoint 4: Rust 2,236 · TS 931 · Kotlin 500 · Swift 425 · web playground 102 · wasm 29 · contracts 54/54.
 CI has been green on every `main` run since `1b550c1` except two flakes, both fixed (the alloc test, the port test).
 
-## v1.x program (2026-10-01, afternoon) — integrator ledger
+## v1.x program (2026-10-01, afternoon) - integrator ledger
 
 Spec `.10x/specs/2026-10-01-v1x-default-choice-design.md` (Tracks A–H, Amendments A–D). Phase 1 pieces
 merged in dependency order after an adversarial review each; every merge ran the full local matrix first.
 
-### Checkpoint 5 (2026-10-01, afternoon) — phase 1 landing
+### Checkpoint 5 (2026-10-01, afternoon) - phase 1 landing
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -321,7 +321,7 @@ amendment, implemented, opus review running) → `react-native` (G1, implemented
 boundary plan (`abi-table` ADR-044, `ios-floor` ADR-045, `newtypes` ADR-042), `persistence-v2`
 (ADR-037/049), `dev-reload` (B3), `testkit` (F), derived lists (ADR-039), then the v1.2 bets.
 
-### Checkpoint 6 (2026-10-01, late afternoon) — parity landed; Rust 1.99.0 handled
+### Checkpoint 6 (2026-10-01, late afternoon) - parity landed; Rust 1.99.0 handled
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -334,17 +334,17 @@ In flight: `android-adapters` (crossing main), `runtime-lifecycle` (opus review)
 (cross-merge + CI jobs + Android reload re-check), `tooling` (D2–D5), `wasm-size` (E5, ADR-052),
 `site-errors` (API pages for the Kotlin/TS error channel).
 
-### Checkpoint 7 (2026-10-01, evening) — React Native landed
+### Checkpoint 7 (2026-10-01, evening) - React Native landed
 
 | Piece | Merge | Verdict |
 |---|---|---|
 | site: the Kotlin/TS API pages describe the typed error channel (samples compiled under kotlinc and tsc --strict); roadmap refreshed to what shipped / in flight / next | `c538222`, `afa4bfd` | docs; 342/350 landing words |
 | a Kotlin test lambda CI's kotlinc 2.0.21 could not infer (brew's 2.4.20 could) | `7c8d2d8` | the Kotlin suite now runs under 2.0.21 too (ONBOARDING row) |
-| **G1 React Native runtime** (ADR-038): `@undra/react-native` TurboModule over the C ABI under the TS mirror, `undra build --platform rn`, the playground RN app, a `react-native` CI job + `rn-devices.yml` (simulator/emulator on PRs touching RN, weekly), `scripts/rn-device-checks.sh` | `6fe1643` | opus review `.10x/reviews/2026-10-01-react-native-review.md`: ownership trace holds, 2 Medium fixed (a failed second start froze the running core; a stopped runtime kept calling the new core), 11 Low fixed; 10/10 on-device checks on the iPhone 17 Pro simulator and the `undra-rn` emulator; 20 Android reloads with flat heap; limits documented in `docs/REACT_NATIVE.md` (RN 0.87 New Architecture, one instance per process until ADR-044, ~10k patches/s on Hermes — E4, app supplies adapters — G1b open) |
+| **G1 React Native runtime** (ADR-038): `@undra/react-native` TurboModule over the C ABI under the TS mirror, `undra build --platform rn`, the playground RN app, a `react-native` CI job + `rn-devices.yml` (simulator/emulator on PRs touching RN, weekly), `scripts/rn-device-checks.sh` | `6fe1643` | opus review `.10x/reviews/2026-10-01-react-native-review.md`: ownership trace holds, 2 Medium fixed (a failed second start froze the running core; a stopped runtime kept calling the new core), 11 Low fixed; 10/10 on-device checks on the iPhone 17 Pro simulator and the `undra-rn` emulator; 20 Android reloads with flat heap; limits documented in `docs/REACT_NATIVE.md` (RN 0.87 New Architecture, one instance per process until ADR-044, ~10k patches/s on Hermes - E4, app supplies adapters - G1b open) |
 
 Matrix at checkpoint 7: Rust 2,351 · TS 1,049 · Kotlin 585 · Swift 467 · RN 41 + 14/14 C++ · contracts 54/54.
 
-### Checkpoint 8 (2026-10-01, evening) — Android adapters landed
+### Checkpoint 8 (2026-10-01, evening) - Android adapters landed
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -352,23 +352,23 @@ Matrix at checkpoint 7: Rust 2,351 · TS 1,049 · Kotlin 585 · Swift 467 · RN 
 
 Matrix at checkpoint 8: Rust 2,351 · TS 1,049 · Kotlin 588 · Swift 467 · RN 41 · contracts 54/54.
 
-### Checkpoint 9 (2026-10-01, night) — Track A landed: the runtime lifecycle
+### Checkpoint 9 (2026-10-01, night) - Track A landed: the runtime lifecycle
 
 | Piece | Merge | Verdict |
 |---|---|---|
-| **Track A** — ADR-034 `WeakCtx`/`Gone`/`Ctx::closed()`, a runtime ends when its owner lets go (Kotlin `close()` ends an in-process core; `runtime_threads` in stats); ADR-035 off-core writes refused in every build (E0065, `try_set` → `WriteError::OffCore`, change-sets routed to the owning runtime); ADR-019 amendment: a panicking computed poisons only itself; ADR-036 typed stream errors (flag 2 carries `E`, flag 3 `StreamFailure{status,message,detail}`, the text-guessing stop-gap removed on Kotlin/TS, status 5 → `Refused` on all three); macros accept `Stream<Item = Result<T,E>>`; S07.6/S07.7/S17.7; ADR-034 Amendment A (what a call pins) | `2186bad` | opus review `.10x/reviews/2026-10-01-runtime-lifecycle-review.md`: merge after fixes; no High; M1 fixed (S17.7 could not fail — `runtime_threads == 0` asserted after every close, proven with a mutant), M2 documented as the amendment; JNI shutdown raced under Miri; "answered once" raced in release; the write checker compares runtime ids, 8.5 ns vs 65 ns; wire version stays 1 per ADR-036/Amendment C. Rust 2,400 · TS 1,102 · Kotlin 612 (2.4.20 and 2.0.21) · Swift 480 · RN 45 · wasm 19+24 · contracts 54/54; playground hash `0xddcdea47fa95a8d4`. Open Lows: L2–L5, L8, TS unknown-flag path |
+| **Track A**: ADR-034 `WeakCtx`/`Gone`/`Ctx::closed()`, a runtime ends when its owner lets go (Kotlin `close()` ends an in-process core; `runtime_threads` in stats); ADR-035 off-core writes refused in every build (E0065, `try_set` → `WriteError::OffCore`, change-sets routed to the owning runtime); ADR-019 amendment: a panicking computed poisons only itself; ADR-036 typed stream errors (flag 2 carries `E`, flag 3 `StreamFailure{status,message,detail}`, the text-guessing stop-gap removed on Kotlin/TS, status 5 → `Refused` on all three); macros accept `Stream<Item = Result<T,E>>`; S07.6/S07.7/S17.7; ADR-034 Amendment A (what a call pins) | `2186bad` | opus review `.10x/reviews/2026-10-01-runtime-lifecycle-review.md`: merge after fixes; no High; M1 fixed (S17.7 could not fail - `runtime_threads == 0` asserted after every close, proven with a mutant), M2 documented as the amendment; JNI shutdown raced under Miri; "answered once" raced in release; the write checker compares runtime ids, 8.5 ns vs 65 ns; wire version stays 1 per ADR-036/Amendment C. Rust 2,400 · TS 1,102 · Kotlin 612 (2.4.20 and 2.0.21) · Swift 480 · RN 45 · wasm 19+24 · contracts 54/54; playground hash `0xddcdea47fa95a8d4`. Open Lows: L2–L5, L8, TS unknown-flag path |
 
 Matrix at checkpoint 9: Rust 2,400 · TS 1,102 · Kotlin 612 · Swift 480 · RN 45 · contracts 54/54.
 In flight: `wasm-size` (E5, review), `tooling` (D2–D5, review), `dev-reload` (B3, ADR-053 accepted), `docs-reference` (H3), `rn-adapters` (G1b).
 Unblocked now that Track A is in: `abi-table` (ADR-044), `persistence-v2` (ADR-037/049), `derived-lists` (ADR-039), E4, `ts-runtime-size`, `testkit`, the Rust 1.99 bump.
 
-### Checkpoint 10 (2026-10-01, night) — the API reference
+### Checkpoint 10 (2026-10-01, night) - the API reference
 
 | Piece | Merge | Verdict |
 |---|---|---|
 | H3 API reference: rustdoc for `undra` + the six re-exported crates built in the site workflow with `-D warnings` and published at `/reference/rust/` (site palette and Geist laid over rustdoc's theme); `/reference/{swift,kotlin,typescript}.html` generated from the committed playground bindings by `site/scripts/build-reference.mjs` (declarations only, parser `decls.mjs` with tests, collapsed per file), covered by the "generated files up to date" check | `a22b8ed` | fable review (screenshots, desktop + phone, dark + light); open: a custom port in the playground so the Ports section has an example; `undra bindgen --declarations` would replace the parser; rustdoc has no link back to the site |
 
-### Checkpoint 11 (2026-10-02) — tooling landed
+### Checkpoint 11 (2026-10-02) - tooling landed
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -376,7 +376,7 @@ Unblocked now that Track A is in: `abi-table` (ADR-044), `persistence-v2` (ADR-0
 
 Matrix at checkpoint 11: Rust 2,530 · TS 1,128 · Kotlin 612 · Swift 480 · RN 45 · contracts 54/54.
 
-### Checkpoint 12 (2026-10-02) — the web bundle under budget
+### Checkpoint 12 (2026-10-02) - the web bundle under budget
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -384,7 +384,7 @@ Matrix at checkpoint 11: Rust 2,530 · TS 1,128 · Kotlin 612 · Swift 480 · RN
 
 Matrix at checkpoint 12: Rust 2,556 · TS 1,128 · Kotlin 612 · Swift 480 · RN 45 · contracts 54/54.
 
-### Checkpoint 13 (2026-10-02) — state-preserving reload
+### Checkpoint 13 (2026-10-02) - state-preserving reload
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -392,25 +392,25 @@ Matrix at checkpoint 12: Rust 2,556 · TS 1,128 · Kotlin 612 · Swift 480 · RN
 
 Matrix at checkpoint 13: Rust 2,603 · TS 1,132 · Kotlin 616 · Swift 482 · RN 59 · contracts 54/54.
 
-### Checkpoint 14 (2026-10-02) — React Native adapters, the Swift Fs fix
+### Checkpoint 14 (2026-10-02) - React Native adapters, the Swift Fs fix
 
 | Piece | Merge | Verdict |
 |---|---|---|
-| **G1b rn-adapters** (ADR-038 Amendment B): all ten standard ports by default in `@undra/react-native` — Kv/Fs in one portable C++ store on per-port workers, Keychain/Keystore SecureStore, native connectivity monitors, Http over `fetch`, `AppState` lifecycle; a `platform` module in the playground core; RN11–RN20 device checks | `15afd10` | opus review `.10x/reviews/2026-10-02-rn-adapters-review.md`: merge; M1 SPEC rows, L1 a Keychain key with U+0000 listed cut short, L2 a second JS connectivity source beside the native one, six Lows (OOM `terminate`, pending JNI exception, thread names, leaks); a stopped core's late reply never reaches the next core (proven); 19/19 iOS, 20/20 Android; RN 60 |
-| **swift-fs**: `FsAdapter` walks from the root descriptor with `openat(O_NOFOLLOW)` (symlinks out of the root were followed), atomic writes, `KvAdapter.list` skips temp and damaged files | `262f38a` | small fix piece; 22 + 7 tests, mutants fail; Swift 511; open: a damaged entry is "no value" in Swift and "unavailable" in the C++ store — unify under ADR-049's `StorageError` |
+| **G1b rn-adapters** (ADR-038 Amendment B): all ten standard ports by default in `@undra/react-native` - Kv/Fs in one portable C++ store on per-port workers, Keychain/Keystore SecureStore, native connectivity monitors, Http over `fetch`, `AppState` lifecycle; a `platform` module in the playground core; RN11–RN20 device checks | `15afd10` | opus review `.10x/reviews/2026-10-02-rn-adapters-review.md`: merge; M1 SPEC rows, L1 a Keychain key with U+0000 listed cut short, L2 a second JS connectivity source beside the native one, six Lows (OOM `terminate`, pending JNI exception, thread names, leaks); a stopped core's late reply never reaches the next core (proven); 19/19 iOS, 20/20 Android; RN 60 |
+| **swift-fs**: `FsAdapter` walks from the root descriptor with `openat(O_NOFOLLOW)` (symlinks out of the root were followed), atomic writes, `KvAdapter.list` skips temp and damaged files | `262f38a` | small fix piece; 22 + 7 tests, mutants fail; Swift 511; open: a damaged entry is "no value" in Swift and "unavailable" in the C++ store - unify under ADR-049's `StorageError` |
 
 Matrix at checkpoint 14: Rust 2,603 · TS 1,132 · Kotlin 616 · Swift 511 · RN 60 · contracts 54/54.
 In flight: `derived-lists` (opus review), `abi-table`, `persistence-v2` (finishing), `ports-v2` (ADR-047/048 → implementation), `devtools` (ADR-054), `testkit` (ADR-055).
 
-### Checkpoint 15 (2026-10-02) — derived keyed lists
+### Checkpoint 15 (2026-10-02) - derived keyed lists
 
 | Piece | Merge | Verdict |
 |---|---|---|
-| **E2 derived-lists** (ADR-039 Accepted): `DerivedList<T>` / `derive()` with filter/map/sort (+ parameters) and `count()`, two arena order-statistic trees, source taps (4,096 cap), one patch per transaction, the 256-op parameter re-walk; the playground's `Todos` on recorded ops with derived `visible`/`remaining`; S19 replays a 60,000-op seeded recording on all columns; nine budget rows, two ratios, a stress scenario; a landing card "Filtered view of a 10,000-row list, one row changed" (392 ns, 158 B — was 176 µs, 353 KB) | `76f9364` + `(wording)` | opus review `.10x/reviews/2026-10-02-derived-lists-review.md`: sound, no High/Medium; a second model (four views + a computed, tap overflow inside one transaction) 3 × 3,000 cases; the hello-world wasm unchanged (a core without derived lists does not link the index); L1 S19 on the RN column, L2 patch merging pinned on Kotlin/Swift, L4 read-your-writes documented; Rust 2,700 · Swift 512 · Kotlin 617 · TS 1,132 · RN 60 · contracts 57/57 (19 × 3); playground hash `0xc5f05c376fde398c` |
+| **E2 derived-lists** (ADR-039 Accepted): `DerivedList<T>` / `derive()` with filter/map/sort (+ parameters) and `count()`, two arena order-statistic trees, source taps (4,096 cap), one patch per transaction, the 256-op parameter re-walk; the playground's `Todos` on recorded ops with derived `visible`/`remaining`; S19 replays a 60,000-op seeded recording on all columns; nine budget rows, two ratios, a stress scenario; a landing card "Filtered view of a 10,000-row list, one row changed" (392 ns, 158 B; was 176 µs, 353 KB) | `76f9364` + `(wording)` | opus review `.10x/reviews/2026-10-02-derived-lists-review.md`: sound, no High/Medium; a second model (four views + a computed, tap overflow inside one transaction) 3 × 3,000 cases; the hello-world wasm unchanged (a core without derived lists does not link the index); L1 S19 on the RN column, L2 patch merging pinned on Kotlin/Swift, L4 read-your-writes documented; Rust 2,700 · Swift 512 · Kotlin 617 · TS 1,132 · RN 60 · contracts 57/57 (19 × 3); playground hash `0xc5f05c376fde398c` |
 
 Matrix at checkpoint 15: Rust 2,700 · TS 1,132 · Kotlin 617 · Swift 512 · RN 60 · contracts 57/57.
 
-### Checkpoint 16 (2026-10-02) — the ABI function table
+### Checkpoint 16 (2026-10-02) - the ABI function table
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -418,7 +418,7 @@ Matrix at checkpoint 15: Rust 2,700 · TS 1,132 · Kotlin 617 · Swift 512 · RN
 
 Matrix at checkpoint 16: Rust 2,718 · TS 1,133 · Kotlin 630 · Swift 527 · RN 65 · contracts 60/60.
 
-### Checkpoint 17 (2026-10-02) — devtools and persistence
+### Checkpoint 17 (2026-10-02) - devtools and persistence
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -428,7 +428,7 @@ Matrix at checkpoint 16: Rust 2,718 · TS 1,133 · Kotlin 630 · Swift 527 · RN
 Matrix at checkpoint 17: Rust 2,891 · TS 1,264 · Kotlin 652 · Swift 553 · RN 65 · contracts 65/65 (S01–S22 + S26).
 In flight: `testkit` (complete; sonnet review + cross), `ports` (complete; opus review + cross).
 
-### Checkpoint 18 (2026-10-02) — the testing kit
+### Checkpoint 18 (2026-10-02) - the testing kit
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -437,7 +437,7 @@ In flight: `testkit` (complete; sonnet review + cross), `ports` (complete; opus 
 Matrix at checkpoint 18: Rust 2,940 · TS 1,264 · Kotlin 682 · Swift 581 · RN 65 · contracts 65/65.
 In flight: `ports` (review resuming: B1 size fix, sub-reviews, matrix), `docs-v1x` (cookbook + sample).
 
-### Checkpoint 19 (2026-10-02) — the cookbook and the sample
+### Checkpoint 19 (2026-10-02) - the cookbook and the sample
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -446,7 +446,7 @@ In flight: `ports` (review resuming: B1 size fix, sub-reviews, matrix), `docs-v1
 Matrix at checkpoint 19: Rust 2,993 · TS 1,264 + 32 · Kotlin 682 · Swift 581 · RN 65 · contracts 65/65.
 In flight: `ports` (review resuming).
 
-### Checkpoint 20 (2026-10-02) — ports: WebSocket, SSE and Db
+### Checkpoint 20 (2026-10-02) - ports: WebSocket, SSE and Db
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -455,7 +455,7 @@ In flight: `ports` (review resuming).
 Matrix at checkpoint 20: Rust 3,052 · TS 1,432 + 32 · Kotlin 753 + 30 · Swift 668 · RN 87 · contracts 74/74 (S01–S26 incl. S23–S25).
 In flight: `objects-callbacks` (ADR-040/041), `ios-floor` (ADR-045), `prod-ops` (ADR-046).
 
-### Checkpoint 21 (2026-10-02) — the dev-reload flake, iOS 15/16
+### Checkpoint 21 (2026-10-02) - the dev-reload flake, iOS 15/16
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -465,7 +465,7 @@ In flight: `objects-callbacks` (ADR-040/041), `ios-floor` (ADR-045), `prod-ops` 
 Matrix at checkpoint 21: Rust 3,078 · TS 1,432 + 32 · Kotlin 753 + 30 · Swift 674 · RN 87 · contracts 74/74.
 In flight: `ns-storage` (review), `objects-callbacks`, `prod-ops`, `ts-size-e4`.
 
-### Checkpoint 22 (2026-10-02) — the web call path, per-namespace storage
+### Checkpoint 22 (2026-10-02) - the web call path, per-namespace storage
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -475,7 +475,7 @@ In flight: `ns-storage` (review), `objects-callbacks`, `prod-ops`, `ts-size-e4`.
 Matrix at checkpoint 22: Rust 3,079 · TS 1,580 + 32 · Kotlin 756 + 30 · Swift 686 · RN 88 · contracts 74/74.
 In flight: `objects-callbacks` (ADR-040/041, final matrix), `prod-ops` (ADR-046, final matrix); drafted: `default-choice-post` (fact-check pending).
 
-### Checkpoint 23 (2026-10-02) — objects as parameters, host callbacks
+### Checkpoint 23 (2026-10-02) - objects as parameters, host callbacks
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -484,16 +484,16 @@ In flight: `objects-callbacks` (ADR-040/041, final matrix), `prod-ops` (ADR-046,
 Matrix at checkpoint 23: Rust 3,133 · TS 1,613 + 32 · Kotlin 782 + 30 · Swift 705 · RN 92 · contracts 80/80.
 In flight: `prod-ops` (ADR-046, opus review), `types-paging` (ADR-042/043), `objects-followups` (O1–O8), `default-choice-post` (drafted).
 
-### Checkpoint 24 (2026-10-02) — production operations
+### Checkpoint 24 (2026-10-02) - production operations
 
 | Piece | Merge | Verdict |
 |---|---|---|
-| **prod-ops** (ADR-046 Accepted, 19-point amendment): every contained panic is a FATAL `undra::panic` record plus one `PanicReport` (message, location, operation, thread, frames with image-relative addresses, namespace, core version, schema hash, image id) to the standard `Diagnostics.panicked` port, delivered to `onPanic` in order on every platform (wasm builds it host-side from the trap); `run_background(deadline)` runs per-runtime tasks (the query client's replay/refetch/flush) with iOS `UndraBackground`, Android `android-work`, the web page window; the CLI keeps line-table symbols, writes `build/symbols/manifest.json`, `undra symbolicate`, `.lldbinit`; S29/S30 | `4d6effd` | opus review `.10x/reviews/2026-10-02-prod-ops-review.md`: sound with fixes; H1 the hello wasm went over its gate after the cross (the panic path is linked by use on wasm — `guarded()` is `Ok(f())` under `panic=abort`; 119,654 of 120,000), M1 two `SAFETY` claims held only for images `undra build` makes (bounded ELF/Mach-O reads with the real load bias, Miri-checked), M2 two containment sites reported nothing, M4 an empty image id right after load; the JS gate reconciled at 22,100 (main 21,336 + objects 336 + prod-ops 333, `runInBackground` and the Diagnostics registration lazy); symbolication proven on iOS Release, Android, host and web (`lab.rs:222/221/236`); Rust 3,229 · Swift 772 · Kotlin 810 · TS 1,681 · RN 104 · contracts 86/86; hash `0xcc36d9fa84455aef` |
+| **prod-ops** (ADR-046 Accepted, 19-point amendment): every contained panic is a FATAL `undra::panic` record plus one `PanicReport` (message, location, operation, thread, frames with image-relative addresses, namespace, core version, schema hash, image id) to the standard `Diagnostics.panicked` port, delivered to `onPanic` in order on every platform (wasm builds it host-side from the trap); `run_background(deadline)` runs per-runtime tasks (the query client's replay/refetch/flush) with iOS `UndraBackground`, Android `android-work`, the web page window; the CLI keeps line-table symbols, writes `build/symbols/manifest.json`, `undra symbolicate`, `.lldbinit`; S29/S30 | `4d6effd` | opus review `.10x/reviews/2026-10-02-prod-ops-review.md`: sound with fixes; H1 the hello wasm went over its gate after the cross (the panic path is linked by use on wasm - `guarded()` is `Ok(f())` under `panic=abort`; 119,654 of 120,000), M1 two `SAFETY` claims held only for images `undra build` makes (bounded ELF/Mach-O reads with the real load bias, Miri-checked), M2 two containment sites reported nothing, M4 an empty image id right after load; the JS gate reconciled at 22,100 (main 21,336 + objects 336 + prod-ops 333, `runInBackground` and the Diagnostics registration lazy); symbolication proven on iOS Release, Android, host and web (`lab.rs:222/221/236`); Rust 3,229 · Swift 772 · Kotlin 810 · TS 1,681 · RN 104 · contracts 86/86; hash `0xcc36d9fa84455aef` |
 
 Matrix at checkpoint 24: Rust 3,229 · TS 1,681 + 37 · Kotlin 810 + 32 · Swift 772 · RN 104 · contracts 86/86 (S01–S30).
 In flight: `types-paging` (ADR-042/043), `objects-followups` (O1–O8); drafted: `default-choice-post`.
 
-### Checkpoint 25 (2026-10-02) — newtypes, generics, Decimal; paged and lazy lists; polling
+### Checkpoint 25 (2026-10-02) - newtypes, generics, Decimal; paged and lazy lists; polling
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -502,30 +502,30 @@ In flight: `types-paging` (ADR-042/043), `objects-followups` (O1–O8); drafted:
 Matrix at checkpoint 25: Rust 3,518 · TS 1,847 + 37 · Kotlin 880 + 32 · Swift 862 · RN 109 · contracts 95/95.
 Every ADR from 029 to 056 is implemented and merged. In flight: `objects-followups` (review + the path-independent size gate); drafted: `default-choice-post`.
 
-### Checkpoint 26 (2026-10-02) — the objects follow-ups; every code piece of the v1.x program is merged
+### Checkpoint 26 (2026-10-02) - the objects follow-ups; every code piece of the v1.x program is merged
 
 | Piece | Merge | Verdict |
 |---|---|---|
-| **objects-followups** (O1–O8 of the objects review): streams that take objects or callbacks lend and give back on every platform, one Swift wrapper per handle with cleanup under the identity map's lock, restore cancels calls holding a replaced store as a parameter, TS crash-restart replay distinguishes give-backs from releases, per-origin dev-session accounting, a constructor failing after taking callbacks answers status 2 without a double release, an abort racing a success reply reclaims the reference on every transport, Kotlin `invoke` for every `new`, the Swift weak wrapper fails rather than hangs; release builds remap `~`, `CARGO_HOME`, the registry, the checkout and the project so the module does not depend on where it was built | `14aae90` | sonnet review `.10x/reviews/2026-10-02-objects-followups-review.md`: merge; F1 (High) a pre-existing deadlock in Swift's identity map (a weak load under the lock deallocating a wrapper whose `deinit` takes the lock — found by an 8-thread stress), F3 StrictMode double effects closed a live object, F4/F5 parameter-slot gaps; Rust 3,536 · Swift 870 · Kotlin 881 · TS 1,856 · RN 110 · contracts 95/95; hash `0xcaec1b9d8ea1f199`; wasm 116,690 of 120,000, JS 22,100 of 22,100 (zero headroom: the next JS change makes room or restates ADR-052) |
+| **objects-followups** (O1–O8 of the objects review): streams that take objects or callbacks lend and give back on every platform, one Swift wrapper per handle with cleanup under the identity map's lock, restore cancels calls holding a replaced store as a parameter, TS crash-restart replay distinguishes give-backs from releases, per-origin dev-session accounting, a constructor failing after taking callbacks answers status 2 without a double release, an abort racing a success reply reclaims the reference on every transport, Kotlin `invoke` for every `new`, the Swift weak wrapper fails rather than hangs; release builds remap `~`, `CARGO_HOME`, the registry, the checkout and the project so the module does not depend on where it was built | `14aae90` | sonnet review `.10x/reviews/2026-10-02-objects-followups-review.md`: merge; F1 (High) a pre-existing deadlock in Swift's identity map (a weak load under the lock deallocating a wrapper whose `deinit` takes the lock - found by an 8-thread stress), F3 StrictMode double effects closed a live object, F4/F5 parameter-slot gaps; Rust 3,536 · Swift 870 · Kotlin 881 · TS 1,856 · RN 110 · contracts 95/95; hash `0xcaec1b9d8ea1f199`; wasm 116,690 of 120,000, JS 22,100 of 22,100 (zero headroom: the next JS change makes room or restates ADR-052) |
 
 Matrix at checkpoint 26: Rust 3,536 · TS 1,856 + 37 · Kotlin 881 + 32 · Swift 870 · RN 110 · contracts 95/95 (S01–S33).
 **Every code piece of the v1.1/v1.2 program is merged.** Left: the `default-choice-post` fact-check and publication, the Rust 1.99 bump (needs `rustup update stable`), the final state pass.
 
-### Checkpoint 27 (2026-10-02) — the post is published
+### Checkpoint 27 (2026-10-02) - the post is published
 
 | Piece | Merge | Verdict |
 |---|---|---|
-| **default-choice-post** (H4): "Why Undra is the default choice" — a 36-row limitations matrix against KMP, UniFFI and Flutter/React Native-as-logic (Undra: 27 solved, 6 partial, 2 open, 1 by decision), five measured sections, the adoption cost, what is open; `claims.md` public beside it | `0654810` | opus fact-check `.10x/reviews/2026-10-02-default-choice-post-fact-check.md`: publish; 221 draft claims → 182 verified, 29 corrected (8 about other tools), 10 removed, 11 added; all 45 linked competitor pages re-read from source (plus the 68 pages of UniFFI's manual for the "describes no …" claims); no speed comparison with another tool; the stale statements in the reads post, the KMP post, both migration guides, `roadmap.json` and `pending.json` fixed in the same pass |
+| **default-choice-post** (H4): "Why Undra is the default choice" - a 36-row limitations matrix against KMP, UniFFI and Flutter/React Native-as-logic (Undra: 27 solved, 6 partial, 2 open, 1 by decision), five measured sections, the adoption cost, what is open; `claims.md` public beside it | `0654810` | opus fact-check `.10x/reviews/2026-10-02-default-choice-post-fact-check.md`: publish; 221 draft claims → 182 verified, 29 corrected (8 about other tools), 10 removed, 11 added; all 45 linked competitor pages re-read from source (plus the 68 pages of UniFFI's manual for the "describes no …" claims); no speed comparison with another tool; the stale statements in the reads post, the KMP post, both migration guides, `roadmap.json` and `pending.json` fixed in the same pass |
 
 In flight: `ci-green` (every red CI job at its root cause + the Rust 1.99.0 bump; the local toolchain is 1.99.0 since `rustup update stable`), `landing-refresh` (landing page, roadmap page, docs nav, README to what shipped).
 
-### Checkpoint 28 (2026-10-02) — the landing page, roadmap, docs nav and README match what shipped
+### Checkpoint 28 (2026-10-02) - the landing page, roadmap, docs nav and README match what shipped
 
 | Piece | Merge | Verdict |
 |---|---|---|
 | **landing-refresh**: the hero names React Native; one "new" row under the hero (React Native · Devtools with time travel · Derived lists · WebSocket, SSE and Db ports · Migrations · iOS 15/16 · the post · the roadmap); the badge "v1 shipped · v1.x on main" (no release claimed; brew/npm/curl still wait for the tag); the measured note says simulator, emulator and Chromium rows exist and real-phone rows do not; the tests card and the contract grid generated by `site/scripts/build-trust.mjs` (7,253 tests; 33 scenarios, 95/95 cells); the harsh-conditions cards read `bench/results/*.json`; the Android core card re-measured (978.6 KB arm64-v8a, recorded in `bench/results/android-size.jsonl`); cold start 85 µs; the collapsed samples match main's API; the roadmap re-verified item by item (Now = open items, Next = release and reach); docs nav regrouped with no orphans; README features, numbers from records, an honest "not done" | `1fb8db8` | fable check (screenshots dark/light at 1280 and 375: the v1 look intact); landing prose 347/350; 47 pages link-clean; the live demo and "Push it" verified. No web call-path card by decision (the only budget is the CI gate; against the design target it is ~6× over, which the post states) |
 
-### Checkpoint 29 (2026-10-02) — main is green; the merge gate is live; React Native in the diagram
+### Checkpoint 29 (2026-10-02) - main is green; the merge gate is live; React Native in the diagram
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -534,7 +534,7 @@ In flight: `ci-green` (every red CI job at its root cause + the Rust 1.99.0 bump
 
 Known, not fixed here: under a heavily throttled local pass (load 80, background QoS) these still fail on time alone and are the `test-pacing` piece: `bench/tests/stress.rs` (fixed 100–200 ms scenario durations), three TypeScript "2 MB row" tests (the 5 s default timeout) and `db-two-cores.test.ts` (8 s), Kotlin `PortsV2BindingTests`' burst test (a 1 ms `delay` as its cadence). None has failed on a hosted runner.
 
-### Checkpoint 30 (2026-10-02) — generic functions, objects and stores
+### Checkpoint 30 (2026-10-02) - generic functions, objects and stores
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -542,7 +542,7 @@ Known, not fixed here: under a heavily throttled local pass (load 80, background
 
 Open from the review, being closed on `generics-followups`: L6 (the E0070 rule can report a false "declared twice" for type names like `A_B`), L7 (the playground's draft counter can reuse a serial after a restore), L8 (the Android half of the symbols size test allows no margin and is 16 bytes over on a machine with the NDK; CI skips it). Limits the guide now states, not defects: a store's alias in another module needs the store's private fields in scope (L2; a dispatcher generated at the template would lift it), TypeScript bundles a generic family whole (L4).
 
-### Checkpoint 31 (2026-10-02, end of day) — the generics follow-ups; where the last three pieces stand
+### Checkpoint 31 (2026-10-02, end of day) - the generics follow-ups; where the last three pieces stand
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -552,18 +552,18 @@ The founder closed the session at this point and protects `main` next; from here
 
 | Branch (pushed head) | State | What is left |
 |---|---|---|
-| `wt/reload-handles` (`31ce274`, contains main `3c279a6`) | ADR-059 implemented; opus review verdict **merge**, 5 review tests added, every finding closed; S35; the grid is 35 scenarios / 101 cells and `site/data/tests.json`, the roadmap and the post say so. CI on the head: Site, Bench, Two cores green; CI red in one job, Contract scenarios (Swift), on **S30's 100 ms bound** — the known flake, not this piece (main's own run on `aa04821` hit it too). | Land `test-pacing` (which fixes S30) or merge its head into this branch, re-run, open the PR. Delete `proto/reload-handles` if it still exists (it was not on origin at close). |
-| `wt/test-pacing` (`8782a64`, contains main) | Tests made independent of machine speed on every platform plus `ci-local` fixes. Opus review: not mergeable as handed over — H1 (the TS outer-Busy check) and M1–M8 (sibling parity, a burst test that passed a mutant, sleeps that could fail, `--slow` dropping the Rust clock tests, S30 and the grid's other small bounds) are **fixed on the branch**; nothing open. Unverified: M7's Kotlin column and M8's full Kotlin/TS/RN columns were not run. | Run those columns, the RN unit tests, `ci-local --slow --only ci/rust`, fmt and clippy; CI green; PR. |
+| `wt/reload-handles` (`31ce274`, contains main `3c279a6`) | ADR-059 implemented; opus review verdict **merge**, 5 review tests added, every finding closed; S35; the grid is 35 scenarios / 101 cells and `site/data/tests.json`, the roadmap and the post say so. CI on the head: Site, Bench, Two cores green; CI red in one job, Contract scenarios (Swift), on **S30's 100 ms bound** - the known flake, not this piece (main's own run on `aa04821` hit it too). | Land `test-pacing` (which fixes S30) or merge its head into this branch, re-run, open the PR. Delete `proto/reload-handles` if it still exists (it was not on origin at close). |
+| `wt/test-pacing` (`8782a64`, contains main) | Tests made independent of machine speed on every platform plus `ci-local` fixes. Opus review: not mergeable as handed over - H1 (the TS outer-Busy check) and M1–M8 (sibling parity, a burst test that passed a mutant, sleeps that could fail, `--slow` dropping the Rust clock tests, S30 and the grid's other small bounds) are **fixed on the branch**; nothing open. Unverified: M7's Kotlin column and M8's full Kotlin/TS/RN columns were not run. | Run those columns, the RN unit tests, `ci-local --slow --only ci/rust`, fmt and clippy; CI green; PR. |
 | `wt/ts-runtime-16k` (`1b593df`, contains main) | ADR-057 implemented: 15,811 B gz up front against 16,000 (16,333 with Vite's helper against 16,600; all-features 40,221 against 42,400; the awaited call +4%). Opus review verdict **merge after green CI**; four Highs fixed with tests (`reclaim` was missing from the published d.ts so bindings failed tsc; snapshot/restore had lost call order; the pagehide drain needed a chunk fetch; T-codes reached the core and the WebSocket close frame). Open lows: L3 (a partially typed custom transport gets a TypeError), L5 (a 5 ms sleep in a negative check), L6 (`Mirror.whenObserved` rejects with no waiters). Record: `.10x/reviews/2026-10-02-ts-runtime-16k-review.md`. | Close L3/L5/L6, CI green on the head (S30 and Swift S14 build B's 5 s bound are main's flakes until `test-pacing` lands), PR. |
 
-### Checkpoint 32 (2026-10-02, evening) — test-pacing and reload-handles landed
+### Checkpoint 32 (2026-10-02, evening) - test-pacing and reload-handles landed
 
 | Piece | Merge | Verdict |
 |---|---|---|
-| **test-pacing**: no test passes or fails on the machine's speed — bounds measured against a reference armed beside the thing under test, counted in events, or waits on a condition with a hang-detector deadline, on Rust (`bench/tests/stress.rs` runs to an operations floor), TypeScript, Kotlin, Swift and React Native; contract S30's 100 ms bound shown against the debounce's own clock; `ci-local` runs `cargo test` with `--no-fail-fast`, throttles only the timing-sensitive suites, never under `taskpolicy -b`, and its burners cannot outlive it. | `14a4689` (merge commit: the tested head `8782a64` plus state files only) | Review `.10x/reviews/2026-10-02-test-pacing-review.md`: the hand-over was not mergeable; H1 and M1–M8 fixed on the branch, residuals listed. CI, Bench, Two cores and Site green on the head. One race the rewrite introduced (a "second" `receive`/`next` could become the pending one and wait forever; a 26-minute hang under load) is fixed on `reload-handles` (`7e5d238`): the three tests race two calls and assert on the outcomes (`firstOfTwo`). |
+| **test-pacing**: no test passes or fails on the machine's speed - bounds measured against a reference armed beside the thing under test, counted in events, or waits on a condition with a hang-detector deadline, on Rust (`bench/tests/stress.rs` runs to an operations floor), TypeScript, Kotlin, Swift and React Native; contract S30's 100 ms bound shown against the debounce's own clock; `ci-local` runs `cargo test` with `--no-fail-fast`, throttles only the timing-sensitive suites, never under `taskpolicy -b`, and its burners cannot outlive it. | `14a4689` (merge commit: the tested head `8782a64` plus state files only) | Review `.10x/reviews/2026-10-02-test-pacing-review.md`: the hand-over was not mergeable; H1 and M1–M8 fixed on the branch, residuals listed. CI, Bench, Two cores and Site green on the head. One race the rewrite introduced (a "second" `receive`/`next` could become the pending one and wait forever; a 26-minute hang under load) is fixed on `reload-handles` (`7e5d238`): the three tests race two calls and assert on the outcomes (`firstOfTwo`). |
 | **reload-handles** (ADR-059): query handles survive every restore path through an in-band recreation record and build-on-first-use; the TypeScript host-side replay is removed; contract S35 on the three platforms (the grid is 35 scenarios, 101 of 101 cells); the roadmap and the post say so. | `7e5d238` (fast-forward, `scripts/wt.sh merge`, with a Site run asked for on the exact head) | Review `.10x/reviews/2026-10-02-reload-handles-review.md`: merge; nine Rust tests added; H1 pre-existing and real (a removal from the `undra-ffi` port registry could return while a callback still ran; fixed, pinned by a forced-race test); M1 hello wasm +1,541 B against main, recorded at 118,409 against the 120,000 gate. CI, Bench, Two cores and Site green on the head. |
 
-### Checkpoint 33 (2026-10-02, night) — the JavaScript runtime at 16 KB; the launch wave is complete
+### Checkpoint 33 (2026-10-02, night) - the JavaScript runtime at 16 KB; the launch wave is complete
 
 | Piece | Merge | Verdict |
 |---|---|---|
@@ -571,7 +571,7 @@ The founder closed the session at this point and protects `main` next; from here
 
 **The launch wave is complete.** Everything the founder asked for on 2026-10-02 is on `main` with its review closed: main green with the merge gate, React Native in the landing diagram, generic functions/objects/stores (+ follow-ups), tests independent of machine speed, query handles across a dev reload, the JavaScript runtime at 16 KB. The grid is 35 scenarios, 101 of 101 cells. No worktree or branch of the wave is left; `wt/cold-restore-regression` belongs to another session. The Android emulator CI job is still on hold until the founder says go. The founder protects `main` now; every change from here lands through a pull request.
 
-### Checkpoint 34 (2026-10-03) — the pull-request gate, and the five fixes from a week of outside use
+### Checkpoint 34 (2026-10-03) - the pull-request gate, and the five fixes from a week of outside use
 
 A team that tried Undra for a week sent seven findings (U1–U7). Five were taken on; each landed through a pull request with
 its adversarial review closed. `main` is protected since this checkpoint (the founder's ruleset: pull request required, squash
@@ -592,7 +592,7 @@ Not taken on, by decision: **U2** (the Swift test target does not build on Xcode
 
 Open, recorded in each review: the examples carry no `schema.json`, so nothing dogfoods `schema diff` (R10); Android under Bazel is declared, not verified; `undra build` is not byte-reproducible across directories (cargo hashes the absolute path into crate names); certificate pinning through OkHttp was not exercised end to end, nor a build against OkHttp 5; `URLSessionWebSocketAdapter(session:)` with a background session crashes the way the SSE adapter did before it refused one; relocation packing for Android (3%) needs a load test on API 23; the device bench rows have no budgets and no CI job; no physical device has run any of it. The Android emulator CI job for the Kotlin Android modules is still on hold until the founder says go.
 
-### Checkpoint 35 (2026-10-03) — ready to launch: the site, the posts, and distribution from GitHub
+### Checkpoint 35 (2026-10-03) - ready to launch: the site, the posts, and distribution from GitHub
 
 Undra has not been announced. This checkpoint is everything that had to be true before it is.
 

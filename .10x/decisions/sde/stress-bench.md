@@ -1,4 +1,4 @@
-# stress-bench (S1a) — decisions (SDE, branch wt/stress)
+# stress-bench (S1a) - decisions (SDE, branch wt/stress)
 
 [VERIFIED by running it, 2026-09-30, Apple M5 Pro / macOS 26.5 / rustc 1.98.1, a shared machine
 (load average 3 to 8): the layer A rows and the budgets gate, the sustained gate three times in a

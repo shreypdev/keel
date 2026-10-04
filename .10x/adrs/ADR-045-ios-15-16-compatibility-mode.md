@@ -31,7 +31,7 @@ type-checked for the iOS 15 simulator target directly.
 | Floor | `UndraRuntime` | Generated stores (golden `stores`) |
 |---|---|---|
 | macOS 13 / iOS 16 | **builds unchanged** | `@Observable` fails: "'Observable()' / 'ObservationRegistrar' / 'ObservationTracked()' is only available in macOS 14.0 or newer", for every store and every property |
-| macOS 13 / iOS 16, stores rewritten as `@MainActor final class …: UndraStore, ObservableObject` with `@Published public private(set) var` | — | **builds, Swift 6 language mode, no warnings** |
+| macOS 13 / iOS 16, stores rewritten as `@MainActor final class …: UndraStore, ObservableObject` with `@Published public private(set) var` | n/a | **builds, Swift 6 language mode, no warnings** |
 | macOS 12 / iOS 15 | fails; every error is `Swift.Duration` or `ContinuousClock` (iOS 16 / macOS 13 APIs) in three files: `Wire/UndraTypes.swift` (`UndraDuration` wraps `Duration`), `Core/MirrorStats.swift` (`DrainStats.duration: Duration`), `Core/Mirror.swift` (drain timing) | also the wire `Duration` mapping (`elapsed: Duration`) |
 
 Typed `throws(E)` in an async protocol requirement (port requirements, ADR-032), `AsyncThrowingStream` and a
@@ -46,9 +46,9 @@ Typed `throws(E)` in an async protocol requirement (port requirements, ADR-032),
    * `Observation` (today): `@MainActor @Observable public final class Todos: UndraStore`, properties
      `public private(set) var`.
    * `ObservableObject`: `@MainActor public final class Todos: UndraStore, ObservableObject`, properties
-     `@Published public private(set) var`, `import Combine` instead of `import Observation`. Everything else —
+     `@Published public private(set) var`, `import Combine` instead of `import Observation`. Everything else -
      `init(adopting:core:)`, constructors, commands, `apply(signal:op:reader:)`, the mirror registration, ADR-031
-     delivery, ADR-032 errors — is byte-for-byte the same generated code. The runtime's `UndraStore` base class is
+     delivery, ADR-032 errors - is byte-for-byte the same generated code. The runtime's `UndraStore` base class is
      unchanged; the mirror underneath is the same.
 2. **Chosen by the deployment target, overridable.** `undra bindgen` reads `[ios] deployment_target` (and the
    macOS target when C5 adds one): below 17.0 (macOS 14.0) → `ObservableObject`, else `Observation`.

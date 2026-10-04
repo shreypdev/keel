@@ -1,4 +1,4 @@
-# SDE — prod-ops: production operations (wt/prod-ops, 2026-10-01)
+# SDE - prod-ops: production operations (wt/prod-ops, 2026-10-01)
 
 ADR-046 (Accepted, with the dated amendment at its end). The piece makes a shipped Undra app operable: a panic in
 the core reaches the app's crash reporter on every platform with one shape; a background window drains the offline

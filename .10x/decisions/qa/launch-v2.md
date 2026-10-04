@@ -1,4 +1,4 @@
-# QA — launch-v2 (2026-09-30)
+# QA - launch-v2 (2026-09-30)
 
 * Rename gate: `grep -rni keel` over the tree returns only `.10x/reviews/`, ADR-018…029,
   the rename script and ADR-030; every suite (Rust, TS, Kotlin, Swift, wasm, C, contracts

@@ -32,7 +32,7 @@ and S35 (`MigrationBuildB.kt`).
 * **Waiting** is a poll every 10 ms with a 5 s limit (`awaitUntil`, `awaitEq`), "for 200 ms nothing happens" is
   `holdsFor`. Each look first drains the mirror on the main thread (`drainLoadedMirror`): since ADR-031 a store
   shows what the core did on its own at the next frame (the runtime's 16.67 ms grid on the JVM), so without the
-  drain a poll can see a value a frame old — S12 once read `fetching == false` before the change-set that set it
+  drain a poll can see a value a frame old: S12 once read `fetching == false` before the change-set that set it
   to `true` had been applied, and refetched into a fetch still in flight. A scenario that runs longer than 120 s is reported as failed.
 * **The main thread.** `UndraDispatchers.main` is the single `undra-main` thread of a JVM. The mirror applies
   change-sets there, at the next frame for what the core sends on its own (ADR-031), so a test that takes a

@@ -1,4 +1,4 @@
-# SDE — launch-dist: launch distribution from GitHub (wt/launch-dist, 2026-10-03)
+# SDE - launch-dist: launch distribution from GitHub (wt/launch-dist, 2026-10-03)
 
 ADR-063 (Accepted): everything a project made by a released `undra` needs resolves from `github.com/shreypdev/undra` at one
 release tag; no registry account on either side; Maven Central and the npm registry later, additive. The founder decided GitHub

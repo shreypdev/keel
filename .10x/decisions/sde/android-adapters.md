@@ -1,4 +1,4 @@
-# SDE — Android platform adapters (wt/android-adapters, 2026-10-01)
+# SDE - Android platform adapters (wt/android-adapters, 2026-10-01)
 
 Closes finding 1 of `.10x/specs/2026-10-01-competitive-limitations.md`: Android shipped without platform adapters
 (the Kotlin runtime installed only Clock, Rng, Log and Timer; the playground faked Kv and Http), so persistence, the
@@ -19,7 +19,7 @@ contract of SPEC section 8 and ADR-025, and the code is in `android-adapters` (C
 | `Connectivity` | `AndroidConnectivityAdapter` | `ConnectivityManager.registerDefaultNetworkCallback` | initial state at once, then changes, de-duplicated, from a handler thread; online = `NET_CAPABILITY_INTERNET` (like `NWPath.satisfied`) |
 | `Lifecycle` | `AndroidLifecycleAdapter` | `Application.ActivityLifecycleCallbacks` | Active / Inactive / Background from started and resumed counts, downgrades debounced 700 ms |
 | `Log` | `AndroidLogAdapter` | `android.util.Log` | keeps trace and debug, which Android's `java.util.logging` drops |
-| `Clock`, `Rng`, `Timer` | the runtime's | — | registered by `install` too, so one call covers all ten |
+| `Clock`, `Rng`, `Timer` | the runtime's | none | registered by `install` too, so one call covers all ten |
 
 `AndroidPlatformDefaults.install(core, context)` (returns an `AndroidPlatform` handle) registers all ten and starts the two event
 sources; the playground and the `undra init` Android template call it and **no longer fake anything**. Pure logic is in
@@ -114,7 +114,7 @@ A queued mutation survives a killed process and is replayed after real airplane 
 used). The two tests that change the whole device (switching the network off, airplane mode in `smoke.sh`) ran on a private AVD,
 `undra-adapters` on port 5560, created and removed by this piece, so no other agent's session was disturbed.
 
-## 2026-10-01 (later) — crossing main: the merge, the error channels, two review follow-ups
+## 2026-10-01 (later) - crossing main: the merge, the error channels, two review follow-ups
 
 `wt/android-adapters` was cut from `6ab7b8c`; `main` had gained dev-loop (ADR-051), device-bench, parity (ADR-032 amendment A),
 schema-json, diagnostics, `cas_update` and the Rust 1.98.1 pin (85 commits), then the checkpoint-6 state commit. The branch now

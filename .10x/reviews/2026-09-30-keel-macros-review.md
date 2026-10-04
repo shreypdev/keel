@@ -187,8 +187,8 @@ New confirmed findings (both Low):
 
 Both Highs and all Mediums except one M5 sub-case are closed; keel-macros is sound for v1
 on the schema/wire side. Accepted as v1.x diagnostic polish: query-in-impl (rustc errors,
-no Keel code — macros cannot see their parent item), split-impl follow-on errors (6),
+no Keel code - macros cannot see their parent item), split-impl follow-on errors (6),
 re-review NF1 (rustc's unquoted `key = id` suggestion) and NF2 (duplicate/misworded
 errors for a non-Keel field type). Runtime/ports follow-up noted: the browser runtime
 registers SecureStore only under crypto.subtle, so SecureStore on a plain-http page traps
-a wasm core — document in the web adapter README when the playground lands.
+a wasm core - document in the web adapter README when the playground lands.

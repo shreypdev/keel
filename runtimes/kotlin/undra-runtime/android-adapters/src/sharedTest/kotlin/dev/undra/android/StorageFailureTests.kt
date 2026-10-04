@@ -42,10 +42,10 @@ import org.junit.Test
  * |---|---|---|---|
  * | full disk (`ENOSPC`, `EDQUOT`) | `Full` | `Full` | `FsError.Full` |
  * | other I/O (`EIO`) | `Io` | `Io` | `FsError.Io` |
- * | stored bytes that do not decode or open | `Corrupt` | `Corrupt` | — |
- * | key needs user authentication | — | `Locked` | — |
- * | key permanently invalidated | — | `Corrupt` | — |
- * | no Android Keystore | — | `Unavailable` | — |
+ * | stored bytes that do not decode or open | `Corrupt` | `Corrupt` | n/a |
+ * | key needs user authentication | n/a | `Locked` | n/a |
+ * | key permanently invalidated | n/a | `Corrupt` | n/a |
+ * | no Android Keystore | n/a | `Unavailable` | n/a |
  */
 class StorageFailureTests {
     private lateinit var dir: File

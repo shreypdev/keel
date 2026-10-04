@@ -1,4 +1,4 @@
-# ADR-030: The product is named Undra — one identity across registries
+# ADR-030: The product is named Undra - one identity across registries
 
 **Status:** Accepted
 **Date:** 2026-09-30
@@ -17,7 +17,7 @@ Checked on 2026-09-30, before anything was published: the npm user `keel` exists
 Kubernetes tool; another active Rust project called "keel" holds `keel-cli` and
 `keel-macros` on crates.io and `@getkeel` / `@keel-dev` on npm; `keel.dev` is someone
 else's live site. Shipping under a name we cannot own on the registries platform engineers
-install from — and that collides with an active Rust project — would cost trust and search
+install from - and that collides with an active Rust project - would cost trust and search
 placement from day one.
 
 A search of about a hundred candidates (nautical and structural words, Latin/Greek/Spanish
@@ -67,10 +67,10 @@ founder chose **Undra**.
 * Historical documents read with the old name; ADR-030 is the map.
 
 ### Risks
-* Someone claims `@undra` or `undra` on npm, or the crate names, before the founder does
-  — mitigated by making those the first two runbook steps.
+* Someone claims `@undra` or `undra` on npm, or the crate names, before the founder does,
+  mitigated by making those the first two runbook steps.
 * A missed identifier (a JNI symbol, a module map, an env var in CI) breaks one platform
-  silently — mitigated by the rule that every suite runs green before review, and by the
+  silently, mitigated by the rule that every suite runs green before review, and by the
   adversarial review's explicit checklist of ABI, JNI, Swift module and CI names.
 
 ## Dependencies

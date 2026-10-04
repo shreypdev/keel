@@ -37,7 +37,7 @@ use crate::value::SignalValue;
 /// a separate transaction. (A computed that writes one of its own inputs invalidates itself; a
 /// commit that keeps recomputing such a computed is cut off after 1000 rounds.) During a
 /// commit the closure runs under its store's **delivery lock**, so it must not wait on another
-/// thread that writes the same store — like a change sink, it would deadlock (ADR-020).
+/// thread that writes the same store: like a change sink, it would deadlock (ADR-020).
 ///
 /// # Example
 ///

@@ -1,4 +1,4 @@
-# SDE — the playground stress screen and "Push it" (wt/stress-screen, 2026-09-30)
+# SDE - the playground stress screen and "Push it" (wt/stress-screen, 2026-09-30)
 
 S1b of the harsh-conditions work (`.10x/specs/2026-09-30-stress-bench-design.md` section 8; the Rust
 harness is S1a in `stress-bench.md`; the runtime half is `frame-coalesced-delivery.md`). No wire, ABI,

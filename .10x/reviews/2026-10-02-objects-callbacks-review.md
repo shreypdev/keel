@@ -1,4 +1,4 @@
-# objects-callbacks (ADR-040 objects as parameters and returns, ADR-041 host callback interfaces) — adversarial review
+# objects-callbacks (ADR-040 objects as parameters and returns, ADR-041 host callback interfaces) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/objects-callbacks` at `61ca552` (`main` `b800994` an ancestor; `main` had not moved when the review ended, so the

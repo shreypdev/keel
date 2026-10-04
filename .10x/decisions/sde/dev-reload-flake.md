@@ -1,4 +1,4 @@
-# SDE — `dev_reload.rs` fails under load: the test client was not a client (wt/dev-reload-flake, 2026-10-01)
+# SDE - `dev_reload.rs` fails under load: the test client was not a client (wt/dev-reload-flake, 2026-10-01)
 
 `crates/undra-cli/tests/dev_reload.rs` (ADR-053's nine integration tests: the real `undra dev` on a copy of the
 playground and a raw WebSocket client) failed under parallel load: at `:145` (`expect_close`: `a Close frame`) and `:172`

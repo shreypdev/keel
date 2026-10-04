@@ -36,7 +36,7 @@
     },
     {
       "id": "derived-view",
-      "operation": "Filtered view of a 10,000-row list, one row changed — 158 bytes on the wire, was 353 KB",
+      "operation": "Filtered view of a 10,000-row list, one row changed: 158 bytes on the wire, was 353 KB",
       "value": 392,
       "unit": "ns",
       "budget": 1,
@@ -97,7 +97,7 @@
   "harsh": [
     {
       "id": "harsh-firehose",
-      "operation": "Firehose — one transaction per update through the C ABI, sustained; p99 {result.p99_ns|time} per call",
+      "operation": "Firehose: one transaction per update through the C ABI, sustained; p99 {result.p99_ns|time} per call",
       "value": 6.2,
       "unit": "M/s",
       "budget": 1.1,
@@ -113,7 +113,7 @@
     },
     {
       "id": "harsh-events",
-      "operation": "Event firehose — a feed entering through an event port; p99 {result.p99_ns|time}",
+      "operation": "Event firehose: a feed entering through an event port; p99 {result.p99_ns|time}",
       "value": 7.5,
       "unit": "M/s",
       "budget": 1.4,
@@ -129,7 +129,7 @@
     },
     {
       "id": "harsh-churn",
-      "operation": "Keyed churn — a 10,000-row list, one insert/update/move/remove per transaction, every patch applied by the host; p99 {result.p99_ns|time}",
+      "operation": "Keyed churn: a 10,000-row list, one insert/update/move/remove per transaction, every patch applied by the host; p99 {result.p99_ns|time}",
       "value": 182,
       "unit": "k/s",
       "budget": 33,
@@ -145,7 +145,7 @@
     },
     {
       "id": "harsh-fanout",
-      "operation": "Fan-out — 1,000 of 100,000 observed signals written per transaction; one {result.bytes_per_op|int}-byte change-set; p99 {result.p99_ns|time}",
+      "operation": "Fan-out: 1,000 of 100,000 observed signals written per transaction; one {result.bytes_per_op|int}-byte change-set; p99 {result.p99_ns|time}",
       "value": 27.9,
       "unit": "k/s",
       "budget": 4.6,
@@ -161,7 +161,7 @@
     },
     {
       "id": "harsh-stream",
-      "operation": "Stream backpressure — an always-ready producer, never more than one item ahead of the consumer's credit; RSS {result.rss_growth_pct|pct}",
+      "operation": "Stream backpressure: an always-ready producer, never more than one item ahead of the consumer's credit; RSS {result.rss_growth_pct|pct}",
       "value": 30.6,
       "unit": "M/s",
       "budget": 5.7,
@@ -177,7 +177,7 @@
     },
     {
       "id": "harsh-completions",
-      "operation": "Concurrent completions — 8 threads answering port calls at once, 256 in flight: 0 lost, 0 reordered; p99 {result.p99_ns|time} call to reply",
+      "operation": "Concurrent completions: 8 threads answering port calls at once, 256 in flight, 0 lost, 0 reordered; p99 {result.p99_ns|time} call to reply",
       "value": 341,
       "unit": "k/s",
       "budget": 69,
@@ -193,7 +193,7 @@
     },
     {
       "id": "harsh-soak",
-      "operation": "60-second soak — firehose, churn, completions and a stream together at 98 to 100 % of target; RSS growth over the second half",
+      "operation": "60-second soak: firehose, churn, completions and a stream together at 98 to 100 % of target; RSS growth over the second half",
       "value": 0.14,
       "unit": "%",
       "budget": 1,

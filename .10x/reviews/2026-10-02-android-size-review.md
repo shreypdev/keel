@@ -1,4 +1,4 @@
-# android-size (ADR-052 amendment "native size gates") — adversarial review
+# android-size (ADR-052 amendment "native size gates") - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/android-size` at
 `184f010` (draft PR #8; contains `main` `267b62c`) · **Read:** `CLAUDE.md` (R6, R9, R12), `docs/AGENT_WORKFLOW.md` 4, ADR-046 (panic reports

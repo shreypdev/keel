@@ -1,6 +1,6 @@
 <!-- One piece per pull request (docs/AGENT_WORKFLOW.md). The "All green" check (the Gate) must pass on the head. -->
 
-**Piece:** `wt/<slug>` — one line on what it does.
+**Piece:** `wt/<slug>`, one line on what it does.
 
 **Design:** ADR-NNN (or the amendment), or "no public shape changes".
 

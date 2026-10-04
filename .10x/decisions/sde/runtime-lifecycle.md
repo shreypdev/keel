@@ -1,4 +1,4 @@
-# SDE — runtime lifecycle: WeakCtx, the write rule, computed isolation, typed stream ends (wt/runtime-lifecycle, 2026-10-01)
+# SDE - runtime lifecycle: WeakCtx, the write rule, computed isolation, typed stream ends (wt/runtime-lifecycle, 2026-10-01)
 
 Track A of the v1.x program: ADR-034 (A1), ADR-035 (A2), the ADR-019 amendment (A3) and ADR-036 (A4), from
 the gap audit `.10x/specs/2026-10-01-v1x-gaps.md` (LC-1…LC-3, PA-6, OW-1, OW-2, PC-1, ST-1/ST-2). The

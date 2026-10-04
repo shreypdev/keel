@@ -1,4 +1,4 @@
-# DevOps — launch-v2 (2026-09-30)
+# DevOps - launch-v2 (2026-09-30)
 
 * `release.yml`: tag `v*` or `workflow_dispatch` (`publish` input, default false = full
   dry run). Matrix: aarch64/x86_64 apple-darwin, x86_64/aarch64 linux-gnu. Steps: verify

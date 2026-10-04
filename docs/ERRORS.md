@@ -32,7 +32,7 @@ All three read well as text: Swift `error.localizedDescription`, Kotlin `error.m
 
 In a **production build of a TypeScript app**, `error.message` of what the runtime itself words (every `UndraCallError` and
 `UndraTransportError`, the wire errors, the misuse errors) is a code, the values and a link, not a sentence:
-`T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017`, and `wire: code=unexpected_eof at=12 needed=3 — …`
+`T0017: callSync, remote; see https://shreypdev.github.io/undra/docs/errors.html#T0017`, and `wire: code=unexpected_eof at=12 needed=3; see …`
 for a decoding failure. The sentence is on the errors page ("Runtime messages") and is what the development build says (Vite's dev
 server, Vitest, React Native: the `development` and `react-native` export conditions). Nothing a program branches on changes: the
 class, `kind`, `reason`, `status` and every field are the same, and the core's own text (a panic message, a refusal reason) travels as

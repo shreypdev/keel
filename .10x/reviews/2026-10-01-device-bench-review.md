@@ -1,4 +1,4 @@
-# Device bench (E1) — adversarial review
+# Device bench (E1) - adversarial review
 
 **Date:** 2026-10-01 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/device-bench` at `edcb9e0` (12 commits on `main` at `549b1f2`) · **Read:** `CLAUDE.md` (R9, R10, R12), the SDE record

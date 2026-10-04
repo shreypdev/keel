@@ -1,4 +1,4 @@
-# Architect — v1.1 / v1.2 "the default choice" (2026-10-01)
+# Architect - v1.1 / v1.2 "the default choice" (2026-10-01)
 
 * The boundary does not change shape for v1.1: new behaviour lands as typed values on the
   existing status/error channels (A2, A4), contracts grow, the C ABI stays at 19 functions.

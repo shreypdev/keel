@@ -1,4 +1,4 @@
-# Architect — launch-v2 (2026-09-30)
+# Architect - launch-v2 (2026-09-30)
 
 **Rename.** Product-wide, generated-shape-wide (ADR-030): crates, macros, C ABI symbols,
 JNI names, Swift module, Kotlin package, npm scope, env vars, CLI. Done by an idempotent
@@ -9,7 +9,7 @@ script → re-test". Goldens regenerate; history stays.
 the build-time concerns (search index, blog index, llms.txt, header/footer sync, OG
 render, link check); `site.yml` stages `_site/` = `site/` + the CI-built web playground.
 The live demo is the real wasm core inside an iframe; counters are measured by the
-playground around the runtime's apply and posted to the parent — the landing page never
+playground around the runtime's apply and posted to the parent - the landing page never
 fakes a number.
 
 **Distribution.** One `release.yml` produces immutable artifacts (tarballs + sha256 +

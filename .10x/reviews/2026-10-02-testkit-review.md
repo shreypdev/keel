@@ -1,4 +1,4 @@
-# Testing kit (F1/F2, ADR-055) — adversarial review
+# Testing kit (F1/F2, ADR-055) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/testkit`
 at `ea5cc38`, then `main` (`8fbb6ce`: devtools, persistence) merged in at the start · **Read:** `CLAUDE.md` (R1, R3, R4, R6, R11,
@@ -27,7 +27,7 @@ identical with and without it), the harness has teeth on all four implementation
 
 ## Findings
 
-**M1 — `advance` could never return (fixed; `fakes.ts:149`, `preview.ts:101`, `Fakes.swift:154`, `PreviewCore.swift:108`,
+**M1 - `advance` could never return (fixed; `fakes.ts:149`, `preview.ts:101`, `Fakes.swift:154`, `PreviewCore.swift:108`,
 `Fakes.kt:142`, `PreviewCore.kt:80`, `clock.rs:118`, `fakes/mod.rs:230`).** The brief's attack: a timer that re-arms itself inside
 `advance`. Every implementation loops "while a timer is due within the window", and a timer armed with a delay of zero from the
 firing callback is due again at the same instant, so the loop never ends (a periodic 1 ms timer across a long window is the same
@@ -41,7 +41,7 @@ fine until its window holds more firings than the cap; deadline order with ties 
 fires in the same call), and `fakes::clock::tests` / `fakes::tests` in Rust. Without the fix the TS test did not finish (8 s of the
 runner's timeout, then killed).
 
-**M2 — Secrets in a recording (fixed; `recorder.rs:85,93,131`, `main.rs` runner template, `cli.rs:355`).** `undra dev --record`
+**M2 - Secrets in a recording (fixed; `recorder.rs:85,93,131`, `main.rs` runner template, `cli.rs:355`).** `undra dev --record`
 records every port call and reply the app answers, and `SecureStore.get`/`set` carry the secret as the argument or the reply. The
 file is hex, not encrypted, and the docs invite committing it. Decision: **redact by default**. The calls of the `SecureStore` port
 stay in the file (port, method, call id, status) with empty `args` and `body`, so the file is still a valid `undra.recording` that
@@ -55,14 +55,14 @@ paragraph, and say that a `Replayer` cannot answer a redacted call (it reports `
 finished call's id is not emptied), the `--record` integration test (`source`), `record_args` (the flag reaches the runner, and
 only when asked).
 
-**M3 — Two native recorders, one call id (fixed; `recorder.rs:336-350`).** `RecordingClock` and `RecordingRng` each had a counter
+**M3 - Two native recorders, one call id (fixed; `recorder.rs:336-350`).** `RecordingClock` and `RecordingRng` each had a counter
 from zero (`0x8000_0000 + n`), and each wrote its call and its reply with two separate lock acquisitions. A recording could hold
 `Clock.now_ms` call `0x80000000` and `Rng.fill` call `0x80000000`, with the two replies interleaved; readers pair a reply with the
 call of its id, so one reply lands on the wrong call and the other is dropped. Fix: one process-wide counter, and the call and its
 reply are appended under one lock (`push_all`). Test: `a_clock_and_an_rng_never_write_the_same_call_id` (two ids before, three
 now).
 
-**M4 — A recording that cannot be written (fixed; runner template `write_recording`, `Recorder::stop`).** The brief's attack: a full
+**M4 - A recording that cannot be written (fixed; runner template `write_recording`, `Recorder::stop`).** The brief's attack: a full
 disk. Before: one `eprintln!` per failed flush (a flush is attempted whenever the event count changed, so under traffic it repeats
 twice a second), the recorder kept appending to memory for the rest of the session (a core that reads the clock a lot makes that
 unbounded), a half-written `NAME.json.tmp` stayed behind, and nothing told the developer that the recording had stopped. After: the
@@ -72,7 +72,7 @@ dropped, the tap and the native `Clock`/`Rng` wrappers stop appending) and the f
 Test: `a_recording_that_cannot_be_written_warns_and_the_server_keeps_serving` (a directory that does not exist, on the real `undra
 dev`: one warning, a call still answered, no file) and `a_stopped_recorder_keeps_what_it_has_and_drops_the_rest`.
 
-**L1 — A recorded call with no recorded reply was invisible (fixed; `replayer.rs:84,258`, `ports.ts:104`, `Ports.swift`,
+**L1 - A recorded call with no recorded reply was invisible (fixed; `replayer.rs:84,258`, `ports.ts:104`, `Ports.swift`,
 `Ports.kt`).** The brief: a missing port reply must be a typed error naming the port and the method, not a silent answer. The
 replayers answered `Unavailable` (no hang, no crash) and `finish()` passed, with a test that said so on purpose ("it was made, the
 answer was just empty"). A recording cut mid-call (the dev session ended while a request was in flight, a hand edit, a truncated
@@ -82,7 +82,7 @@ answered unavailable". Replies are still paired with their call by id, not by po
 reply that lands after a Kv call and reply). Tests in all four kits; TESTING.md, SPEC 17.5, the site page and ADR-055's
 amendment list it.
 
-**L2 — The native `ctx.sleep` note did not say what to do (fixed; `docs/TESTING.md`, `testing.html`, both native `PreviewCore`
+**L2 - The native `ctx.sleep` note did not say what to do (fixed; `docs/TESTING.md`, `testing.html`, both native `PreviewCore`
 docs).** It said a native `ctx.sleep` "is waited for, not advanced". A preview author needs the consequence: `advance(5_000)`
 returns at once, fires no timer for that sleep, and the task wakes 5 real seconds after it went to sleep; `settle()` does not wait
 for it (a sleeping core is idle). The note now lists what to do (make the delay a parameter the preview sets to a few
@@ -90,11 +90,11 @@ milliseconds; wait the real duration and then `settle()`; preview the state afte
 the ports; or run the story on the web, where sleeps follow the clock) and what keeps working natively (`Clock` reads such as
 staleness). The Kotlin `advance` summary still said "completing a `ctx.sleep`"; fixed.
 
-**L3 — `cargo doc --workspace --no-deps` with `-D warnings` failed (fixed; `replayer.rs:162`).** `Replayer`'s summary linked
+**L3 - `cargo doc --workspace --no-deps` with `-D warnings` failed (fixed; `replayer.rs:162`).** `Replayer`'s summary linked
 `[module documentation](self)`, and the module is private (`rustdoc::private_intra_doc_links`). R4 puts docs on every `pub` item
 and CI builds them with warnings denied.
 
-**L4 — The cross-merge with persistence broke the kit (fixed in the merge commit; `conformance.rs`).** `Kv` now returns
+**L4 - The cross-merge with persistence broke the kit (fixed in the merge commit; `conformance.rs`).** `Kv` now returns
 `Result<_, StorageError>` and `FsError` has `Full` and `Unavailable`, so the conformance generator did not compile. Fixed (the
 file it generates is byte-identical: success paths only). The Swift, Kotlin and TypeScript kits compiled and passed unchanged.
 The playground's schema hash moved to `0xfa536b9ac6f06149`, so the two playground recordings were re-blessed

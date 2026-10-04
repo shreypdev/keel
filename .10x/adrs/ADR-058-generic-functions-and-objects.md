@@ -440,7 +440,7 @@ parameter in it is still E0002 at the template.
 | generic queries and mutations | E0002 | a query is cached, persisted and invalidated under one name and key | per-instantiation keys and handle names; a new ADR |
 | generic ports and callback traits (`Listener<T>`), generic error enums | E0002 | the platform implements a port once, by the trait's name; an error is thrown by name | named instantiations of traits (`type TodoListener = dyn Listener<Todo>`); a new ADR |
 | a template instantiated in another crate | E0070 | the instantiation implements `UndraObject` for a type of the template's crate | dispatch generated at the template (generic), so the alias only registers |
-| native generic types or one fused native generic function (`func newest<T: Dated>`, `Selection<Todo>` as a Swift generic class) | — | the schema would need type parameters and named type sets | a `templates` section in the schema and described type sets; the overloads of section 2 stay source-compatible with it |
+| native generic types or one fused native generic function (`func newest<T: Dated>`, `Selection<Todo>` as a Swift generic class) | none | the schema would need type parameters and named type sets | a `templates` section in the schema and described type sets; the overloads of section 2 stay source-compatible with it |
 
 ### 7. Diagnostics (R8)
 

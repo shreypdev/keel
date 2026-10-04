@@ -1,4 +1,4 @@
-# The playground stress screen and "Push it" (S1b) — adversarial review
+# The playground stress screen and "Push it" (S1b) - adversarial review
 
 **Date:** 2026-10-01 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/stress-screen` at `07c3b23` · **Read:** `CLAUDE.md` (R10, R12), ADR-031 (decisions 2, 3, 5), the design

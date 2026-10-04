@@ -1,4 +1,4 @@
-# SDE — abi-table: one C ABI table per core, cores side by side (ADR-044, wt/abi-table, 2026-10-01)
+# SDE - abi-table: one C ABI table per core, cores side by side (ADR-044, wt/abi-table, 2026-10-01)
 
 ADR-044's implementation brief, items 1–8. Before this piece a process could hold one Undra core: the C ABI was
 19 global `undra_*` symbols exported by `undra-ffi` itself, the JNI natives were registered on one runtime class,
@@ -24,7 +24,7 @@ hash (the playground's was `0xddcdea47fa95a8d4` before and after it; `0xefd907be
    struct; `tests/fixture` is a core like any other (`undra_fixture`), and the C, Swift and JNI harnesses run
    against it. Miri: `--lib` 35 pass (the table tests included) and the `abi` subset CI runs plus the two table
    tests, 4 pass.
-2. **`undra.h`** — the table, no functions, `UNDRA_ABI_VERSION 2u`; the host contract text unchanged except that
+2. **`undra.h`** - the table, no functions, `UNDRA_ABI_VERSION 2u`; the host contract text unchanged except that
    `undra_<name>` now names the table's `<name>` entry. The Swift runtime's copy and React Native's are
    byte-identical (`undra_h_copies_are_identical` and the RN host test).
 3. **CLI** (`6757777`, `ec3f803`). `[core] namespace` (validated; default: the core's package name in snake case;
