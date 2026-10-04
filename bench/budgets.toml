@@ -907,21 +907,23 @@ tolerance = 0.05
 # close frame's reason are sentences in both builds. Recorded after it: 15,811 (190 under the budget), with the helper
 # 16,333, all features 40,221 (27,455 + 12,766). After L3 (the framed channel) and the merge of reload-handles (ADR-059:
 # no query-handle re-creation in recovery): 15,774 (226 under), with the helper 16,285, all features 39,922 (27,064 +
-# 12,858). The next change that grows the chunk by 226 bytes is over the budget: make room (ADR-057's levers not taken:
-# host events by use first, about 530) or restate it in an ADR.
+# 12,858). After the production message's separator became `; see` (2026-10-03: no em-dash in program output): 15,758
+# (242 under), with the helper 16,284, all features 39,919 (27,055 + 12,864). The next change that grows the chunk by 242
+# bytes is over the budget: make room (ADR-057's levers not taken: host events by use first, about 530) or restate it in
+# an ADR.
 [size."web/hello-runtime-js"]
 budget_gzip_bytes = 16000
-measured_gzip_bytes = 15774
+measured_gzip_bytes = 15758
 tolerance = 0.05
 
 [size."web/hello-runtime-js-with-helper"]
 budget_gzip_bytes = 16600
-measured_gzip_bytes = 16285
+measured_gzip_bytes = 16284
 tolerance = 0.05
 
 [size."web/all-features-runtime-js"]
 budget_gzip_bytes = 42400
-measured_gzip_bytes = 39922
+measured_gzip_bytes = 39919
 tolerance = 0.05
 
 # The native cores (ADR-052, amendment "native size gates", 2026-10-02): the hello-world core, the `undra init` template
