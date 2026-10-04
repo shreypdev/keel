@@ -250,8 +250,6 @@ fn path_message(project: &Project, plan: &Plan) -> String {
 /// How the running `undra` was installed, as far as its path tells.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Channel {
-    /// Homebrew: the binary is in a cellar (`/opt/homebrew/Cellar/undra/<version>/bin/undra`).
-    Homebrew,
     /// The installer (`install.sh`): `$UNDRA_HOME/bin`, by default `~/.undra/bin`.
     Installer,
     /// `cargo install`: `$CARGO_HOME/bin`, by default `~/.cargo/bin`.
@@ -262,7 +260,6 @@ impl Channel {
     /// The command that updates `undra` through this channel.
     fn update_command(self) -> &'static str {
         match self {
-            Channel::Homebrew => "brew upgrade undra",
             Channel::Installer => "curl -fsSL https://shreypdev.github.io/undra/install.sh | sh",
             Channel::Cargo => {
                 "cargo install --locked --force --git https://github.com/shreypdev/undra undra-cli"
@@ -280,9 +277,6 @@ fn channel_of(
     cargo_home: Option<String>,
 ) -> Option<Channel> {
     let dir = exe.parent()?;
-    if exe.components().any(|c| c.as_os_str() == "Cellar") {
-        return Some(Channel::Homebrew);
-    }
     let bin = |root: Option<PathBuf>| root.is_some_and(|root| dir == root.join("bin"));
     if bin(undra_home.map(PathBuf::from)) || bin(home.map(|h| h.join(".undra"))) {
         return Some(Channel::Installer);
@@ -293,13 +287,13 @@ fn channel_of(
     None
 }
 
-/// What to run to update `undra`: the channel's command when it is known, else the three.
+/// What to run to update `undra`: the channel's command when it is known, else the installer's, and cargo's for a
+/// binary cargo built (a path that says nothing, such as a package manager's directory, gets the installer).
 fn update_help(installed: Option<Channel>) -> String {
     match installed {
         Some(channel) => format!("`{}`", channel.update_command()),
         None => format!(
-            "`{}`, `{}` or `{}`, whichever installed it",
-            Channel::Homebrew.update_command(),
+            "`{}`, or `{}` if you installed it with cargo",
             Channel::Installer.update_command(),
             Channel::Cargo.update_command()
         ),
@@ -423,13 +417,13 @@ mod tests {
     fn the_update_help_names_the_channel_the_binary_came_from() {
         let home = Path::new("/Users/me");
         let of = |exe: &str| channel_of(Path::new(exe), Some(home), None, None);
-        assert_eq!(
-            of("/opt/homebrew/Cellar/undra/1.0.0/bin/undra"),
-            Some(Channel::Homebrew)
-        );
+        // A binary under a Homebrew prefix (from a formula of someone else's, say) is no channel of ours: it gets the
+        // installer's help, like any other path that says nothing.
+        assert_eq!(of("/opt/homebrew/Cellar/undra/1.0.0/bin/undra"), None);
+        assert_eq!(of("/opt/homebrew/bin/undra"), None);
         assert_eq!(
             of("/home/linuxbrew/.linuxbrew/Cellar/undra/1.0.0/bin/undra"),
-            Some(Channel::Homebrew)
+            None
         );
         assert_eq!(of("/Users/me/.undra/bin/undra"), Some(Channel::Installer));
         assert_eq!(of("/Users/me/.cargo/bin/undra"), Some(Channel::Cargo));
@@ -454,12 +448,18 @@ mod tests {
             ),
             Some(Channel::Cargo)
         );
-        assert_eq!(update_help(Some(Channel::Homebrew)), "`brew upgrade undra`");
+        assert_eq!(
+            update_help(Some(Channel::Installer)),
+            "`curl -fsSL https://shreypdev.github.io/undra/install.sh | sh`"
+        );
         let all = update_help(None);
-        for needle in ["brew upgrade undra", "install.sh | sh", "cargo install"] {
+        for needle in ["install.sh | sh", "cargo install"] {
             assert!(all.contains(needle), "{all}");
         }
-        assert!(!all.contains("npm"), "{all}");
+        assert!(all.starts_with("`curl"), "the installer comes first: {all}");
+        for gone in ["brew", "npm"] {
+            assert!(!all.contains(gone), "{all}");
+        }
     }
 
     #[test]

@@ -125,8 +125,9 @@ All live in `site/scripts/` and run from the repository root.
 * **Pages that are linked before they exist** go in `data/pending.json`; the checker reports those links as notes
   instead of failures and tells you to remove the entry once the page exists.
 * **The install blocks** (both in `index.html`, the table in `docs/getting-started.html` and the README) list the
-  standard channels for a native CLI, easiest first: Homebrew, the installer (`curl … | sh`), cargo. The npm
-  wrapper of the CLI that the release pipeline still builds is not advertised.
+  two ways to get the CLI, easiest first: the installer (`curl … | sh`), then cargo. There is no Homebrew tap and
+  the CLI is not on npm; `brew install undra` comes later through homebrew-core (ADR-063, amendment; the roadmap's
+  Next list), and the blocks gain it then.
 
 ## The CI flow (`.github/workflows/site.yml`)
 

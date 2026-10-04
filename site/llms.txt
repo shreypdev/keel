@@ -7,7 +7,7 @@ Undra is open source (MIT OR Apache-2.0) and ships an `undra` CLI (`undra init`,
 ## Docs
 
 - [Undra documentation](https://shreypdev.github.io/undra/docs/): Guides and reference for Undra, the Rust framework for native iOS, Android and web apps: getting started, concepts, queries, ports, the CLI and the API.
-- [Getting started · Undra docs](https://shreypdev.github.io/undra/docs/getting-started.html): Install the Undra CLI with Homebrew, the installer or cargo, make a project, run its web app in minutes, then the live loop, iOS and Android.
+- [Getting started · Undra docs](https://shreypdev.github.io/undra/docs/getting-started.html): Install the Undra CLI with the installer or cargo, make a project, run its web app in minutes, then the live loop, iOS and Android.
 - [Core concepts · Undra docs](https://shreypdev.github.io/undra/docs/concepts.html): Stores, signals, computeds, transactions, change-sets and keyed lists, and why a list write costs the change and not the list.
 - [Queries & mutations · Undra docs](https://shreypdev.github.io/undra/docs/queries.html): The data layer in the core: cached queries with staleness and dedup, retry, optimistic mutations with precise rollback, persistence and an offline queue.
 - [Ports & adapters · Undra docs](https://shreypdev.github.io/undra/docs/ports.html): The ten standard ports, the default adapter on each platform, how to supply your own, what happens when one is missing, and the fakes for tests.

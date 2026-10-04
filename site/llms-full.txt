@@ -46,9 +46,9 @@ With Rust (and its `wasm32-unknown-unknown` target) and Node installed:
 bash
 
 ```bash
-brew install shreypdev/undra/undra            # the CLI; the installer and cargo are below
-undra init myapp                              # a core, its bindings, and an app per platform
-cd myapp/web && npm install && npm run dev   # the web app on the core: http://localhost:5173
+curl -fsSL https://shreypdev.github.io/undra/install.sh | sh   # the CLI; cargo is the other way, below
+undra init myapp                                               # a core, its bindings, and an app per platform
+cd myapp/web && npm install && npm run dev                     # the web app on the core: http://localhost:5173
 ```
 
 `undra init` prints `Created …/myapp (… files, bindings for schema hash 0x…)` and what to run next; nothing is downloaded, the templates are part of the binary. `npm run dev` starts Vite, whose `undra()` plugin builds the core to WebAssembly first (`==> Building the core for web`, then a table with the module's size against its budget; the first build compiles the Undra crates and takes a minute or two). The page at `http://localhost:5173` is a to-do list whose state lives in the Rust core in `core/src/lib.rs`. Edit that file and save: the plugin rebuilds the core and reloads the page.
@@ -107,11 +107,10 @@ The Android SDK needs a few packages (platform 35, build-tools 35, NDK 27.2, the
 
 ## 2. Install the CLI
 
-Pick one channel. Homebrew and the installer put a prebuilt `undra` binary on your machine (macOS and Linux, arm64 and x86_64); cargo builds it from source with Rust 1.85 or newer.
+Pick one channel. The installer puts a prebuilt `undra` binary on your machine (macOS and Linux, arm64 and x86_64); cargo builds it from source with Rust 1.85 or newer.
 
 | Channel | Command |
 | --- | --- |
-| Homebrew | `brew install shreypdev/undra/undra` |
 | Installer | `curl -fsSL https://shreypdev.github.io/undra/install.sh \| sh` |
 | cargo | `cargo install --git https://github.com/shreypdev/undra undra-cli` |
 
@@ -3552,7 +3551,7 @@ the core and the project disagree about where Undra comes from, or the project i
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| core/Cargo.toml pins Undra at tag v999.0.0, newer than this undra (<version>) | `undra upgrade` moves a project forward only, and a CLI older than the project's runtimes would generate bindings they do not match (ahead is <dir>/ahead) | update this `undra` first (`brew upgrade undra`, `curl -fsSL https://shreypdev.github.io/undra/install.sh \| sh` or `cargo install --locked --force --git https://github.com/shreypdev/undra undra-cli`, whichever installed it) and run `undra upgrade` again |
+| core/Cargo.toml pins Undra at tag v999.0.0, newer than this undra (<version>) | `undra upgrade` moves a project forward only, and a CLI older than the project's runtimes would generate bindings they do not match (ahead is <dir>/ahead) | update this `undra` first (`curl -fsSL https://shreypdev.github.io/undra/install.sh \| sh`, or `cargo install --locked --force --git https://github.com/shreypdev/undra undra-cli` if you installed it with cargo) and run `undra upgrade` again |
 | undra.toml says Undra is at /somewhere/else, but the core's `undra` dependency is at <repo> | the library Undra ships is built from the same Undra as the core, and the platform runtimes come from `[undra] path`; if they differ, the core and the apps would speak different wire formats | make them agree: set `path` of the core's `undra` dependency and `[undra] path` in undra.toml to the same checkout (or remove `[undra] path` to use released runtimes) |
 
 ## Runtime messages
@@ -4738,6 +4737,7 @@ Each of these is recorded as open in the repository, with the work done around i
 
 - Benchmarks on physical phonesEvery device row so far is from a simulator, an emulator or headless Chromium. Real-phone rows next, then budgets for them and a CI job.
 - Maven Central and the npm registryThe conventional registries, after launch, beside GitHub: the Kotlin runtime on Maven Central and the npm packages on the registry. undra upgrade moves a project over. crates.io follows, under a registry-safe prefix.
+- Homebrew (brew install undra)Through homebrew-core, once the repository is 30 days old and notable (75 stars, or 30 forks or watchers). There is no tap at launch: the installer and cargo are the two ways to get the CLI.
 - Android modules tested in CIundra-compose, android-adapters and android-work pass locally and on the emulator; an emulator job in CI runs them.
 - Android under Bazel, verifiedThe rules declare Android; a build and a test run prove it.
 - Byte-reproducible undra buildToday the same core built in two directories differs, because cargo hashes the absolute path into crate names.
@@ -4824,12 +4824,12 @@ Sizes are gated in CI. The hello-world web core, a WebAssembly module, is 113.1 
 With Rust (and its `wasm32-unknown-unknown` target) and Node installed:
 
 ```bash
-brew install shreypdev/undra/undra
+curl -fsSL https://shreypdev.github.io/undra/install.sh | sh
 undra init myapp
 cd myapp/web && npm install && npm run dev
 ```
 
-The installer script and cargo work too. `undra init` writes a core with a to-do store, its bindings and an app per platform, downloading nothing. `npm run dev` builds the core to WebAssembly (the first build compiles the Undra crates and takes a minute or two) and serves the app at `http://localhost:5173`. Edit `core/src/lib.rs` and save: the page is on the new core. `undra dev` serves one core to every app at once.
+Cargo works too (`cargo install --git https://github.com/shreypdev/undra undra-cli`, built from source). `undra init` writes a core with a to-do store, its bindings and an app per platform, downloading nothing. `npm run dev` builds the core to WebAssembly (the first build compiles the Undra crates and takes a minute or two) and serves the app at `http://localhost:5173`. Edit `core/src/lib.rs` and save: the page is on the new core. `undra dev` serves one core to every app at once.
 
 The iOS and Android apps get their runtimes from the same GitHub release, with no account: the Swift package at the repository's root and the Kotlin modules from JitPack. [Getting started](https://shreypdev.github.io/undra/docs/getting-started.html) has every step, as we ran it.
 

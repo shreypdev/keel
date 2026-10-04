@@ -6,11 +6,11 @@ The product is **Undra** (renamed from the working name Keel on 2026-09-30, ADR-
 ## Where things stand (2026-10-01, evening)
 Launch v2 is complete and live (status.md checkpoints 1–4). The v1.1/v1.2 program (the section
 below) is landing piece by piece: checkpoints 5–6 are merged, the queue is listed there. The
-founder-only release steps are unchanged (`docs/RELEASING.md`; the dry run is green): npm org
-`undra` + automation token → `NPM_TOKEN`; repository `shreypdev/homebrew-undra` with `Formula/`
-+ fine-grained PAT → `HOMEBREW_TAP_TOKEN`; the `release` environment with a `v*` restriction and
-a `v*` tag ruleset; then `scripts/bump-version.sh 1.0.0` → tag `v1.0.0`. Distribution is parked
-until after v2 by the founder's decision.
+founder-only release steps (`docs/RELEASING.md`; the dry run is green; corrected 2026-10-03: distribution is
+ADR-063's, from GitHub, and there is no tap) are: reserve the npm scope `@undra` (nothing is published there); the
+`release` environment with a `v*` restriction and a `v*` tag ruleset (recommended); the rehearsal tag
+`v1.0.0-rc.1`; then `scripts/bump-version.sh 1.0.0` → tag `v1.0.0`. **The release needs no secret** beyond the
+`GITHUB_TOKEN` GitHub gives every run: no npm token, no Homebrew tap, no tap token (ADR-063, amendment of 2026-10-03).
 
 ## How to run everything
 `source scripts/env.sh`, then the commands in status.md's matrix table and `docs/ONBOARDING.md`;
@@ -56,10 +56,11 @@ findings not taken on are U2 (Xcode 27, needs the reporter's crash log) and U6 (
 
 **Launch readiness (2026-10-03, status checkpoint 35).** The site for launch (#11), the posts' fact-check (#13), the web
 size re-record (#12) and distribution from GitHub (#14, ADR-063) are on `main` (`da087cc`); `origin` has `main` only.
-The live site already reads as on launch day: its `brew` and installer commands become true with the release. **Nothing
-is announced and nothing is tagged.** The founder's steps are `docs/RELEASING.md`, in order; step 4, the
-`v1.0.0-rc.1` rehearsal tag, is required. An agent must not create tags, releases, repositories or tokens, and must
-not be given a token: the secret is set by the founder with `gh secret set`. After the tag: check each channel from a
+The live site already reads as on launch day: its installer and cargo commands become true with the release (there is no
+Homebrew tap; `brew install undra` comes later through homebrew-core, roadmap Next). **Nothing is announced and nothing is
+tagged.** The founder's steps are `docs/RELEASING.md`, in order; step 3, the `v1.0.0-rc.1` rehearsal tag, is required.
+An agent must not create tags, releases, repositories or tokens, and must not be given a token (the release needs none
+beyond GitHub's own). After the tag: check each channel from a
 clean machine before any post. Follow-ups that are safe to take as small pull requests: the three CI flakes named in
 checkpoint 35, the test count on the landing page, `schema.json` in the examples.
 - **On hold by the founder:** the Android emulator CI job for `android-adapters`, `android-work` and

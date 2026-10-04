@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Getting started · Undra docs</title>
-<meta name="description" content="Install the Undra CLI with Homebrew, the installer or cargo, make a project, run its web app in minutes, then the live loop, iOS and Android.">
+<meta name="description" content="Install the Undra CLI with the installer or cargo, make a project, run its web app in minutes, then the live loop, iOS and Android.">
 <link rel="canonical" href="https://shreypdev.github.io/undra/docs/getting-started.html">
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="Undra">
 <meta property="og:title" content="Getting started · Undra docs">
-<meta property="og:description" content="Install the Undra CLI with Homebrew, the installer or cargo, make a project, run its web app in minutes, then the live loop, iOS and Android.">
+<meta property="og:description" content="Install the Undra CLI with the installer or cargo, make a project, run its web app in minutes, then the live loop, iOS and Android.">
 <meta property="og:url" content="https://shreypdev.github.io/undra/docs/getting-started.html">
 <meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
 <meta property="og:image:width" content="1200">
@@ -17,10 +17,10 @@
 <meta property="og:image:alt" content="Undra — the Rust core for native apps">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Getting started · Undra docs">
-<meta name="twitter:description" content="Install the Undra CLI with Homebrew, the installer or cargo, make a project, run its web app in minutes, then the live loop, iOS and Android.">
+<meta name="twitter:description" content="Install the Undra CLI with the installer or cargo, make a project, run its web app in minutes, then the live loop, iOS and Android.">
 <meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/getting-started.html#article","headline":"Getting started · Undra docs","description":"Install the Undra CLI with Homebrew, the installer or cargo, make a project, run its web app in minutes, then the live loop, iOS and Android.","url":"https://shreypdev.github.io/undra/docs/getting-started.html","inLanguage":"en","dateModified":"2026-10-03","datePublished":"2026-09-30","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Getting started","item":"https://shreypdev.github.io/undra/docs/getting-started.html"}]}]}
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/getting-started.html#article","headline":"Getting started · Undra docs","description":"Install the Undra CLI with the installer or cargo, make a project, run its web app in minutes, then the live loop, iOS and Android.","url":"https://shreypdev.github.io/undra/docs/getting-started.html","inLanguage":"en","dateModified":"2026-10-03","datePublished":"2026-09-30","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Getting started","item":"https://shreypdev.github.io/undra/docs/getting-started.html"}]}]}
 </script>
 <!-- chrome:head -->
 <meta name="theme-color" content="#0a0a0a">
@@ -63,9 +63,9 @@
     <p class="lede">Three commands put the to-do app that every new project starts with on your screen, running on its Rust core. Then the live loop, the native apps, and what you ship.</p>
 <h2 id="in-five-minutes">In five minutes<a class="anchor" href="#in-five-minutes" aria-label="Link to this section">#</a></h2>
 <p>With Rust (and its <code>wasm32-unknown-unknown</code> target) and Node installed:</p>
-<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">brew install shreypdev/undra/undra            # the CLI; the installer and cargo are below
-undra init myapp                              # a core, its bindings, and an app per platform
-cd myapp/web &amp;&amp; npm install &amp;&amp; npm run dev   # the web app on the core: http://localhost:5173</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">curl -fsSL https://shreypdev.github.io/undra/install.sh | sh   # the CLI; cargo is the other way, below
+undra init myapp                                               # a core, its bindings, and an app per platform
+cd myapp/web &amp;&amp; npm install &amp;&amp; npm run dev                     # the web app on the core: http://localhost:5173</code></pre></div>
 <p><code>undra init</code> prints <code>Created …/myapp (… files, bindings for schema hash 0x…)</code> and what to run next; nothing is downloaded, the templates are part of the binary. <code>npm run dev</code> starts Vite, whose <code>undra()</code> plugin builds the core to WebAssembly first (<code>==&gt; Building the core for web</code>, then a table with the module's size against its budget; the first build compiles the Undra crates and takes a minute or two). The page at <code>http://localhost:5173</code> is a to-do list whose state lives in the Rust core in <code>core/src/lib.rs</code>. Edit that file and save: the plugin rebuilds the core and reloads the page.</p>
 <p>That is the whole loop on the web. The rest of this page installs what each platform needs, shows <a href="#4-start-the-live-loop"><code>undra dev</code></a> (one core served to every app, its state kept across a rebuild), and runs the iOS and Android apps. <code>undra doctor</code> says what your machine is missing, with the command that fixes each gap.</p>
 <h2 id="what-you-need">What you need<a class="anchor" href="#what-you-need" aria-label="Link to this section">#</a></h2>
@@ -91,8 +91,8 @@ sudo xcodebuild -license accept
 xcodebuild -downloadPlatform iOS        # simulator runtime, one time, large</code></pre></div>
 <p>The Android SDK needs a few packages (platform 35, build-tools 35, NDK 27.2, the emulator and a system image). The <a href="https://github.com/shreypdev/undra/blob/main/docs/ONBOARDING.md" rel="noopener">onboarding guide</a> has the exact <code>sdkmanager</code> line and an <code>avdmanager</code> line that creates the <code>undra</code> emulator used throughout the project.</p>
 <h2 id="2-install-the-cli">2. Install the CLI<a class="anchor" href="#2-install-the-cli" aria-label="Link to this section">#</a></h2>
-<p>Pick one channel. Homebrew and the installer put a prebuilt <code>undra</code> binary on your machine (macOS and Linux, arm64 and x86_64); cargo builds it from source with Rust 1.85 or newer.</p>
-<div class="table-wrap"><table><thead><tr><th>Channel</th><th>Command</th></tr></thead><tbody><tr><td>Homebrew</td><td><code class="cw">brew install shreypdev/undra/undra</code></td></tr><tr><td>Installer</td><td><code class="cw">curl -fsSL https://shreypdev.github.io/undra/install.sh | sh</code></td></tr><tr><td>cargo</td><td><code class="cw">cargo install --git https://github.com/shreypdev/undra undra-cli</code></td></tr></tbody></table></div>
+<p>Pick one channel. The installer puts a prebuilt <code>undra</code> binary on your machine (macOS and Linux, arm64 and x86_64); cargo builds it from source with Rust 1.85 or newer.</p>
+<div class="table-wrap"><table><thead><tr><th>Channel</th><th>Command</th></tr></thead><tbody><tr><td>Installer</td><td><code class="cw">curl -fsSL https://shreypdev.github.io/undra/install.sh | sh</code></td></tr><tr><td>cargo</td><td><code class="cw">cargo install --git https://github.com/shreypdev/undra undra-cli</code></td></tr></tbody></table></div>
 <p>The installer detects your OS and architecture, verifies the download against the release checksums, installs to <code>~/.undra/bin</code> and prints the line to add to your <code>PATH</code>. It never uses <code>sudo</code>.</p>
 <div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">undra --version
 undra doctor      # prints what is missing, with the fix</code></pre></div>

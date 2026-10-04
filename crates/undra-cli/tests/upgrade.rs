@@ -396,7 +396,10 @@ fn a_project_ahead_of_this_undra_is_refused_with_the_way_out() {
         "{stderr}"
     );
     assert!(
-        stderr.contains("update this `undra` first") && stderr.contains("install.sh"),
+        stderr.contains("update this `undra` first")
+            && stderr.contains("install.sh")
+            && stderr.contains("cargo install")
+            && !stderr.contains("brew"),
         "{stderr}"
     );
     assert!(
