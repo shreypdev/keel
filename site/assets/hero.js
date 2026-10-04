@@ -1,4 +1,4 @@
-/* Undra site — the hero diagram.
+/* Undra site: the hero diagram.
    A pure function of time drives the picture: frame(T) sets every pulse, glow and label.
    8-second loop: a write leaves one UI, crosses the boundary once, the core commits one
    change-set, and it fans out to every local mirror. The origin rotates through the UIs

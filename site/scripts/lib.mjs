@@ -51,7 +51,7 @@ export function replaceRegion(html, name, inner, indent = "    ") {
   return html.slice(0, i + a.length) + "\n" + inner.replace(/^/gm, indent).replace(/^\s+$/gm, "") + "\n" + indent + html.slice(j);
 }
 
-const ENT = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&apos;": "'", "&nbsp;": " ", "&mdash;": "—", "&ndash;": "–", "&hellip;": "…", "&rarr;": "→" };
+const ENT = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&apos;": "'", "&nbsp;": " ", "&mdash;": "\u2014", "&ndash;": "–", "&hellip;": "…", "&rarr;": "→" };
 /** Decodes the HTML entities the site uses. */
 export const decode = (s) => s.replace(/&(?:amp|lt|gt|quot|#39|apos|nbsp|mdash|ndash|hellip|rarr);/g, (m) => ENT[m]).replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(+n)).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)));
 /** Escapes text for HTML or XML. */
