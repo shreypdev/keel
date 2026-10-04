@@ -20,11 +20,12 @@
     var pushBtn = $("[data-push-it]", live), bar = $(".frame-bar span", live), frame = null, gotStats = false, giveUp = 0, step = floorUs;
     var theme = function () { return doc.documentElement.dataset.theme === "light" ? "light" : "dark"; };
     var stepText = function () { return step >= 100 ? (step / 1000) + " ms" : (step || 1) + " µs"; }; // as the playground writes it (0.1 ms)
-    // One reading: at or below the clock's step it is not resolved, so it reads "under" the step.
-    var fmt = function (us) {
+    // One reading of k steps is a time between k - 1 and k + 1 steps, so it is shown as the bound that is always true:
+    // under k + 1 steps ("< 0.1 ms" for a reading of 0, "< 0.2 ms" for one step).
+    var fmtOne = function (us) {
       if (!isFinite(us) || us < 0) return "–";
-      if (step > 0 ? us <= step : us < 1) return "< " + stepText();
-      return us >= 1000 ? (us / 1000).toFixed(us >= 10000 ? 1 : 2) + " ms" : Math.round(us) + " µs";
+      var bound = (Math.round(us / step) + 1) * step;
+      return "< " + (bound >= 100 ? +(bound / 1000).toFixed(3) + " ms" : Math.round(bound) + " µs");
     };
     // A batch's average: resolved below the step (the readings' errors even out), so it keeps a decimal under 10 µs.
     var fmtAvg = function (us) {
@@ -68,7 +69,7 @@
       } else {
         stat.avg.textContent = "–"; stat.avgOf.textContent = "";
       }
-      stat.max.textContent = n > 0 ? fmt(worst) : "–";
+      stat.max.textContent = n > 0 ? fmtOne(worst) : "–";
       // The stress screen adds the core's own counter and what the mirror did with it (all measured in this page).
       var g = Number(d.generatedPerSec), applied = Number(d.entriesAppliedPerSec), received = Number(d.entriesReceivedPerSec), ratio = Number(d.mergeRatio), dropped = Number(d.droppedFrames);
       var stress = d.generatedPerSec !== undefined && isFinite(g) && isFinite(applied);
