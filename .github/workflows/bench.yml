@@ -216,9 +216,7 @@ jobs:
         run: cargo install cargo-ndk
       - name: The NDK r27 (the Android cores are linked with it)
         run: |
-          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$sdkmanager" --licenses > /dev/null || true
-          "$sdkmanager" "ndk;27.2.12479018" > /dev/null
+          bash scripts/android-sdk-install.sh "ndk;27.2.12479018"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
       - name: Native size gate (Android, hello-world core per ABI, bytes as shipped)
         run: bash scripts/native-size.sh --platform android
