@@ -356,7 +356,7 @@ runtime's class fields again, and the call path costs what it did before ADR-056
 **Two builds of the runtime** (ADR-057). `@undra/runtime` publishes a development build and a production build of the same code, and its
 `exports` pick one by condition: `vite dev` (its browser modules; a module it runs for SSR is loaded by Node, which resolves `default`), Vitest,
 webpack in development mode and React Native (Metro) resolve the `development` / `react-native` condition, the readable build, whose errors and logs say sentences; `vite build`, webpack in production mode, esbuild and
-plain Node resolve `default`, the production build, whose messages are a code, the values and a link (`T0017: callSync, remote — …/errors.html#T0017`:
+plain Node resolve `default`, the production build, whose messages are a code, the values and a link (`T0017: callSync, remote; see …/errors.html#T0017`:
 the page's "Runtime messages" section has every sentence) and whose private members have short names. The classes, `kind`s and fields are the
 same in both, so nothing a program branches on changes; only the text and the size do (a hello page's runtime is about 16 KB gzipped in
 production). To see production text in a page, run `vite build && vite preview`; to read sentences in a production build, resolve the `development`

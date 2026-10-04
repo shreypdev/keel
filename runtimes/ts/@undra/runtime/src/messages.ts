@@ -6,7 +6,7 @@ import type { WireErrorDetail } from "./wire/errors.js";
  * Every sentence the runtime throws or logs is `msg(code, ...values)`: a literal code and the values it says. This module holds the
  * table of sentences, one per code, with `{0}`, `{1}` for the values, and formats them as the sentences always read. The
  * production build of the package (`npm run build`, the `default` export condition) swaps this module for `messages.prod.ts`, whose
- * `msg` says the code, the values and a link to the errors page instead (`T0017: callSync, remote — https://.../errors.html#T0017`),
+ * `msg` says the code, the values and a link to the errors page instead (`T0017: callSync, remote; see https://.../errors.html#T0017`),
  * so a production page does not carry the prose of an error whose class, `kind`, fields and `code` it already has. Both
  * flavours throw the same classes with the same `kind` and fields; only `message` differs (R6: every error is still a typed value).
  *

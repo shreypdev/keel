@@ -81,8 +81,8 @@ describe.skipIf(!built)("the built package", () => {
     expect(prod.map(({ message, ...rest }) => rest)).toEqual(dev.map(({ message, ...rest }) => rest));
     expect(dev.map((e) => e.name)).toEqual(["RangeError", "WireError", "Panicked", "UndraRestoreError"]);
     for (const [i, error] of prod.entries()) {
-      expect(error.message, error.name).toMatch(/ — https:\/\/shreypdev\.github\.io\/undra\/docs\/errors\.html#(T\d{4}|wire-\w+)$/);
-      expect((dev[i] as { message: string }).message, error.name).not.toMatch(/ — https:\/\//);
+      expect(error.message, error.name).toMatch(/; see https:\/\/shreypdev\.github\.io\/undra\/docs\/errors\.html#(T\d{4}|wire-\w+)$/);
+      expect((dev[i] as { message: string }).message, error.name).not.toMatch(/; see https:\/\//);
     }
   });
 

@@ -150,16 +150,16 @@ describe("the production flavour", () => {
     expect([typeof asDev.msg, typeof asProd.wireText]).toEqual(["function", "function"]);
   });
 
-  it("says the code, the values and the link: T0017: callSync, remote — https://…/errors.html#T0017", () => {
-    expect(prod.msg(17, "callSync", "remote")).toBe("T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017");
-    expect(prod.msg(5)).toBe("T0005 — https://shreypdev.github.io/undra/docs/errors.html#T0005");
-    expect(prod.msg(1234, 1, 2n)).toBe("T1234: 1, 2 — https://shreypdev.github.io/undra/docs/errors.html#T1234");
+  it("says the code, the values and the link: T0017: callSync, remote; see https://…/errors.html#T0017", () => {
+    expect(prod.msg(17, "callSync", "remote")).toBe("T0017: callSync, remote; see https://shreypdev.github.io/undra/docs/errors.html#T0017");
+    expect(prod.msg(5)).toBe("T0005; see https://shreypdev.github.io/undra/docs/errors.html#T0005");
+    expect(prod.msg(1234, 1, 2n)).toBe("T1234: 1, 2; see https://shreypdev.github.io/undra/docs/errors.html#T1234");
   });
 
   it("says a wire failure as its code and fields, with a link", () => {
     const text = (detail: WireErrorDetail): string => prod.wireText(detail);
-    expect(text({ code: "unexpected_eof", at: 12, needed: 3 })).toBe("wire: code=unexpected_eof at=12 needed=3 — https://shreypdev.github.io/undra/docs/errors.html#wire-unexpected_eof");
-    expect(text({ code: "bad_magic" })).toBe("wire: code=bad_magic — https://shreypdev.github.io/undra/docs/errors.html#wire-bad_magic");
+    expect(text({ code: "unexpected_eof", at: 12, needed: 3 })).toBe("wire: code=unexpected_eof at=12 needed=3; see https://shreypdev.github.io/undra/docs/errors.html#wire-unexpected_eof");
+    expect(text({ code: "bad_magic" })).toBe("wire: code=bad_magic; see https://shreypdev.github.io/undra/docs/errors.html#wire-bad_magic");
     expect(text({ code: "schema_mismatch", expected: 255n, got: 1n })).toContain("expected=255 got=1");
   });
 
