@@ -10,8 +10,8 @@
 
 Undra owns everything **under the pixels** of your iOS, Android and web apps (domain
 logic, reactive state, the data layer, persistence, and the dev loop) while the UI stays
-100% native: SwiftUI, Jetpack Compose, React and React Native, written by hand, the way
-platform engineers want to write them.
+100% native: SwiftUI on iOS, Jetpack Compose on Android, React on the web, and React
+Native, written by hand, the way platform engineers want to write them.
 
 It is the opposite of a cross-platform UI framework. Your screens never leave the
 platform. Your *logic* stops being written three times.
