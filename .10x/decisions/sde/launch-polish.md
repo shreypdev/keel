@@ -108,3 +108,15 @@ the browser's drain.
 titles; the narrow variant's call line moved down 6px; getting-started's first mention is a code comment for `undra
 init`, which makes no React Native shell, so it names the three it makes; the social card re-rendered with local
 Chrome. 332 of 350 words.
+
+## Found on the pull request: RN devices (Android) could not bundle the Release app
+
+Editing `rn-devices.yml` (item 3c) ran that workflow on this pull request, its first run under this name. Its Android
+job failed in `createBundleReleaseJsAndAssets`, before anything of this piece: Metro stopped on the runtime's
+`export * as codecs from "./codecs.js"` ("Export namespace should be first transformed by
+@babel/plugin-transform-export-namespace-from"), which the React Native preset's module transform does not take.
+Reproduced on main's tree with `npx react-native bundle --platform android --dev false` in `examples/playground/rn`.
+An app built the way docs/REACT_NATIVE.md says would hit it too. **Fix:** `@undra/react-native/babel-plugin` (which
+every app adds, step 3) rewrites the form as `import * as _codecs from "./codecs.js"; export { _codecs as codecs };`,
+leaving the runtime and its size untouched; a test of the plugin, and a row in the guide's troubleshooting table.
+**Proof:** the Release bundle builds locally; the package's 112 tests pass.
