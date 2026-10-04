@@ -44,23 +44,23 @@ D5 about a minute more CI; D6 split S1 into bench and playground halves. Details
 
 ## Integrator decisions (2026-09-30, after the design)
 
-* **D1 — ADR-031 accepted in direction** (platform-side merge per drain, frame-aligned,
+* **D1 - ADR-031 accepted in direction** (platform-side merge per drain, frame-aligned,
   bounded backlog, worker batching). Conditions before its status flips to Accepted with the
   implementation: (a) Kotlin frame pacing is an interface in the runtime module implemented
-  in `android-adapters` (Choreographer) — the runtime module stays stdlib + coroutines;
+  in `android-adapters` (Choreographer) - the runtime module stays stdlib + coroutines;
   (b) synchronous calls made from the main thread drain before they return on all three
   runtimes, so read-your-writes holds for sync calls as well as replies; (c) decision 6
   (`no_coalesce` through the schema) lands in the same piece as a separable commit with
   regenerated goldens; (d) contract scenario S18 is mandatory (R4); (e) SPEC §11/§17 and a
   "high-frequency data" docs page land with the code.
-* **D2 — yes**: the TS runtime gains `Mirror.addDrainListener` and the counters of
+* **D2 - yes**: the TS runtime gains `Mirror.addDrainListener` and the counters of
   decision 5 (they are part of the ADR).
-* **D3** — the landing page shows today's measured numbers, labelled "before
+* **D3** - the landing page shows today's measured numbers, labelled "before
   frame-coalesced delivery (ADR-031)", and swaps them when the implementation lands.
-* **D4 — yes**: an allocation gate in the ffi crate's tests (≤ 3 allocations per observed
+* **D4 - yes**: an allocation gate in the ffi crate's tests (≤ 3 allocations per observed
   commit); reaching 0 is a roadmap line.
-* **D5** — the 10 s soak runs in `bench.yml` on every run (about one extra minute).
-* **D6 — split**: (S1a) the Rust harness now, on this branch, by the cheap model;
+* **D5** - the 10 s soak runs in `bench.yml` on every run (about one extra minute).
+* **D6 - split**: (S1a) the Rust harness now, on this branch, by the cheap model;
   (S1b) the playground stress screen after site-v2 and the rename land; (S2) ADR-031's
-  implementation after the rename lands, by the strong model — runtime code in three
+  implementation after the rename lands, by the strong model - runtime code in three
   languages whose correctness is the product's central claim justifies it.

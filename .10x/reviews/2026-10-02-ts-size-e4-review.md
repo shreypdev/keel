@@ -1,4 +1,4 @@
-# `ts-size-e4` (the TypeScript runtime's size, ADR-052's amendment, and the E4 call path, ADR-056) — adversarial review
+# `ts-size-e4` (the TypeScript runtime's size, ADR-052's amendment, and the E4 call path, ADR-056) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/ts-size-e4` at
 `8df31c5` (`main` `d1b35b5` merged; `main` is `8000d39`, a handoff commit, merged at the end) · **Read:** `CLAUDE.md` (R3, R6, R9, R11),

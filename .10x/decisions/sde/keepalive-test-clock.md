@@ -1,4 +1,4 @@
-# SDE — two flaky `undra-transport` tests (wt/flake, 2026-09-30)
+# SDE - two flaky `undra-transport` tests (wt/flake, 2026-09-30)
 
 ## 1. `a_chatty_client_is_never_pinged` stops depending on thread timing
 

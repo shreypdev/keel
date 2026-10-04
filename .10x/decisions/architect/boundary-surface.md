@@ -20,24 +20,24 @@ worker mode trapped on its first sync port and a trapped web core stayed dead. P
   protocol requirements type-check for iOS 15.
 
 **Decisions (all Proposed).**
-* ADR-040 — objects cross as `&T`/`Arc<T>` parameters (borrowed) and `Arc<T>` returns (one owned reference per
+* ADR-040 - objects cross as `&T`/`Arc<T>` parameters (borrowed) and `Arc<T>` returns (one owned reference per
   crossing, interned: one handle and one wrapper per object, rolled back with a failed call); derived handles
   are transient; handles repartition 24/40 with a `u64` snapshot floor in the wire revision.
-* ADR-041 — `#[undra::callback]` traits are port instances (`Arc<dyn Trait>` parameters; instance handle in the
+* ADR-041 - `#[undra::callback]` traits are port instances (`Arc<dyn Trait>` parameters; instance handle in the
   port call; fire-and-forget or async-with-`Result`; `__release`/`__cancel` reserved methods); app code runs off
   the core lock, on the main thread through the mirror's drain by default; no ABI change.
-* ADR-042 — transparent newtypes; generic templates instantiated by named aliases into plain records; a
+* ADR-042 - transparent newtypes; generic templates instantiated by named aliases into plain records; a
   `Decimal` leaf; opt-in `uuid`/`chrono`/`time`/`rust_decimal`/`bytes` leaf types.
-* ADR-043 — end-to-start interval polling; infinite queries as keyed lists grown by recorded appends; `Lazy<T>`
+* ADR-043 - end-to-start interval polling; infinite queries as keyed lists grown by recorded appends; `Lazy<T>`
   store signals paged by the host, op 2 carrying length and version.
-* ADR-044 — one `<namespace>_undra_api()` function table per self-contained core image (cdylib or prelinked
+* ADR-044 - one `<namespace>_undra_api()` function table per self-contained core image (cdylib or prelinked
   static object); per-core JNI class and artefact names; one `UndraCore` per core; `-force_load` removed;
   ADR-038 adopts the table before its code.
-* ADR-045 — `ObservableObject` stores below an iOS 17 deployment target, `UndraDuration` below 16; runtime floor
+* ADR-045 - `ObservableObject` stores below an iOS 17 deployment target, `UndraDuration` below 16; runtime floor
   iOS 15 / macOS 12.
-* ADR-046 — release builds keep line tables and write symbol files; a tested debugger path per platform;
+* ADR-046 - release builds keep line tables and write symbol files; a tested debugger path per platform;
   `run_background(deadline)` with BGTaskScheduler/WorkManager helpers; structured panic reports to `onPanic`.
-* ADR-049 — `Kv`/`SecureStore` return `StorageError`; `undra-query` never panics on storage nor overwrites an
+* ADR-049 - `Kv`/`SecureStore` return `StorageError`; `undra-query` never panics on storage nor overwrites an
   unreadable queue; worker mode answers sync ports in the worker; opt-in web recovery from the last snapshot.
 
 **Rejected.** `Named` for objects; a fresh handle per crossing; synchronous host callbacks under the core lock;

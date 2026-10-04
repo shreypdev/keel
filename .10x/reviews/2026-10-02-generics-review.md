@@ -1,4 +1,4 @@
-# `generics-fn-obj` (ADR-058: generic functions monomorphised from a declared list; generic objects and stores as templates instantiated through an alias) — adversarial review
+# `generics-fn-obj` (ADR-058: generic functions monomorphised from a declared list; generic objects and stores as templates instantiated through an alias) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** Claude Fable 5.1 (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/generics-fn-obj` at
 `4d18393` (23 commits on `a309e9f`) · **Read:** `CLAUDE.md` (R1, R3, R4, R7, R8, R9, R12), ADR-058 with its implementation note and

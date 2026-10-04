@@ -1,4 +1,4 @@
-# SDE: landing refresh — the landing page, roadmap, docs index and README (2026-10-02)
+# SDE: landing refresh - the landing page, roadmap, docs index and README (2026-10-02)
 
 Branch `wt/landing-refresh`, from `main` `0654810` (every code piece of the v1.1/v1.2 program merged,
 `.10x/status.md` checkpoint 26). The numbers and wording come from the record and from the fact-checked post

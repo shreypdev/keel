@@ -1,4 +1,4 @@
-# SDE: docs-v1x — the cookbook (H1) and the production-shaped sample (H2), 2026-10-01
+# SDE: docs-v1x - the cookbook (H1) and the production-shaped sample (H2), 2026-10-01
 
 Worktree `wt/docs-v1x`, from `main` `8fbb6ce`, merged with `main` `660e026` (testkit landed meanwhile; `main` is an ancestor of
 HEAD). Sources of truth: SPEC §3/§8/§9/§11/§17, `docs/ERRORS.md`, `docs/DEV_LOOP.md`, `docs/TESTING.md`, ADR-037/039/047/048/049/053,

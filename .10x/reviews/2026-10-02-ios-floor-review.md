@@ -1,10 +1,10 @@
-# iOS 15 / 16 compatibility mode (ADR-045) — adversarial review
+# iOS 15 / 16 compatibility mode (ADR-045) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** adversarial (`docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/ios-floor` at `7e7c6b9` (`main` `3fc8b7f`
 is an ancestor) · **Read:** ADR-045 with its deviations, `.10x/decisions/sde/ios-floor.md`, `docs/IOS_15_16.md`, SPEC 17.3 and 10.1, and the
 diff (`undra-bindgen` `swift.rs`/`validate.rs`/the `swift-observable-object` goldens, `undra-cli` `config.rs`/`bindgen.rs`/`templates/ios-floor`, the five
 runtime files, `examples/ios15-sample`, `scripts/ios-floor.sh`, `contract-tests/swift/run.sh --floor`, `ci.yml`) · **Scope:** the five surfaces of the
-brief and nothing else · **Fixes:** `fix(ios-floor): review fixes — …` (one commit), then this record.
+brief and nothing else · **Fixes:** `fix(ios-floor): review fixes - …` (one commit), then this record.
 
 ## Verdict
 
@@ -19,7 +19,7 @@ now). Three Lows. Open items below, none blocking.
 
 ## Findings
 
-**M1 — a view's `@Observable` connection depended on the core being alive (fixed; `UndraCore.swift:138,392`).** `setConnectionState` and the
+**M1 - a view's `@Observable` connection depended on the core being alive (fixed; `UndraCore.swift:138,392`).** `setConnectionState` and the
 placeholder branch of `init` hopped to the main queue with `[weak self]` and looked the Observation twin up through `self`. `onConnectionChange`
 runs *before* the hop, and the documented reaction to `.closed(.sessionLost)` is to load a new core and drop the old one, so the old core can be gone
 when the hop runs: the `ObservableObject` connection (captured strongly) heard `.closed`, the `@Observable` one stayed on its last state. The default
@@ -27,23 +27,23 @@ mode had no such dependency before this branch (the hop captured the connection 
 `ReconnectCoreTests.testAConnectionAViewHoldsHearsTheFinalStateEvenWhenTheCoreIsReleasedAtOnce` (the fake transport gains
 `releasesInboundOnShutdown`, as the in-process transport forgets the core on shutdown); it timed out at 3.1 s without the fix.
 
-**M2 — the floor's R8 diagnostics lost their why in `undra.toml` (fixed; `config.rs:389,394,680`).** `deployment_target = "14.0"` and `observation` with
+**M2 - the floor's R8 diagnostics lost their why in `undra.toml` (fixed; `config.rs:389,394,680`).** `deployment_target = "14.0"` and `observation` with
 a floor below 17 were mapped through `CliError::bad_config(file, what, fix)`, whose `why` is the general "the file drives the build…". The specific why
 (Combine/ObservableObject; "Observation, which is iOS 17.0 and later") only survived on the command line. `in_file` keeps the why. Test:
 `every_ios_floor_mistake_teaches_what_why_fix_and_where_to_read_more` (14.0, `sixteen`, 16.4 with `observation`; 15, 15.0, 15.0.1, 16.4, 17.0, 26.0 and
 `observation` on 17.0 are accepted; the command line's `C0009`); it failed on the generic why without the fix.
 
-**M3 — the `@Published` list cost was unstated (fixed in docs; measured below).** ADR-045 decision 4 names granularity only. `@Published` has no
+**M3 - the `@Published` list cost was unstated (fixed in docs; measured below).** ADR-045 decision 4 names granularity only. `@Published` has no
 in-place accessor, so `try applyPatch(ops, to: &self.visible)` copies the array once per applied patch. Now in SPEC 10.1, `docs/IOS_15_16.md`, the
 cookbook page and an ADR-045 addendum.
 
-**L1 — `ios_major` took `+15` and four-part versions (fixed; `config.rs:695`).** `u32::from_str` accepts a leading `+`; the value would have reached
+**L1 - `ios_major` took `+15` and four-part versions (fixed; `config.rs:695`).** `u32::from_str` accepts a leading `+`; the value would have reached
 `IPHONEOS_DEPLOYMENT_TARGET`. It takes digits, at most three parts. Test in `a_deployment_target_the_runtime_cannot_run_on_is_refused`.
 
-**L2 — a build marker was tracked (fixed).** `examples/ios15-sample/build/ios/.undra-configuration-Debug` is what the Xcode phase writes; the sample had
+**L2 - a build marker was tracked (fixed).** `examples/ios15-sample/build/ios/.undra-configuration-Debug` is what the Xcode phase writes; the sample had
 no `.gitignore` (the other examples do). Untracked; `.gitignore` added.
 
-**L3 — the floor's main-queue twin test was only indirect (closed).** `testTheConnectionObjectIsTheObservableObjectTwin…` polled each observable once.
+**L3 - the floor's main-queue twin test was only indirect (closed).** `testTheConnectionObjectIsTheObservableObjectTwin…` polled each observable once.
 `testBothConnectionObservablesFollowEveryState…` takes both through connecting, connected, reconnecting, connected, closed and requires them to agree at
 each step, that `core.connection` is one object, and that an Observation tracker on it fires.
 

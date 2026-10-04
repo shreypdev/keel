@@ -1,4 +1,4 @@
-# SDE — testkit: preview cores, recorded cores, port record/replay (wt/testkit, 2026-10-01)
+# SDE - testkit: preview cores, recorded cores, port record/replay (wt/testkit, 2026-10-01)
 
 Track F (F1 + F2) of the v1.x design. The decision is ADR-055 (`.10x/adrs/ADR-055-testkit.md`; design note
 `.10x/decisions/architect/testkit.md`, one correction below). User-facing: `docs/TESTING.md`, the site page `/docs/testing.html`,

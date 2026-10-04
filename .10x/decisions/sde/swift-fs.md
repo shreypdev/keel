@@ -1,4 +1,4 @@
-# SDE — the Swift `Fs` stays in its root; the Swift `Kv` lists only sealed entries (wt/swift-fs, 2026-10-01)
+# SDE - the Swift `Fs` stays in its root; the Swift `Kv` lists only sealed entries (wt/swift-fs, 2026-10-01)
 
 Two findings against the Swift runtime, both found by the rn-adapters piece and its review
 (`rn-adapters.md` finding 1; `.10x/reviews/2026-10-02-rn-adapters-review.md` I1). No wire, schema or

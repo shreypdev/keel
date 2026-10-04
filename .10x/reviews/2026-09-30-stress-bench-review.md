@@ -1,4 +1,4 @@
-# Harsh-conditions benchmark (S1a) — adversarial review
+# Harsh-conditions benchmark (S1a) - adversarial review
 
 **Date:** 2026-09-30 · **Reviewer:** Claude Opus 5.5 (adversarial pass: measurement validity and gate strength) ·
 **Piece:** `wt/stress` at `7a088a6`, review fixes committed on top · **Design:**

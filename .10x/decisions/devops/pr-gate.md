@@ -1,9 +1,9 @@
-# pr-gate — the merge gate as GitHub enforces it (2026-10-02)
+# pr-gate - the merge gate as GitHub enforces it (2026-10-02)
 
 **What:** one roll-up job, `all-green` ("All green"), at the end of `ci.yml`, `bench.yml`, `two-cores.yml` and
 `site.yml`: `needs` every other job of the workflow, `if: always()`, and fails unless each result is `success`.
 Branch protection on `main` requires those four checks; nothing else need be required, because each one covers its
-workflow's jobs, and new jobs are added to its `needs` (a job left out is a job the gate does not see — the
+workflow's jobs, and new jobs are added to its `needs` (a job left out is a job the gate does not see - the
 reviewer checks the list when a workflow changes).
 
 **Why a roll-up and not every job:** required checks are named in the repository settings; naming thirty jobs there

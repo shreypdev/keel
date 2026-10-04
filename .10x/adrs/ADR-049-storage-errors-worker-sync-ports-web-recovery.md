@@ -43,7 +43,7 @@ The gap audit (`.10x/specs/2026-10-01-v1x-gaps.md`) rates three of these **block
 * **PC-2: a trapped web core is dead for good.** A trap sets the transport's `#dead`, rejects pending calls,
   fails streams and calls `onClose` (`transport/wasm-main.ts:418-432`, `core.ts:536-566`); `LoadOptions.onError`
   never hears of it (`core.ts:238-240`). TypeScript's `UndraCore` has no `snapshot()`/`restore()`; the runtime
-  never calls `undra_snapshot` and never sends `Restore` (`wasm-main.ts:75`, `:285-294`) — though SPEC 7 says
+  never calls `undra_snapshot` and never sends `Restore` (`wasm-main.ts:75`, `:285-294`) - though SPEC 7 says
   "Panics call the `log` import with level 5 … before trapping so the host can restart from snapshot", and Swift
   and Kotlin have both (`UndraCore.swift:535-549`, `UndraCore.kt:210-219`).
 * **PO-11 (hurts)**: without WebCrypto the `random` import's error is swallowed and the built-in `Rng.fill`
@@ -80,9 +80,9 @@ The gap audit (`.10x/specs/2026-10-01-v1x-gaps.md`) rates three of these **block
 
    | Failure | Swift | Kotlin (JVM / Android, C4a) | TypeScript |
    |---|---|---|---|
-   | no backend | — (always present) | Keystore missing → `Unavailable` | no `indexedDB` / no `crypto.subtle` → **registered anyway**, answering `Unavailable("needs IndexedDB" / "needs a secure context")` |
+   | no backend | n/a (always present) | Keystore missing → `Unavailable` | no `indexedDB` / no `crypto.subtle` → **registered anyway**, answering `Unavailable("needs IndexedDB" / "needs a secure context")` |
    | quota / disk | `NSFileWriteOutOfSpaceError`, `ENOSPC` → `Full` | `IOException` with `ENOSPC` → `Full` | `QuotaExceededError` → `Full` |
-   | locked | `errSecInteractionNotAllowed`, data-protection `NSFileReadNoPermissionError` before first unlock → `Locked` | `UserNotAuthenticatedException` → `Locked` | — |
+   | locked | `errSecInteractionNotAllowed`, data-protection `NSFileReadNoPermissionError` before first unlock → `Locked` | `UserNotAuthenticatedException` → `Locked` | n/a |
    | unreadable | a stored file that does not decode, Keychain item of the wrong class → `Corrupt` | `WireException` in `get`, `KeyPermanentlyInvalidatedException` → `Corrupt` | `OperationError` on decrypt, bad stored format → `Corrupt` |
    | other | `Io(error.localizedDescription)` | `Io(message)` | `Io(message)` |
 
@@ -93,7 +93,7 @@ The gap audit (`.10x/specs/2026-10-01-v1x-gaps.md`) rates three of these **block
      `persist.write_failed` in `stats_json`, and tries again at the next write; `Full` pauses new persisted entries
      until a write succeeds.
    * A failed **hydration read** of a cache entry starts that entry empty (it can be fetched again).
-   * A failed **queue read** (`Locked`, `Io`, `Unavailable` — an iOS app launched in the background before first
+   * A failed **queue read** (`Locked`, `Io`, `Unavailable` - an iOS app launched in the background before first
      unlock, ADR-046) leaves the client **not hydrated for the queue**: it does not replay, and it **never
      writes the queue key** until a read succeeds (writing would overwrite the unreadable queue); it retries on
      `Active`, on the next background run and after a backoff. New offline mutations wait in memory meanwhile. A
@@ -104,9 +104,9 @@ The gap audit (`.10x/specs/2026-10-01-v1x-gaps.md`) rates three of these **block
 ### 2. Worker mode answers sync ports inside the worker
 
 1. **Built-ins.** The worker's `port_call` handler returns **`2`** for any port it was not given an
-   implementation for **in the worker** — so the shim's built-in Clock/Rng/Log answers run (`wasm.rs:164-166`)
+   implementation for **in the worker** - so the shim's built-in Clock/Rng/Log answers run (`wasm.rs:164-166`)
    on the worker's own `Date.now()`, `crypto.getRandomValues` (available in workers) and the `log` import (which
-   the worker already forwards as Log envelopes, `worker.ts:148-150`) — and keeps returning `1` (async, crossing to
+   the worker already forwards as Log envelopes, `worker.ts:148-150`) - and keeps returning `1` (async, crossing to
    the main thread) only for ports registered on the main thread whose methods are asynchronous. The worker
    learns which ports are async from the host's registrations: the set is sent in `init` and kept current by a
    `{t:"ports", asyncPorts}` message whenever the host registers or removes a port after load.
@@ -118,13 +118,13 @@ The gap audit (`.10x/specs/2026-10-01-v1x-gaps.md`) rates three of these **block
    `worker.ports`"), instead of a trap at its first call.
 3. **Protocol.** The worker protocol becomes version 3 (ADR-031's version 2 plus fields): `init` gains
    `asyncPorts: number[]` and `portsModule?: string`, and a host-to-worker `{t:"ports", asyncPorts}` message keeps
-   the set current; the rest of version 2 — the batched `envelopes` message,
-   transfer, ordering — is unchanged. Both sides ship in one package, so no negotiation beyond the announced
+   the set current; the rest of version 2 - the batched `envelopes` message,
+   transfer, ordering - is unchanged. Both sides ship in one package, so no negotiation beyond the announced
    version.
 4. **No `SharedArrayBuffer`** (rejected below). Nothing in the TypeScript runtime uses it today.
 5. **Randomness never degrades silently** (PO-11). The `random` import throws when no CSPRNG exists; the shim
    then answers the built-in `Rng.fill` **unavailable** instead of zeros, and `Rng` keeps no error channel
-   (randomness must not fail), so the proxy's E0062 panic — a loud trap with a FATAL record that names the cause —
+   (randomness must not fail), so the proxy's E0062 panic - a loud trap with a FATAL record that names the cause -
    replaces silently colliding idempotency keys. `UndraCore.load` checks `crypto.getRandomValues` up front and
    rejects with `UndraTransportError("unsupported", "WebCrypto is required")` before instantiating.
 
@@ -143,7 +143,7 @@ The gap audit (`.10x/specs/2026-10-01-v1x-gaps.md`) rates three of these **block
    `maxSnapshotBytes` is not kept (the previous one stays) and is reported once.
 4. **On a trap**, in this order:
    1. ADR-046's panic report (from the FATAL `undra::panic` record and the trap's stack) goes to `onPanic`;
-   2. every in-flight call rejects and every open stream ends with **`UndraTransportError("restarted")`** — the
+   2. every in-flight call rejects and every open stream ends with **`UndraTransportError("restarted")`** - the
       call may or may not have applied before the trap, so it is reported as failed, never retried silently;
    3. the runtime instantiates the **same compiled module** again (no recompile), runs `_initialize` and
       `undra_init`, re-registers the ports (their implementations are unchanged on the host side), and

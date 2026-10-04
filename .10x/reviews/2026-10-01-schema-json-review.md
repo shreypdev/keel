@@ -1,4 +1,4 @@
-# Full-schema `undra_schema_json` and public Swift standard types (C1, C2) — adversarial review
+# Full-schema `undra_schema_json` and public Swift standard types (C1, C2) - adversarial review
 
 **Date:** 2026-10-01 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/schema-json` at `dcc74c0` (11 commits on `549b1f2`) · **Read:** `CLAUDE.md` (R1, R2, R3, R7, R11), the SDE record

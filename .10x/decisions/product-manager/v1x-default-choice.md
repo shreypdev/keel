@@ -1,4 +1,4 @@
-# Product — v1.1 / v1.2 "the default choice" (2026-10-01)
+# Product - v1.1 / v1.2 "the default choice" (2026-10-01)
 
 **Users and jobs.** A platform engineer evaluating Undra for a real app asks: can it do what my
 app needs (storage, real-time, background work, every type I model)? will it break my users

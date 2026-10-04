@@ -1,4 +1,4 @@
-# Benchmark follow-ups (M1, M3, M4, L4-L8) — adversarial review
+# Benchmark follow-ups (M1, M3, M4, L4-L8) - adversarial review
 
 **Date:** 2026-10-01 · **Reviewer:** Claude Opus 5.5 (adversarial pass: does CI now gate performance,
 and only performance) · **Piece:** `wt/bench-followups` at `0197074`, review fixes committed on top ·

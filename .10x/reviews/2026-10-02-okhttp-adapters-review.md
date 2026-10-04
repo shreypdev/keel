@@ -1,4 +1,4 @@
-# The app's network stack inside the ports (ADR-060, `okhttp-adapters`) — adversarial review
+# The app's network stack inside the ports (ADR-060, `okhttp-adapters`) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** adversarial (`docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/okhttp-adapters` at
 `d6b770b` (`main` `fd7abb4` merged; `main` has not moved since) · **Read:** `CLAUDE.md` (R4, R5, R6, R12), ADR-060, ADR-047,

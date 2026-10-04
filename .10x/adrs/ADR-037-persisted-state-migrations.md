@@ -34,7 +34,7 @@ under, migrate with a hook the app implements in Rust, discard nothing silently.
 ## Decision
 
 1. **Type fingerprints.** `undra-meta` gains `Schema::closure(&TypeRef) -> TypeClosure` (the type plus every
-   record and enum it reaches, transitively, in canonical form — field and variant names, order and types; docs
+   record and enum it reaches, transitively, in canonical form: field and variant names, order and types; docs
    excluded) and `TypeClosure::fingerprint() -> u64` (`fnv1a64` of its canonical JSON). A store's fingerprint is
    the closure of its non-computed signals, by name, type and `signal_id`; a query's is the closure of its return
    type; a mutation's is the closure of its parameters, by name. A change elsewhere in the schema does not move a
@@ -76,8 +76,8 @@ under, migrate with a hook the app implements in Rust, discard nothing silently.
      `Bytes↔Vec<u8>`; `Vec`, `Option` and `Map` recurse;
    * store signals matched **by name**; a signal the snapshot lacks takes `Default` when the field carries
      `#[undra(default)]` (now accepted on `Signal<T>` fields); a signal the new store lacks is dropped.
-   Anything else — a narrowing, a type change, a renamed field, variant or signal, an enum variant the new type
-   does not have — is not structural and goes to decision 5.
+   Anything else - a narrowing, a type change, a renamed field, variant or signal, an enum variant the new type
+   does not have - is not structural and goes to decision 5.
 5. **Load algorithm, per item** (a store record, a cache entry, a queued mutation):
    1. fingerprint equal → decode as today (no `DynValue`, no JSON; the common case costs one comparison);
    2. else structural migration (4) from the recorded closure to the current one;
@@ -102,11 +102,11 @@ under, migrate with a hook the app implements in Rust, discard nothing silently.
    `from = "0x…"` restricts a hook to one old fingerprint. Wrong targets (an unknown type, store, signal or
    mutation) are compile errors (`E0066`, what/why/fix) checked against the registrations the macro can see, and
    a runtime ERROR at start-up for the rest.
-7. **Refusals are loud and kind-specific — nothing is discarded silently.**
+7. **Refusals are loud and kind-specific: nothing is discarded silently.**
    * *Snapshot*: the restore fails as a whole, as ADR-023 requires, with `RestoreError::Incompatible { type_id,
      store, signal, reason }` (a new `restore_code`, and the reason in the ERROR log the host's Log port receives).
      One exception: a store **type** the current schema no longer has is left out (its handle answers
-     `stale_handle`) and reported, instead of failing everything — the app removed that screen.
+     `stale_handle`) and reported, instead of failing everything - the app removed that screen.
    * *Query cache entry*: deleted, because it can be fetched again, and reported (WARN log naming the query and the
      reason, a `persist.dropped` counter in `stats_json`).
    * *Offline queue item*: **never deleted.** It moves to a dead-letter queue (`Kv` `undra.query.queue.dead`, same

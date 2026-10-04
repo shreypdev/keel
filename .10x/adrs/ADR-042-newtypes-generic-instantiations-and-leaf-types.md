@@ -144,7 +144,7 @@ which keeps hashes stable when a flag is added.
 3. **Platforms.** Swift `Foundation.Decimal` (its 128-bit mantissa and exponent range hold every wire value),
    Kotlin `java.math.BigDecimal(BigInteger, scale)` (exact; note that `equals` is scale-sensitive, which Kotlin
    engineers expect), TypeScript a small immutable `Decimal` class in `@undra/runtime` (`mantissa: bigint`,
-   `scale: number`, `toString()`, `static parse(text)`, `equals`, `compare`; no arithmetic — convert through
+   `scale: number`, `toString()`, `static parse(text)`, `equals`, `compare`; no arithmetic - convert through
    `toString()` to the app's decimal library).
 4. Not a map key (numeric versus encoded equality would disagree). `i128`/`u128` stay E0001; the help text
    points at `Decimal` (or a `String` newtype for identifiers).

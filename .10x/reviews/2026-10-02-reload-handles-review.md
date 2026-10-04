@@ -1,4 +1,4 @@
-# `reload-handles` (ADR-059: query handles across every restore) — adversarial review
+# `reload-handles` (ADR-059: query handles across every restore) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/reload-handles` at
 `a9bd725` (38 commits from `main` `a309e9f`), reviewed against `main` `12dafe2`, then merged with `main` `fc326d6` (the CI piece),

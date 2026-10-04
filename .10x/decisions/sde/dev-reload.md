@@ -1,4 +1,4 @@
-# SDE — dev-reload: a rebuild keeps the state (wt/dev-reload, 2026-10-01)
+# SDE - dev-reload: a rebuild keeps the state (wt/dev-reload, 2026-10-01)
 
 Track B3 of the v1.x design (`.10x/specs/2026-10-01-v1x-default-choice-design.md`). The decision is ADR-053 (written
 first, R11, accepted by the integrator with four decisions that are in its "Decisions" section; "As built" lists what

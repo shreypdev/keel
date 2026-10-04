@@ -10,7 +10,7 @@ natives are registered on a class per core), 6.2, 7 (unchanged exports; one modu
 `undra.toml` (`[core] namespace`); `undra-ffi`, `undra-cli` (shim template, builds, schema loader, templates),
 `undra-bindgen`, the three runtimes, and ADR-038's C++ module before it is built. **No wire change, no schema
 change, no wasm ABI change. The native C ABI changes shape (same 19 operations, same signatures, reached
-through a table) — a pre-publication ABI break, version 2.** Constitution R2 (the only new `unsafe` is in
+through a table) - a pre-publication ABI break, version 2.** Constitution R2 (the only new `unsafe` is in
 `undra-ffi`), R7 (the ABI version and the schema hash are both checked at load) and R11.
 
 ## Context
@@ -57,7 +57,7 @@ linked into one C program on macOS 26 (Xcode 26.6 `ld`, Rust 1.98.1, `aarch64-ap
 | Two staticlibs with `-force_load` (what the app template does so debug registrations survive, ADR-029) | **2,179 duplicate symbols**, link fails (2,178 for the iOS slice) |
 | Two fat-LTO staticlibs (the release profile), no `-force_load` | 2 duplicate symbols (`rust_eh_personality`, std's `EMPTY_PANIC`), link fails |
 | Each staticlib **prelinked** (`ld -r`) into one object with only `_<ns>_undra_report` left global | links; registries and statics are **independent** (`core_a.item global=1`, `core_b.item global=1`, `core_a.item global=2`) |
-| ... prelinked from the fat-LTO staticlib with `-u _<ns>_…` instead of `-all_load` | the same, and the two-core program is 712 KB — the size of two cdylibs (2 × 353 KB); with `-all_load` it is 1.3 MB |
+| ... prelinked from the fat-LTO staticlib with `-u _<ns>_…` instead of `-all_load` | the same, and the two-core program is 712 KB - the size of two cdylibs (2 × 353 KB); with `-all_load` it is 1.3 MB |
 | Two cdylibs (`.dylib`) | independent; each exports only its `#[no_mangle]` function (rustc's cdylib export list) |
 | The prelinked program, built with `debug = "line-tables-only"`, after `dsymutil` | `atos` resolves the Rust frame: `a_undra_report (in t8) (lib.rs:3)`; the binary is the same size (DWARF stays in the object and the dSYM) |
 
@@ -167,7 +167,7 @@ library exports **every** Rust symbol, and two of them in one binary either coll
 
 * **Prefix all 19 symbols (`acme_pay_undra_call`, …).** Each runtime is compiled once and would have to
   resolve 19 names per core at run time (`dlsym`, which does not work for static iOS linking without
-  exporting them from the app) or link per-core C shims; and it solves only the visible half — the Rust
+  exporting them from the app) or link per-core C shims; and it solves only the visible half: the Rust
   symbols still collide or merge in a static link.
 * **One shared JNI library in the Kotlin runtime that `dlopen`s cores and calls through their tables.** Every
   host would then be a host of the C table (attractive), but it adds a second Rust image (its own std) to every
@@ -270,7 +270,7 @@ these points, each recorded with its reason in the record:
    and names none. ADR-038 says so.
 9. **S26 keeps its provisional number.**
 
-## Amendment A (2026-10-02, integrator): default storage directories per namespace — follow-up `ns-storage`
+## Amendment A (2026-10-02, integrator): default storage directories per namespace - follow-up `ns-storage`
 
 Two cores of one app share nothing in memory, but the default storage adapters (`Kv`, `Fs`, `SecureStore`) of the
 Swift, Kotlin and React Native runtimes (and the web's) still use one location per app, so two cores that both use

@@ -85,4 +85,4 @@ web startup to interactive 48 ms; 10 updates/s streaming on the 10k list: 62 fra
 16.8 ms. `bench_touch_signals(100)` observed, core side only: 2.5 us.
 
 
-Update (integrator): finding 2 (rollback removes a later mutation's optimistic placeholder) is FIXED on main-line — undra-query stamps + per-mutation layers; regression tests in undra-query/tests/mutations.rs.
+Update (integrator): finding 2 (rollback removes a later mutation's optimistic placeholder) is FIXED on main-line - undra-query stamps + per-mutation layers; regression tests in undra-query/tests/mutations.rs.

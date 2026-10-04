@@ -59,8 +59,8 @@ and the linked binary is the same size as without debug info.
    keeps the unstripped ones. Optimisation and LTO are unchanged, so the code is the same. `--no-symbols` skips
    the symbol outputs; debug builds are unstripped anyway.
 2. **Outputs** (namespaced per ADR-044), with a `build/symbols/manifest.json` recording, per artefact, the
-   namespace, core version, schema hash and image identity (Mach-O UUID per slice, ELF build id per ABI —
-   rustc gets `-C link-arg=-Wl,--build-id` on Android — and the SHA-256 of the shipped wasm):
+   namespace, core version, schema hash and image identity (Mach-O UUID per slice, ELF build id per ABI -
+   rustc gets `-C link-arg=-Wl,--build-id` on Android - and the SHA-256 of the shipped wasm):
    * **iOS / macOS:** the prelinked `lib<ns>.a` (ADR-044) keeps its DWARF line tables, so the **app's own dSYM**
      (Xcode Release, `dwarf-with-dsym`, already in the template) contains the Rust frames; Crashlytics and Sentry
      upload that dSYM as they do for Swift. There is no separate core dSYM for a static library.
@@ -140,9 +140,9 @@ and the linked binary is the same size as without debug info.
 
 ### 4. Panic reports reach the app's crash reporter
 
-1. **One structured report per contained panic.** Every panic the runtime contains — a call, a stream, a
+1. **One structured report per contained panic.** Every panic the runtime contains - a call, a stream, a
    detached task, an effect, a computed (ADR-019/A3), a port or callback dispatcher, a background task, a
-   migration hook (ADR-037) — produces a `PanicReport { message: String, location: String /* file:line:col */,
+   migration hook (ADR-037) - produces a `PanicReport { message: String, location: String /* file:line:col */,
    operation: String /* "Todos.add", "task", "computed Todos.visible" */, thread: String, frames: Vec<PanicFrame
    { address: u64 /* relative to the image base */, symbol: Option<String>, file: Option<String>, line: Option<u32> }>,
    namespace: String, core_version: String, schema_hash: u64, image_id: String /* Mach-O UUID / ELF build id /

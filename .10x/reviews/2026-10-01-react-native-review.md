@@ -1,4 +1,4 @@
-# React Native host (ADR-038, v1.2 bet G1) — adversarial review
+# React Native host (ADR-038, v1.2 bet G1) - adversarial review
 
 **Date:** 2026-10-01 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/react-native` at `4e8179e` (`main` merged at `646d0a0`) · **Read:** `CLAUDE.md` (R2, R6, R12), ADR-038 (with its

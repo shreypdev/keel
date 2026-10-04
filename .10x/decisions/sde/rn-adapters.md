@@ -1,4 +1,4 @@
-# SDE — React Native's default ports (wt/rn-adapters, G1b, 2026-10-01)
+# SDE - React Native's default ports (wt/rn-adapters, G1b, 2026-10-01)
 
 ADR-038 left a React Native app to supply its own `Kv`, `SecureStore`, `Fs` and `Connectivity` adapters ("React Native's
 core has none"). This piece removes that limit, as the Swift (`Adapters.platformDefault`), Kotlin

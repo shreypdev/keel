@@ -1,4 +1,4 @@
-# objects-followups (the open items O1 to O8 of the objects-callbacks review) — adversarial review
+# objects-followups (the open items O1 to O8 of the objects-callbacks review) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/objects-followups` from `b898a97`, `main` `94b87ba` (types-paging) merged in (`640d83d`) · **Read:**

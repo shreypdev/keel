@@ -14,8 +14,8 @@ callback call is a port call (SPEC 3.6) whose arguments start with the instance'
 
 Host code reaches the core in exactly one way today: a **port**, a trait whose single implementation the host
 registers globally by id (`undra_port_register(port_id, cb, user)`, SPEC 6; `PortTable` in
-`crates/undra-runtime/src/ports.rs:109-199`). Anything per-call or per-object — a progress listener for one
-upload, a delegate for one screen, a token provider for one account — has no shape:
+`crates/undra-runtime/src/ports.rs:109-199`). Anything per-call or per-object - a progress listener for one
+upload, a delegate for one screen, a token provider for one account - has no shape:
 
 * `Box<dyn Fn(..)>`, `fn(..)`, `impl Fn` and `dyn Trait` are **E0004** "trait object … cannot cross the
   boundary … callbacks into the platform are ports (`#[undra::port]`)" (`crates/undra-macros/src/impl_/types.rs:332-351`,
@@ -123,9 +123,9 @@ refreshes a store). So app code must never run inside the port callback.
 9. **Strong by default, weak on request.** The host registry holds the implementation strongly while the core
    holds a reference (a listener created inline must not vanish). That makes a cycle possible: a view model
    holds an `Uploader` wrapper, the core's `Uploader` holds the listener, the listener is the view model. The
-   generated code offers the way out per trait — `WeakUploadListener(target)` (Swift, a forwarding class with a
+   generated code offers the way out per trait - `WeakUploadListener(target)` (Swift, a forwarding class with a
    `weak` reference), `UploadListener.weak(target)` (Kotlin, `WeakReference`), `weakUploadListener(target)`
-   (TypeScript, `WeakRef`) — whose methods do nothing (fire-and-forget) or answer unavailable (async) once the
+   (TypeScript, `WeakRef`) - whose methods do nothing (fire-and-forget) or answer unavailable (async) once the
    target is gone; and the cookbook teaches the Rust-side pattern of decision 1's `watch`: return an object
    (ADR-040) whose `close()` drops the listener.
 
@@ -225,7 +225,7 @@ upload(file: FileRef, listener: UploadListener): Promise<UploadId>;
    E0071; `types.rs` maps `Arc<dyn Trait>` in parameter position to `KType::Callback`; dispatchers decode
    callback arguments into pending proxies and commit them after the last argument; E0004 help texts. Facade
    re-export (`undra::callback`).
-3. `crates/undra-runtime`: `CallbackProxy` support — the per-runtime proxy intern map (handle → `Weak`),
+3. `crates/undra-runtime`: `CallbackProxy` support - the per-runtime proxy intern map (handle → `Weak`),
    `__release` on drop, `__cancel` on a dropped `PortFuture` of a callback call, fire-and-forget calls with id
    0 through `Host::port_call` (a `Runtime::port_notify` entry beside `port_call`), all holding a `WeakCtx`.
 4. `crates/undra-bindgen`: protocols/interfaces (decision "Generated shapes"), weak wrappers, the callback port

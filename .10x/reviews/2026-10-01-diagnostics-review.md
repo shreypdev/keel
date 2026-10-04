@@ -1,4 +1,4 @@
-# D1, macro diagnostic polish and the E-code audit — adversarial review
+# D1, macro diagnostic polish and the E-code audit - adversarial review
 
 **Date:** 2026-10-01 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/diagnostics` at `c25caee` (5 commits), merged with `main` at `08e4e39` (`4f56fec`) · **Read:** `CLAUDE.md`

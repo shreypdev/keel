@@ -1,4 +1,4 @@
-# SDE — ns-storage: default storage per core namespace (ADR-044 amendment A, wt/ns-storage, 2026-10-02)
+# SDE - ns-storage: default storage per core namespace (ADR-044 amendment A, wt/ns-storage, 2026-10-02)
 
 ADR-044's amendment A, implemented. Two cores of one app shared nothing in memory but the default `Kv`, `Fs`,
 `SecureStore` and `Db` of every runtime still used one location per app, so two cores that both used the defaults read

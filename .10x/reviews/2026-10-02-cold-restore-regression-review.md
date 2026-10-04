@@ -1,4 +1,4 @@
-# The schema's JSON written without serde (cold-restore regression) — adversarial review
+# The schema's JSON written without serde (cold-restore regression) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** adversarial (`docs/AGENT_WORKFLOW.md` section 3), did not write the code ·
 **Piece:** `wt/cold-restore-regression`, the five commits `a309e9f..e061cf1` (worktree at `439f1ad`, whose merge commit

@@ -1,4 +1,4 @@
-# SDE — tooling: doctor depth, build-system integration, CI, upgrade (wt/tooling, 2026-10-01)
+# SDE - tooling: doctor depth, build-system integration, CI, upgrade (wt/tooling, 2026-10-01)
 
 Track D2–D5 of the v1.x design (`.10x/specs/2026-10-01-v1x-default-choice-design.md`). The goal: an engineer
 who runs `undra init` never performs a manual build step, never discovers a missing prerequisite at the wrong
@@ -8,7 +8,7 @@ model, the threading model, the C ABI or a shape bindgen generates (the generate
 (the Xcode project, `build.gradle.kts`, `vite.config.ts`, the README, one new workflow file), the CLI, and one
 new subpath export of the TypeScript runtime; SPEC 13 records all of it.
 
-## D5 — `undra doctor` (commit `a1bbf41`)
+## D5 - `undra doctor` (commit `a1bbf41`)
 
 `commands/doctor.rs` became `commands/doctor/` (`finding.rs`, `rust.rs`, `ios.rs`, `android.rs`, `web.rs`,
 `system.rs`, `testing.rs`). Every check is declared once as a `Check { id, anchor, audience, optional }` and makes
@@ -37,7 +37,7 @@ JDK 17+, the Gradle wrapper (inside a project), the `undra` AVD (contributors); 
   agrees with the exit status, `--fix` is comments and commands only. `ONBOARDING.md` section 1 was rewritten with one
   heading per prerequisite (the anchors).
 
-## D3 — `undra build` is never a manual step (commits `a668a25`, `27483ee`)
+## D3 - `undra build` is never a manual step (commits `a668a25`, `27483ee`)
 
 **Android.** `android/app/build.gradle.kts` has an `UndraBuild` task class and `undraBuild` (`preBuild` depends on
 it): inputs `core/src/**`, `Cargo.toml`, `Cargo.lock`, `build.rs` of the core and the project's `undra.toml`,
@@ -112,7 +112,7 @@ the reason, because they take minutes and the repo's other heavy builds are opt-
 decided by `undra doctor --json` on the project, so the tests use the same list a person does. The "undra is not
 installed" tests skip when an `undra` is installed where the build systems look.
 
-## D4 — CI (commit `058c69a`)
+## D4 - CI (commit `058c69a`)
 
 `undra init` writes `.github/workflows/undra.yml` (`ci.rs`, snippets in `templates/ci/`): `core` (fmt, clippy -D
 warnings, test, `undra bindgen --check`), `web` (Node 20, `npm ci`, `npm test --if-present`, `npm run build`),
@@ -133,7 +133,7 @@ itself and `undra upgrade` moves. Deviations:
   changed the shared `Cargo.lock`); `ruby -ryaml` (installed here) checks it as well and `actionlint` when present
   (it is not installed on this machine, and installing system tools was not asked for).
 
-## D2 — `undra upgrade` (commit `bbfd72a`)
+## D2 - `undra upgrade` (commit `bbfd72a`)
 
 `undra upgrade [--dry-run] [--no-bindgen] [--docs]`. `upgrade.rs` has one line-level editor per file kind (they keep
 comments and formatting, change only the version text, or for a git dependency the one `tag`/`rev`/`branch` pair, and
@@ -141,7 +141,7 @@ report what they saw in the same pass): `Cargo.toml` of any crate of the project
 `[dependencies.undra]` sections, `[workspace.dependencies]`, `[dev-]`/`[build-]`/`[target.*.]` tables), `undra.toml`,
 `package.json`, Gradle (`.gradle` and `.kts`), `project.pbxproj`, workflows. Pins are written the way `undra init`
 writes them: crates and the workflow the exact release (`tag = "vX.Y.Z"`, `UNDRA_VERSION: "X.Y.Z"`), the runtimes and
-`[undra] version` the release line (`^X.Y.0`, `X.Y.0`, `X.Y`) — a test ages a fresh `init` back to 0.0.9 pin by pin and
+`[undra] version` the release line (`^X.Y.0`, `X.Y.0`, `X.Y`) - a test ages a fresh `init` back to 0.0.9 pin by pin and
 checks the upgrade reproduces the six pin files **byte for byte**.
 
 * The shim and the dev runner (`target/undra/`) are generated from the core's own dependency (`UndraSource` from

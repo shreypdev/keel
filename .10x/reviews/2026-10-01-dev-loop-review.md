@@ -1,4 +1,4 @@
-# The dev loop (Android remote mode, reconnect, session resume) — adversarial review
+# The dev loop (Android remote mode, reconnect, session resume) - adversarial review
 
 **Date:** 2026-10-01 · **Reviewer:** Claude Opus 5.5 (adversarial pass: the Kotlin WebSocket client against a
 hostile server, session resume races on the dev server, reconnect semantics in three runtimes, the Android

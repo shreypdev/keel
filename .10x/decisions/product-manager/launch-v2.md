@@ -1,4 +1,4 @@
-# Product — launch-v2 (2026-09-30)
+# Product - launch-v2 (2026-09-30)
 
 **Users and jobs.**
 

@@ -1,4 +1,4 @@
-# SDE — frame-coalesced delivery (wt/coalesce, 2026-09-30)
+# SDE - frame-coalesced delivery (wt/coalesce, 2026-09-30)
 
 Implements ADR-031 (accepted with the integrator's D1 conditions (a)-(e), appended to the ADR) in the
 three platform runtimes. No wire, C ABI or wasm ABI change; `undra-signals` and `undra-runtime` are
@@ -54,7 +54,7 @@ skip_serializing_if)]`; `SignalMeta.no_coalesce`), `undra-macros` (records the a
 file is byte-identical), the `stores` golden's `Clock.now` is `no_coalesce`, and
 `tests/schema_hash.rs` pins the pre-ADR hash of all nine golden schemas.
 
-**Playground** (`examples/playground/core/src/stress.rs`): a minimal `Stress` store — `value: u64`
+**Playground** (`examples/playground/core/src/stress.rs`): a minimal `Stress` store - `value: u64`
 (Firehose), `#[undra(no_coalesce)] progress: u32` (Progress), `burst(mode, n)` that commits `n`
 transactions in a tight loop, no `ctx.txn`. Bindings regenerated with `undra bindgen --docs`
 (schema hash `0x3fb88e5bb974203c`). The S1b stress screen (stress-bench design §8) can grow this store

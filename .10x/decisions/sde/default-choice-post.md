@@ -1,4 +1,4 @@
-# SDE — `default-choice-post` (H4): "Why Undra is the default choice" (wt/default-choice-post, 2026-10-02)
+# SDE - `default-choice-post` (H4): "Why Undra is the default choice" (wt/default-choice-post, 2026-10-02)
 
 Worktree `wt/default-choice-post`, from `main` `d1b35b5` (checkpoint 21). The post is
 `site/blog/why-undra-is-the-default-choice/index.html`, dated 2026-10-02, author "Undra team" like the others; its claims ledger is

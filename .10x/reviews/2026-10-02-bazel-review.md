@@ -1,4 +1,4 @@
-# bazel (ADR-061, Bazel rules that run the undra CLI; lint exclusions for generated code) — adversarial review
+# bazel (ADR-061, Bazel rules that run the undra CLI; lint exclusions for generated code) - adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/bazel` at
 `1a09b85` (draft PR #7; main `267b62c` merged in as `bb1184c`) · **Read:** `CLAUDE.md` (R1, R3, R7, R10), `docs/AGENT_WORKFLOW.md` 4,

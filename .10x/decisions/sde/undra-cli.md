@@ -1,6 +1,6 @@
-# undra-cli — decisions (SDE, branch wt/undra-cli)
+# undra-cli - decisions (SDE, branch wt/undra-cli)
 
-[VERIFIED by running it, 2026-09-30: the three generated app shells were built and run — SwiftUI on
+[VERIFIED by running it, 2026-09-30: the three generated app shells were built and run - SwiftUI on
 the iOS 26.5 simulator against the XCFramework, Compose on an Android emulator against the JNI
 library, React in Chrome against the wasm core and against an `undra dev` core.]
 
@@ -108,7 +108,7 @@ Fix (ADR-029): the shim's `[profile.dev]` is `incremental = false`, and `undra b
 (an incremental build partitions the dependency rlibs into codegen units the macOS `--start-lib`
 linker drops); the private directory stops `undra build` reusing a stripping-prone incremental rlib
 that a plain `cargo build`/`cargo test` left in the shared target (decision 6). Only the host library
-needs the private dir — Android `.so` is ELF (symbols kept) and iOS is `-force_load`ed, so both keep
+needs the private dir - Android `.so` is ELF (symbols kept) and iOS is `-force_load`ed, so both keep
 sharing the target. Chosen over the tries that were not robust across the clean / `cargo build` /
 `cargo test --workspace` / inherited-`CARGO_INCREMENTAL=1` matrix: `incremental = false` alone (cargo
 reused the polluting rlib), `codegen-units = 1` (a `cargo test --workspace`-polluted target still

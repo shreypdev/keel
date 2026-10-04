@@ -1,4 +1,4 @@
-# E5 web bundle size (ADR-052) — adversarial review
+# E5 web bundle size (ADR-052) - adversarial review
 
 **Date:** 2026-10-01 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:**
 `wt/wasm-size` at `cd298b2` (37 files, +1,590/−98 against its base `a0d638f`) · **Read:** `CLAUDE.md` (R1, R4, R6, R8,
