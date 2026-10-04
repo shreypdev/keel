@@ -23,7 +23,7 @@ Undra owns the part of your app that is not pixels: domain logic, reactive state
 
 ## The idea in four sentences
 
-You write your domain in Rust and mark it with a handful of attributes. Undra generates idiomatic Swift, Kotlin and TypeScript from the schema those attributes produce, so the UI stays SwiftUI, Compose, React or React Native. Each platform keeps a local mirror of your state, so reads never cross the language boundary. A write crosses once per transaction, and the core answers with one compact binary change-set that patches every mirror.
+You write your domain in Rust and mark it with a handful of attributes. Undra generates idiomatic Swift, Kotlin and TypeScript from the schema those attributes produce, so the UI stays SwiftUI on iOS, Jetpack Compose on Android, React on the web, and React Native. Each platform keeps a local mirror of your state, so reads never cross the language boundary. A write crosses once per transaction, and the core answers with one compact binary change-set that patches every mirror.
 
 **Where these pages come from.** Everything here is digested from the repository: the README, the specification in `docs/SPEC.md`, the onboarding guide, the benchmark results and the playground app. When a page and the spec disagree, the spec wins; the [repository](https://github.com/shreypdev/undra) is the record.
 
@@ -140,7 +140,7 @@ source scripts/env.sh                   # PATH, JDK and Kotlin jars, Xcode fallb
 bash
 
 ```bash
-undra init myapp                        # core + SwiftUI + Compose + React shells
+undra init myapp                        # core + shells: SwiftUI on iOS, Jetpack Compose on Android, React on the web
 undra init myapp --platforms ios,web    # only some of them
 undra init myapp --id dev.acme.myapp    # application id / bundle identifier
 cd myapp
